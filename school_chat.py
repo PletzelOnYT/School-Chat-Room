@@ -326,7 +326,7 @@ def read_messages():
         if time.monotonic() - last_event_scan >= 1.5:
             try:
                 names = sorted(n for n in os.listdir(EVENT_FOLDER)
-                               if re.fullmatch(r'[0-9]{10}-[0-9a-f]{32}\.json', n))
+                               if re.fullmatch(r'(?:[0-9]{10}|[0-9]{19})-[0-9a-f]{32}\.json', n))
             except OSError as exc:
                 raise ChatFileError('Shared event folder is unavailable: ' + str(exc)) from exc
             for name in names:
@@ -359,7 +359,7 @@ def write_event(event):
         suffix = uuid.UUID(event_id).hex
     except (ValueError, AttributeError):
         raise ChatFileError('Invalid signed event ID.')
-    name = f'{int(event.get("issued_at", time.time())):010d}-{suffix}.json'
+    name = f'{int(event.get("issued_at_ns", time.time_ns())):019d}-{suffix}.json'
     full_path = os.path.join(EVENT_FOLDER, name)
     with file_lock:
         try:
@@ -389,6 +389,7 @@ def event_now(kind, **fields):
         fields.setdefault('account_username', GOOGLE_ACCOUNT_USERNAME)
     return sign_event(dict(id=str(uuid.uuid4()), kind=kind,
                            issued_at=int(time.time()),
+                           issued_at_ns=time.time_ns(),
                            time=time.strftime('%H:%M:%S', time.localtime()),
                            user=username, **fields))
 
@@ -1225,7 +1226,7 @@ def submit_message(raw):
                     note('Usage: /reply <message#> <text>')
                     return snapshot()
                 reply_id = target['id']
-                body = '↳ #' + number + ' @' + target['user'] + ': ' + body.strip()
+                body = body.strip()
             elif command == '/me':
                 if not arg:
                     note('Usage: /me <action>')
