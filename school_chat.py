@@ -1,4 +1,4 @@
-# @title School ChatRoom v5.8 — School terminal chat with Vercel owner login
+# @title School ChatRoom v5.9 — School terminal chat with Vercel owner login
 """Google Colab school chat — the same shared Google Drive chat.json.
 
 The ONLY hosted API is for checking the owner's key and signing role grants.
@@ -419,13 +419,15 @@ def analyze(events):
         signed = valid_signature(e)
         sender = str(e.get('sender_key', '')) if signed else None
         from_server = bool(SERVER_PUBLIC_KEY) and sender == SERVER_PUBLIC_KEY and signed
-        # Signed people are identified by public keys, NOT the local Colab login.
-        # /rename writes a signed, hidden profile event, so nicknames persist
-        # across restarts without requiring the next public chat message.
+        # Signed people are identified by keys, not Colab usernames.
+        # Only someone who is VERIFIED at this point in the signed event
+        # history may claim/update a custom nickname. Checking here as well
+        # as in /rename prevents modified clients from bypassing the rule
+        # by writing a forged nickname to a signed message or profile event.
         clean_name = valid_username(e.get('user'))
         if signed and not from_server and kind in ('message', 'reaction', 'profile'):
             identities.setdefault(sender, fallback_username(sender))
-            if clean_name:
+            if kind in ('message', 'profile') and sender in verified and clean_name:
                 identities[sender] = clean_name
                 seen_aliases.setdefault(sender, set()).add(clean_name)
                 claim_order.setdefault((sender, clean_name.casefold()), index)
@@ -637,7 +639,7 @@ HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /owner                     Owner login (asks for private key)
 /exit                      Close the chat
 
-Use /rename <name> to claim a unique nickname. Commands and role tags cannot be nicknames.
+Commands and role tags cannot be nicknames.
 @mention a username in a normal message to highlight it for that person.
 Numbers (#) appear next to chat messages. Moderator role changes are saved
 into the SAME shared chat.json.'''
@@ -812,14 +814,17 @@ def submit_message(raw):
             return snapshot()
         rename = re.fullmatch(r'/rename(?:\s+(.+))?', cleaned, flags=re.I)
         if rename:
-            new_name = valid_username(rename.group(1))
-            if not new_name:
-                note('Nickname rejected: use 1–32 letters/numbers, spaces, _ - .; role tags, reserved names and invisible characters are not allowed.')
-                return snapshot()
             try:
                 current = latest_analysis()
             except ChatFileError as exc:
-                note('Cannot check nickname right now: ' + str(exc))
+                note('Cannot check verification status right now: ' + str(exc))
+                return snapshot()
+            if identity_public not in current['verified']:
+                note('Only verified users can change their nickname. Ask a moderator to verify your ID.')
+                return snapshot()
+            new_name = valid_username(rename.group(1))
+            if not new_name:
+                note('Nickname rejected: use 1–32 letters/numbers, spaces, _ - .; role tags, reserved names and invisible characters are not allowed.')
                 return snapshot()
             other_names = {
                 pub: name for pub, name in current['display_names'].items()
