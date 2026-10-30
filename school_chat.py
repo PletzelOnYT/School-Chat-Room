@@ -393,6 +393,100 @@ def event_now(kind, **fields):
                            user=username, **fields))
 
 
+def validate_attachment_bytes(payload, mime):
+    """Reject executables, HTML, SVG and disguised image/PDF files."""
+    if mime == 'image/png':
+        return payload.startswith(b'\x89PNG\r\n\x1a\n')
+    if mime == 'image/jpeg':
+        return payload.startswith(b'\xff\xd8\xff')
+    if mime == 'image/gif':
+        return payload.startswith((b'GIF87a', b'GIF89a'))
+    if mime == 'image/webp':
+        return payload[:4] == b'RIFF' and payload[8:12] == b'WEBP'
+    if mime == 'application/pdf':
+        return payload.startswith(b'%PDF-')
+    if mime in ('text/plain', 'text/markdown'):
+        try:
+            return b'\x00' not in payload and payload.decode('utf-8') is not None
+        except UnicodeDecodeError:
+            return False
+    return False
+
+
+def upload_attachment(raw):
+    """Store an allowed file in shared Drive, not inside chat.json or event JSON."""
+    if not isinstance(raw, dict):
+        raise ChatFileError('Invalid attachment request.')
+    mime = str(raw.get('mime', '')).strip().lower()
+    if mime not in ALLOWED_ATTACHMENTS:
+        raise ChatFileError('Only PNG, JPEG, WebP, GIF, PDF, TXT, or MD files are allowed.')
+    name = os.path.basename(str(raw.get('name', '')).replace('\\', '/'))
+    name = re.sub(r'[^a-zA-Z0-9._() -]', '_', name).strip('. ')[:72]
+    if not name or name.startswith('.'):
+        raise ChatFileError('Invalid attachment filename.')
+    encoded = raw.get('base64')
+    if not isinstance(encoded, str) or len(encoded) > MAX_ATTACHMENT_BYTES * 2:
+        raise ChatFileError('Attachment is too large (maximum 2 MB).')
+    try:
+        payload = b64decode(encoded)
+    except Exception as exc:
+        raise ChatFileError('Invalid attachment data.') from exc
+    if not payload or len(payload) > MAX_ATTACHMENT_BYTES:
+        raise ChatFileError('Attachment must be between 1 byte and 2 MB.')
+    if not validate_attachment_bytes(payload, mime):
+        raise ChatFileError('File contents do not match its allowed type.')
+    filename = uuid.uuid4().hex + ALLOWED_ATTACHMENTS[mime]
+    path = os.path.join(ATTACHMENT_FOLDER, filename)
+    try:
+        with open(path, 'xb') as fh:
+            fh.write(payload)
+            fh.flush()
+    except OSError as exc:
+        raise ChatFileError('Drive attachment upload failed: ' + str(exc)) from exc
+    sha = hashlib.sha256(payload).hexdigest()
+    event = event_now('message',
+                      text='📎 ' + name,
+                      attachment={'name': name, 'file': filename,
+                                  'mime': mime, 'size': len(payload), 'sha256': sha})
+    if not write_event(event):
+        raise ChatFileError('Attachment uploaded, but message event not confirmed. Retry.')
+    return event['id']
+
+
+def get_attachment(event_id):
+    """Load a signed referenced attachment on demand, never on every refresh."""
+    if not isinstance(event_id, str) or len(event_id) > 80:
+        raise ChatFileError('Invalid attachment message ID.')
+    a = latest_analysis()
+    message = next((x for x in a['messages'] if x['id'] == event_id), None)
+    if not message or not isinstance(message.get('attachment'), dict):
+        raise ChatFileError('The attachment is missing or not trusted.')
+    info = message['attachment']
+    file_name, mime = info.get('file'), info.get('mime')
+    if (mime not in ALLOWED_ATTACHMENTS or not isinstance(file_name, str)
+            or not re.fullmatch(r'[0-9a-f]{32}\.[a-z]{2,4}', file_name)):
+        raise ChatFileError('Invalid attachment reference.')
+    path = os.path.join(ATTACHMENT_FOLDER, file_name)
+    try:
+        with open(path, 'rb') as fh:
+            payload = fh.read(MAX_ATTACHMENT_BYTES + 1)
+    except OSError as exc:
+        raise ChatFileError('Cannot read the attachment from shared Drive.') from exc
+    if (len(payload) > MAX_ATTACHMENT_BYTES or
+            len(payload) != info.get('size') or
+            hashlib.sha256(payload).hexdigest() != info.get('sha256') or
+            not validate_attachment_bytes(payload, mime)):
+        raise ChatFileError('Attachment failed integrity/type verification.')
+    return JSON({'name': info.get('name'), 'mime': mime, 'base64': b64(payload)})
+
+
+def attachment_callback(message_id):
+    try:
+        return get_attachment(message_id)
+    except ChatFileError as exc:
+        return JSON({'error': str(exc)})
+
+
 def valid_incoming_message(text):
     """Read-side protection: modified senders cannot bypass basic spam rules."""
     if not isinstance(text, str) or not text.strip() or len(text) > MESSAGE_LIMIT:
@@ -543,7 +637,10 @@ def analyze(events):
             'time': str(e.get('time', '')),
             'sender_key': sender,
             'signed': signed,
-            'reply_to': e.get('reply_to') if signed else None
+            'reply_to': e.get('reply_to') if signed else None,
+            'issued_at': e.get('issued_at') if signed else None,
+            'attachment': (e.get('attachment') if signed and
+                           isinstance(e.get('attachment'), dict) else None),
         }
         messages.append(item)
         by_number[post_number] = item
@@ -634,6 +731,10 @@ def analyze(events):
             counts[emoji] = counts.get(emoji, 0) + 1
     for msg in messages:
         msg['reactions'] = reaction_totals.get(msg['id'], {})
+        msg['my_reactions'] = [
+            emoji for (target, user, emoji), enabled in reaction_state.items()
+            if target == msg['id'] and user == identity_public and enabled
+        ]
         sender = msg['sender_key']
         msg['verified'] = bool(sender and sender in verified)
     return dict(messages=messages, by_number=by_number,
@@ -880,6 +981,13 @@ def send_message(body, reply_to=None):
 
 def submit_message(raw):
     global username, running, visible_count, clear_through, last_message_time
+    if isinstance(raw, dict) and raw.get('action') == 'upload_attachment':
+        with state_lock:
+            try:
+                upload_attachment(raw)
+            except (ChatFileError, OSError) as exc:
+                note('Attachment: ' + str(exc))
+            return snapshot()
     cleaned = str(raw)[:1800].strip()
     with state_lock:
         if not running or not cleaned:
@@ -1053,8 +1161,10 @@ def submit_message(raw):
 SESSION = uuid.uuid4().hex
 STATE_CALLBACK = f'school_chat.{SESSION}.state'
 SEND_CALLBACK = f'school_chat.{SESSION}.send'
+ATTACH_CALLBACK = f'school_chat.{SESSION}.attachment'
 output.register_callback(STATE_CALLBACK, snapshot)
 output.register_callback(SEND_CALLBACK, submit_message)
+output.register_callback(ATTACH_CALLBACK, attachment_callback)
 
 # One permanent chat display + one short input. Neither is cleared on updates.
 CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;font-size:13px;color:inherit;position:relative;">
