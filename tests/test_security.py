@@ -8,7 +8,7 @@ import unicodedata
 import unittest
 from pathlib import Path
 
-source = Path(__file__).resolve().parents[1].joinpath("school_chat.py").read_text()
+source = Path(__file__).resolve().parents[1].joinpath("messaging_app.py").read_text()
 tree = ast.parse(source)
 names = {
     "analyze", "valid_username", "valid_incoming_message", "is_gibberish",
