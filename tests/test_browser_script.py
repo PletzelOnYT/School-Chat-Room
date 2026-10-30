@@ -5,7 +5,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "school_chat.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "messaging_app.py"
 tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
 html = next(ast.literal_eval(node.value)
             for node in tree.body if isinstance(node, ast.Assign)
