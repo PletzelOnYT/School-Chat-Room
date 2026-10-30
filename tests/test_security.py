@@ -40,8 +40,10 @@ class VerifiedOnlyTests(unittest.TestCase):
         self.now = int(time.time())
 
     def evt(self, identity, kind="message", **kwargs):
-        return dict(id=identity, kind=kind, time="12:00:00",
-                    issued_at=self.now, sig="test-valid", **kwargs)
+        event = dict(id=identity, kind=kind, time="12:00:00",
+                     issued_at=self.now, sig="test-valid")
+        event.update(kwargs)
+        return event
 
     def test_only_verified_self_claim_is_effective(self):
         entries = [
