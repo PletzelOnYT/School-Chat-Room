@@ -695,31 +695,18 @@ ensure_account_profile()
 
 
 def claim_self_verified():
-    """Self-service signed checkmark for THIS chat identity, not Google attestation.
-
-    When optional Google account metadata was accessible, call this at login.
-    The same operation is available via the private, undocumented chat action.
-    It never triggers OAuth, sends a full email, or signs a grant for others.
-    Signed administrator revocations and account bans take precedence.
-    """
-    state = latest_analysis()
-    if identity_public in state['banned']:
-        return False
-    if identity_public in state['self_verification_denied']:
-        return False
-    if identity_public in state['verified']:
+    """Set one blue checkmark for the calling signed identity, never anyone else."""
+    current = latest_analysis()
+    if identity_public in current['verified']:
         return True
     event = event_now('role', role='verified', target_key=identity_public,
                       active=True, self_verified=True)
-    if not write_event(event):
-        return False
-    return identity_public in latest_analysis()['verified']
+    return bool(write_event(event) and
+                identity_public in latest_analysis()['verified'])
 
 
-# An existing, successfully mounted Google Drive is the sign-in signal.
-# This never starts another Google OAuth flow, important for restricted school
-# accounts. All chat participants with mounted Drive can self-claim the badge;
-# it is NOT independent Google identity verification.
+# A Google Drive mount is already required by the chat. Never prompt for
+# extra school-account authorization to claim the self-verified checkmark.
 if os.path.ismount('/content/drive'):
     try:
         claim_self_verified()
@@ -737,9 +724,6 @@ def snapshot():
     global next_popup, running, update_notice_shown
     try:
         check_upstream_version()
-        # Reconcile queued signed grants that another Drive writer may have
-        # overwritten. No secret owner password is saved to disk.
-        reconcile_role_recovery()
         a = latest_analysis()
         if update_required:
             running = False
@@ -756,7 +740,7 @@ def snapshot():
                 })
         error = ''
     except ChatFileError as exc:
-        a = {'messages': [], 'moderators': set(), 'owners': set(), 'verified': set(), 'banned': set()}
+        a = {'messages': [], 'verified': set()}
         error = str(exc)
     with state_lock:
         # Place private system messages at the conversational position where
@@ -777,10 +761,7 @@ def snapshot():
         return JSON({'username': username, 'messages': shown,
                      'popup': next_popup,
                      'running': running,
-                     'my_owner': identity_public in a['owners'],
-                     'my_mod': identity_public in a['moderators'],
-                     'my_verified': identity_public in a['verified'],
-                     'my_banned': identity_public in a['banned']})
+                     'my_verified': identity_public in a['verified']})
 
 
 
@@ -788,9 +769,6 @@ def snapshot():
 def send_message(body, reply_to=None):
     global last_message_time
     now = time.time()
-    if identity_public in latest_analysis()['banned']:
-        note('This account is banned from posting. Contact the Owner if this is a mistake.')
-        return False
     if now - last_message_time < COOLDOWN_SECONDS:
         note('Slow down! Wait a moment before sending another message.')
         return False
@@ -825,7 +803,7 @@ def send_message(body, reply_to=None):
 
 
 def submit_message(raw):
-    global username, running, visible_count, clear_through, last_message_time, owner_access_key
+    global username, running, visible_count, clear_through, last_message_time
     cleaned = str(raw)[:1800].strip()
     with state_lock:
         if not running or not cleaned:
@@ -837,10 +815,8 @@ def submit_message(raw):
             except ChatFileError as exc:
                 note('Cannot check role status right now: ' + str(exc))
                 return snapshot()
-            if identity_public not in (
-                current['verified'] | current['moderators'] | current['owners']
-            ):
-                note('Only Owner, Moderator, or Verified users can use /rename.')
+            if identity_public not in current['verified']:
+                note('Only Verified users can use /rename.')
                 return snapshot()
             new_name = valid_username(rename.group(1))
             if not new_name:
@@ -869,19 +845,7 @@ def submit_message(raw):
                 # Hidden from all command/help menus. Only the issuer's own
                 # signed identity is eligible; no chat message is broadcast.
                 if not claim_self_verified():
-                    note('Self-service checkmark unavailable. An administrator '
-                         'may have revoked it, or the shared Drive write failed.')
-                return snapshot()
-            if command == '/owner':
-                if not arg:
-                    note('Type /owner then enter your key in the password field (it will not be sent to chat).')
-                    return snapshot()
-                grant = call_owner_server('login', arg, target_key=identity_public)
-                if not write_event(grant):
-                    note('Owner identity granted, but failed to save to shared Google Drive. Retry login.')
-                    return snapshot()
-                owner_access_key = arg
-                note('Access GRANTED. Owner badge activated for 8 hours. You can now use /addmod and /removemod.')
+                    note('Could not save the checkmark to shared chat.json. Retry.')
                 return snapshot()
             if command in ('/help', '/hellp'):
                 popup('SCHOOL CHAT COMMANDS', HELP_TEXT)
@@ -893,21 +857,15 @@ def submit_message(raw):
                 t = time.monotonic()
                 read_messages()
                 note(f'Shared Drive file readable. Read: {(time.monotonic() - t) * 1000:.0f} ms. '
-                     f'Role storage: {remote_role_status}. '
-                     f'Chat version: {CLIENT_VERSION}. '
-                     'Permanent roles require Vercel Upstash configuration.')
+                     f'Chat version: {CLIENT_VERSION}.')
                 return snapshot()
             if command == '/exit':
                 running = False
                 return snapshot()
 
             a = latest_analysis()
-            me_owner = identity_public in a['owners']
-            me_mod = identity_public in a['moderators'] or me_owner
             if command in ('/whoami', '/id'):
-                roles = ((['Owner'] if me_owner else []) +
-                         (['Moderator'] if me_mod and not me_owner else []) +
-                         (['Verified'] if identity_public in a['verified'] else []))
+                roles = ['Verified'] if identity_public in a['verified'] else []
                 note('Name: ' + username + '\nYour identity ID: ' + short_id(identity_public) +
                      '\nRoles: ' + (', '.join(roles) or 'Member') +
                      '\nThis ID does not change when you rename yourself. '
@@ -918,8 +876,6 @@ def submit_message(raw):
                 if command == '/verified':
                     people = [(pub, name) for pub, name in people if pub in a['verified']]
                 lines = [
-                    ('[OWNER] ' if pub in a['owners'] else
-                     '[MOD] ' if pub in a['moderators'] else '') +
                     ('☑ ' if pub in a['verified'] else '') +
                     f'@{name} | ID {short_id(pub)}'
                     for pub, name in people[-50:]
@@ -930,127 +886,6 @@ def submit_message(raw):
             if command == '/stats':
                 note(f'{len(a["messages"])} messages, '
                      f'{len(a["identities"])} signed identities. Not live user counts.')
-                return snapshot()
-            if command == '/modhelp':
-                if me_mod:
-                    popup('MODERATOR COMMANDS', MOD_HELP)
-                else:
-                    note('Moderator permissions required.')
-                return snapshot()
-            if command == '/banlist':
-                if not me_mod:
-                    note('Moderator permission required.')
-                else:
-                    names = [f'@{a["display_names"].get(pub, fallback_username(pub))} | ID {short_id(pub)}'
-                             for pub in sorted(a['banned'])]
-                    note('BANNED IDENTITIES\n' + ('\n'.join(names) or '(none)'))
-                return snapshot()
-            if command in ('/verify', '/unverify', '/addmod', '/removemod', '/ban', '/unban'):
-                is_owner_command = command in ('/addmod', '/removemod', '/ban', '/unban')
-                if is_owner_command and not (me_owner and owner_access_key):
-                    note('Owner login needed. Enter /owner and your private key first, '
-                         'then try this command again.')
-                    return snapshot()
-                if not is_owner_command and not me_mod:
-                    note('Moderator permission required. Owner: use /owner first.')
-                    return snapshot()
-                target, error = resolve_target(arg, a)
-                if error:
-                    note(error)
-                    return snapshot()
-                role = ('banned' if command in ('/ban', '/unban') else
-                        'moderator' if command in ('/addmod', '/removemod') else 'verified')
-                active = command in ('/verify', '/addmod', '/ban')
-                target_name = a['display_names'].get(target, fallback_username(target))
-                if command == '/ban' and (target == identity_public or target in a['owners']):
-                    note('You cannot ban yourself or an active Owner.')
-                    return snapshot()
-                # Owner-issued permissions can be stored in a durable Redis
-                # ledger by Vercel. This avoids writing the shared chat.json
-                # at all, so an older Colab save cannot erase the grant.
-                if me_owner and owner_access_key:
-                    grant, persisted = call_owner_server(
-                        'role', owner_access_key,
-                        target_key=target, role=role, active=active)
-                else:
-                    local_grant = event_now('role', role=role,
-                                            target_key=target, active=active)
-                    if remote_role_status == 'durable' and role == 'verified':
-                        # Durable moderator changes are server-authorized
-                        # against the CURRENT signed Moderator registry.
-                        grant, persisted = call_moderator_server(local_grant)
-                    else:
-                        grant, persisted = local_grant, False
-
-                role_field = {'moderator': 'moderators',
-                              'verified': 'verified', 'banned': 'banned'}[role]
-                if persisted:
-                    read_remote_role_events(force=True)
-                    updated = latest_analysis()
-                    effective = (target in updated[role_field]) == active
-                    if effective:
-                        note(f'{role.title()} {"assigned" if active else "revoked"} '
-                             f'for {target_name} (ID {short_id(target)}). '
-                             'Saved in the permanent server role ledger; '
-                             'other updated clients will receive it automatically.')
-                    else:
-                        note('Vercel saved the signed grant, but this client could not '
-                             'confirm the new role from the server. '
-                             'Use /rolecheck and /ping; do not retry repeatedly.')
-                    return snapshot()
-
-                # Fallback if no durable store is configured. An owner
-                # should configure Upstash in Vercel to permanently fix this.
-                # Store the same signed record privately for later repair.
-                queue_role_recovery(grant)
-                effective = False
-                last_reason = 'grant missing after Google Drive synchronization'
-                for attempt in range(6):
-                    if not write_event(grant):
-                        continue
-                    updated = latest_analysis()
-                    effective = (target in updated[role_field]) == active
-                    if effective:
-                        time.sleep(0.3)
-                        effective = ((target in latest_analysis()[role_field]) == active)
-                    if effective:
-                        break
-                    current_entries = read_messages()
-                    matching = [e for e in current_entries
-                                if isinstance(e, dict) and e.get('id') == grant['id']]
-                    if matching:
-                        last_reason = (
-                            'grant exists but its effective state differs. '
-                            'Check for a newer revocation or outdated recipient client.'
-                        )
-                        break
-                    time.sleep(min(0.4 * (attempt + 1), 1.5))
-
-                if effective:
-                    note(f'{role.title()} {"assigned" if active else "revoked"} '
-                         f'for {target_name} (ID {short_id(target)}). '
-                         'The signed grant is in chat.json, but remains at risk '
-                         'until durable Vercel role storage is configured.')
-                else:
-                    note('Role change queued for retry in this account private '
-                         'recovery file. ' + last_reason + '. '
-                         f'Target: {target_name} (ID {short_id(target)}). '
-                         'To prevent lost grants, configure Upstash Redis '
-                         'credentials on the Owner API.')
-                return snapshot()
-            if command == '/rolecheck':
-                target, error = resolve_target(arg, a)
-                if error:
-                    note(error)
-                    return snapshot()
-                name = a['display_names'].get(target, fallback_username(target))
-                labels = (['Owner'] if target in a['owners'] else []) + \
-                         (['Moderator'] if target in a['moderators'] else []) + \
-                         (['Verified'] if target in a['verified'] else []) + \
-                      (['Banned'] if target in a['banned'] else [])
-                note(f'{name} | ID {short_id(target)} | Roles: '
-                     + (', '.join(labels) or 'Member')
-                     + '\nNames are not identities: have this student compare /whoami ID.')
                 return snapshot()
             if command == '/mentions':
                 hits = [m for m in a['messages'] if is_mentioned(m['text'], username)][-10:]
