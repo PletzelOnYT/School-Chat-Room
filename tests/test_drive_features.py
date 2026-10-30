@@ -26,6 +26,7 @@ def methods(overrides=None):
         os=os, re=re, shlex=shlex, json=json, time=time, uuid=uuid,
         hashlib=hashlib, datetime=datetime,
         valid_signature=lambda e: isinstance(e, dict) and e.get("sig") == "valid",
+        is_plain_message=lambda e: False,
         ChatFileError=type("ChatFileError", (Exception,), {}),
         file_lock=threading.RLock(),
         short_id=lambda key: (key or "")[:12],
