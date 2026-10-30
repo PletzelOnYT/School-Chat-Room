@@ -24,7 +24,7 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_one_title_no_owner_password_prompt(self):
-        self.assertIn("appendVerifiedTitle(state.my_verified)", script)
+        self.assertIn("appendVerifiedTitle(state.my_verified, header)", script)
         self.assertIn("if (!msg.private) appendVerifiedTitle(msg.verified, line)", script)
         self.assertIn("showSelectedThread", script)
         self.assertIn("selectedMessageId", script)
