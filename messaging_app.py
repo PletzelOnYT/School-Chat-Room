@@ -1,4 +1,4 @@
-# @title Messaging App v5.21 — Google Drive Messenger
+# @title Messaging App v5.22 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -20,6 +20,7 @@ import time
 import uuid
 import unicodedata
 import shlex
+from collections import Counter
 from datetime import datetime
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -36,7 +37,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 1.5
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.21'
+CLIENT_VERSION = '5.22'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -343,27 +344,98 @@ def valid_incoming_message(text):
     return not is_gibberish(text)
 
 
-def is_gibberish(text):
-    """Low-false-positive flood filter, not a dictionary/spelling checker.
+def gibberish_reason(text):
+    """Detect sustained keyboard mashing without punishing ordinary conversation.
 
-    Ordinary slang, multilingual text, links, code, punctuation, emojis, names,
-    and even short consonant-heavy words are allowed. Block only obvious
-    character/pattern floods; separate cooldown and length limits still apply.
+    Rules are intentionally conservative on short text, slang, multilingual
+    writing, natural repeated emphasis, links, code snippets, and emoji. Long
+    repeated nonsense and alphabetic keysmashes use several independent
+    signals rather than a brittle spelling dictionary.
     """
-    if not text or not text.strip():
-        return False
-    # Twelve identical characters/emojis in a row is an obvious flood;
-    # five periods, elongated 'noooo', smileys, etc. are fine.
-    if re.search(r'(.)\1{11,}', text, re.DOTALL):
-        return True
-    # Repeated keyboard patterns: e.g. asdfasdfasdf... or abcabcabc...
-    # Avoid flagging small, legitimate repeating expressions.
-    if len(text) >= 32 and re.search(r'(.{2,8}?)\1{7,}', text, re.DOTALL):
-        return True
-    # One word pasted 12+ times in succession, including spaces/newlines.
-    if re.search(r'(?i)(?<!\w)([\w]{1,24})(?:\s+\1){11,}(?!\w)', text):
-        return True
-    return False
+    if not isinstance(text, str) or not text.strip():
+        return None
+    value = unicodedata.normalize('NFKC', text)
+    raw = value.casefold()
+    if re.search(r'(.)\1{11,}', raw, re.DOTALL):
+        return 'Excessive repeated characters or emoji'
+    if len(raw) >= 24 and re.search(r'(.{2,10}?)\1{5,}', raw, re.DOTALL):
+        return 'Repeated character pattern'
+    # Ignore punctuation between repeats (asdasd-asdasd-asdasd...).
+    compact = re.sub(r'[\s\W_]+', '', raw, flags=re.UNICODE)
+    if len(compact) >= 30 and re.search(r'([a-z]{2,9}?)\1{4,}', compact):
+        return 'Repeated keyboard pattern'
+    tokens = re.findall(r"[\w']+", raw, flags=re.UNICODE)
+    if len(tokens) >= 9:
+        counts = Counter(tokens)
+        common, repeats = counts.most_common(1)[0]
+        if repeats >= 8 and repeats / len(tokens) >= 0.75 and len(common) <= 24:
+            return 'Repeated word flood'
+
+    # Do not treat non-Latin writing as English keyboard noise.
+    ascii_tokens = re.findall(r'[a-z]+', raw)
+    if not ascii_tokens:
+        return None
+    # For ordinary phrases, analyze only long continuous alphabetic runs.
+    # URLs, pasted code and file paths have different text statistics.
+    links_or_code = bool(re.search(
+        r'https?://|www\.|(?:[a-z]\w*\.){2,}|[{}\[\]<>]|[/\\]|[_=]', raw))
+    long_tokens = [word for word in ascii_tokens if len(word) >= 16]
+    vowels = set('aeiouy')
+    common_pairs = {
+        'th','he','in','er','an','re','on','at','en','nd','ti','es','or','te',
+        'of','ed','is','it','al','ar','st','to','nt','ng','se','ha','as','ou',
+        'io','le','ve','co','me','de','hi','ri','ro','ic','ne','ea','ra','ce',
+        'li','ch','ll','be','ma','si','om','ur','ca','el','ta','la','ns','di',
+        'fo','ho','pe','ec','pr','no','ct','us','ac','ot','il','tr','ly','nc',
+        'et','ut','ss','so','rs','un','lo','wa','ge','ee','wi','em','ad','ol',
+        'rt','po','we','na','ul','ie','ow','id','od','ba','ke','gh','wh','sh',
+        'ck','oo','qu','bu','fi','sp','su','pl','cl','cr','bl','br','gr','fr',
+        'dr','fl','sw','sk','sn','sm','tw','gl','sl','sc'
+    }
+    if not links_or_code:
+        for word in long_tokens:
+            if len(word) < 18:
+                continue
+            vratio = sum(c in vowels for c in word) / len(word)
+            cmax = max((len(x) for x in re.findall(r'[bcdfghjklmnpqrstvwxz]+',
+                                                     word)), default=0)
+            pairs = [word[i:i+2] for i in range(len(word)-1)]
+            unlikely = sum(pair not in common_pairs for pair in pairs) / len(pairs)
+            # Strong signals must AGREE. Normal long technical words can be
+            # consonant-rich or contain rare pairs, but rarely both.
+            if cmax >= 8 and (vratio < 0.30 or unlikely > 0.57):
+                return 'Unlikely long keyboard-mash word'
+            if len(word) >= 24 and unlikely > 0.65 and vratio < 0.37:
+                return 'Unlikely random letter sequence'
+            if len(word) >= 24 and vratio < 0.12 and cmax >= 6:
+                return 'Very long consonant-only sequence'
+
+        # Multiple shorter mashed words are common in chat spam.
+        if len(ascii_tokens) >= 5 and len(raw) >= 25:
+            alpha = [w for w in ascii_tokens if len(w) >= 3]
+            if len(alpha) >= 5:
+                no_vowels = sum(not any(c in vowels for c in w) for w in alpha)
+                unlikely_short = sum(
+                    len(w) >= 4 and
+                    (sum(w[i:i+2] not in common_pairs for i in range(len(w)-1))
+                     / (len(w)-1) > 0.75)
+                    for w in alpha)
+                if (no_vowels / len(alpha) >= 0.80 and
+                        unlikely_short / len(alpha) >= 0.55):
+                    return 'Repeated unlikely keyboard-mash words'
+
+    # A flood of repeated punctuation/symbol runs; allow expressive emoji.
+    punctuation = re.sub(r'[\w\s]', '', raw, flags=re.UNICODE)
+    if (len(raw) >= 35 and len(punctuation) >= 28 and
+            len(set(punctuation)) <= 3 and
+            len(punctuation) / len(raw) > 0.80):
+        return 'Repeated symbol flood'
+    return None
+
+
+def is_gibberish(text):
+    """Compatibility predicate for all send-side and read-side filters."""
+    return gibberish_reason(text) is not None
 
 
 def analyze(events):
@@ -878,8 +950,9 @@ def send_message(body, reply_to=None):
     if len(body) > MESSAGE_LIMIT:
         note(f'Maximum message length is {MESSAGE_LIMIT} characters.')
         return False
-    if is_gibberish(body):
-        note('Message blocked: repeated characters/pattern flood. Normal text is allowed.')
+    spam_reason = gibberish_reason(body)
+    if spam_reason:
+        note('Message blocked: ' + spam_reason + '.')
         return False
     # Only block a *fifth* duplicate in 15 seconds. A couple of repeated
     # replies such as "hi" are normal and should not be misclassified.
