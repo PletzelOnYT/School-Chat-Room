@@ -1,4 +1,4 @@
-# @title School ChatRoom v5.7 — School terminal chat with Vercel owner login
+# @title School ChatRoom v5.8 — School terminal chat with Vercel owner login
 """Google Colab school chat — the same shared Google Drive chat.json.
 
 The ONLY hosted API is for checking the owner's key and signing role grants.
@@ -202,7 +202,7 @@ RESERVED_USERNAMES = {
 }
 GENERIC_USERNAMES = {'colabuser', 'user', 'guest'}
 # Guests are generated from each signed identity. They cannot be claimed manually.
-GUEST_NAME_RE = re.compile(r'(?i)^guest-[0-9a-f]{8,64}$')
+GUEST_NAME_RE = re.compile(r'(?i)^guest-(?:[0-9]{2,3}|[0-9a-f]{8,64})$')
 
 
 def valid_username(value):
@@ -241,7 +241,7 @@ def guest_digest(sender):
 def fallback_username(sender):
     """Stable, virtually collision-free Guest name from each private Drive identity."""
     digest = guest_digest(sender)
-    return 'Guest-' + digest[:16] if digest else 'LegacyUser'
+    return 'Guest-' + str(100 + int(digest[:8], 16) % 900) if digest else 'Guest-000'
 
 
 # Use ONE effective nickname for the chat header and outgoing messages.
@@ -511,20 +511,31 @@ def analyze(events):
             key=lambda pub: (claim_order.get((pub, normalized), 10**18), pub))
         for normalized, claimants in name_claims.items()
     }
-    # Resolve even an astronomically unlikely Guest fingerprint collision
-    # deterministically. For distinct identities in this chat, Guest labels
-    # never repeat. Custom display names are still first-claimant-wins.
-    guest_names = {pub: fallback_username(pub) for pub in identities}
-    for digits in (16, 24, 32, 64):
-        grouped = {}
-        for pub, guest in guest_names.items():
-            grouped.setdefault(guest.casefold(), []).append(pub)
-        duplicates = [group for group in grouped.values() if len(group) > 1]
-        if not duplicates:
-            break
-        for group in duplicates:
-            for pub in group:
-                guest_names[pub] = 'Guest-' + guest_digest(pub)[:digits if digits > 16 else 24]
+    # Stable, short Guest-123 names. Assign in the order identities first
+    # appear in the shared history; collisions probe the next free number.
+    # 900 three-digit + 90 two-digit names are available without duplicates.
+    guest_names = {}
+    occupied_guest_numbers = set()
+    for pub in identities:
+        digest = guest_digest(pub)
+        candidate = 100 + int(digest[:8], 16) % 900
+        for _ in range(900):
+            if candidate not in occupied_guest_numbers:
+                break
+            candidate = 100 + (candidate - 99) % 900
+        else:
+            candidate = 10 + int(digest[8:16], 16) % 90
+            for _ in range(90):
+                if candidate not in occupied_guest_numbers:
+                    break
+                candidate = 10 + (candidate - 9) % 90
+            else:
+                # More than 990 signed identities cannot all have unique
+                # two/three digit labels. Never reuse another Guest label.
+                guest_names[pub] = 'Guest-' + digest[:16]
+                continue
+        occupied_guest_numbers.add(candidate)
+        guest_names[pub] = f'Guest-{candidate}'
 
     display_names = {}
     for pub, name in identities.items():
@@ -658,10 +669,29 @@ def latest_analysis():
     # Keep the input/header nickname equal to the receiver-verified nickname.
     # If a competing student already owns that name, both the header and all
     # future messages use this identity's unique Guest ID instead.
-    username = result['display_names'].get(identity_public, fallback_username(identity_public))
-    # Colab never supplies a trustworthy nickname. If the displayed name
-    # became invalid in a legacy session, force our own unique Guest name.
-    if not username or username.casefold() in GENERIC_USERNAMES:
+    username = result['display_names'].get(identity_public)
+    if not username:
+        # A first-time student has not sent a signed event yet; choose a
+        # Guest number absent from the current shared history as well.
+        reserved = {name.casefold() for name in result['display_names'].values()}
+        number = int(fallback_username(identity_public).split('-')[1])
+        for _ in range(900):
+            candidate = f'Guest-{number}'
+            if candidate.casefold() not in reserved:
+                username = candidate
+                break
+            number = 100 + (number - 99) % 900
+        if not username:
+            number = 10 + int(guest_digest(identity_public)[8:16], 16) % 90
+            for _ in range(90):
+                candidate = f'Guest-{number}'
+                if candidate.casefold() not in reserved:
+                    username = candidate
+                    break
+                number = 10 + (number - 9) % 90
+        if not username:
+            username = 'Guest-' + guest_digest(identity_public)[:16]
+    if username.casefold() in GENERIC_USERNAMES:
         username = fallback_username(identity_public)
     return result
 
@@ -895,18 +925,38 @@ def submit_message(raw):
                                               target_key=target, role=role, active=active)
                 else:
                     grant = event_now('role', role=role, target_key=target, active=active)
-                if not write_event(grant):
-                    note('Could not confirm the role change in shared chat.json. Retry.')
-                    return snapshot()
-                # Do not report success on a mere file append. Read and check
-                # the actual role state that all v5.6 clients will calculate.
-                updated = latest_analysis()
-                current_role_set = updated['moderators'] if is_owner_command else updated['verified']
-                effective = target in current_role_set
-                if effective != active:
-                    note('Role event was saved, but has not taken effect. '
-                         'Check /whoami, /users and the Vercel public key. '
-                         f'Target: {target_name} (ID {short_id(target)}).')
+                # Google Drive mount updates are not atomic across students.
+                # Another student's save can overwrite our role grant almost
+                # immediately. Reinsert the SAME signed grant if it disappears,
+                # and verify the effective role before declaring success.
+                effective = False
+                for attempt in range(6):
+                    if not write_event(grant):
+                        continue
+                    updated = latest_analysis()
+                    current_role_set = updated['moderators'] if is_owner_command else updated['verified']
+                    effective = (target in current_role_set) == active
+                    if effective:
+                        # Confirm once more after a short pause to catch an
+                        # overlapping write before showing success.
+                        time.sleep(0.3)
+                        check = latest_analysis()
+                        actual = check['moderators'] if is_owner_command else check['verified']
+                        effective = (target in actual) == active
+                    if effective:
+                        break
+                    current_entries = read_messages()
+                    if any(isinstance(e, dict) and e.get('id') == grant['id']
+                           for e in current_entries):
+                        # The event is present but ineffective: don't claim a
+                        # successful grant or repeatedly append a bad record.
+                        break
+                    time.sleep(min(0.4 * (attempt + 1), 1.5))
+                if not effective:
+                    note('Role grant could not be retained/verified in shared chat.json. '
+                         'Concurrent Google Drive writes may be overwriting it. '
+                         f'Target: {target_name} (ID {short_id(target)}). '
+                         'Try again when fewer users are writing.')
                 else:
                     note(f'{role.title()} {"assigned" if active else "revoked"} '
                          f'for {target_name} (ID {short_id(target)}). '
