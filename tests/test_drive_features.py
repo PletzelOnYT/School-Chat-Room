@@ -90,7 +90,7 @@ class SingleDriveFileTests(unittest.TestCase):
         self.assertEqual(len(search("from:Emma has:reaction", messages)), 1)
         self.assertEqual(len(search("in:replies", messages)), 1)
         self.assertEqual(len(search("from:Alex math", messages)), 1)
-        self.assertEqual(len(search("after:2026-11-01 has:reaction", messages)), 1)
+        self.assertEqual(len(search("after:2026-11-02 has:reaction", messages)), 1)
         with self.assertRaises(self.env["ChatFileError"]):
             search("has:attachment", messages)
         with self.assertRaises(self.env["ChatFileError"]):
