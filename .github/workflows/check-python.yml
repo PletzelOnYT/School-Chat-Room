@@ -21,7 +21,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Check Messaging App and compatibility launcher syntax
-        run: python -m py_compile messaging_app.py school_chat.py
+      - name: Install guardian signature verification dependency
+        run: python -m pip install 'cryptography>=43,<49'
+      - name: Check Messaging App, compatibility launcher and guardian syntax
+        run: python -m py_compile messaging_app.py school_chat.py owner_guardian.py
       - name: Run messaging, security and browser regression tests
         run: python -m unittest discover -s tests -v
