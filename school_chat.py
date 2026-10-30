@@ -1,10 +1,12 @@
-# @title School ChatRoom v5.18 — Google Drive chat, blue Verified checkmark
-"""School chat on the original shared Google Drive chat.json.
+# @title Messaging App v5.19 — Google Drive Messenger
+"""Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
-Only the blue self-claimed Verified title exists. No privileged roles or
-external authorization APIs. Student identities remain signed Ed25519 keys.
-Anyone with Editor access to chat.json can still modify or overwrite history.
-The checkmark does not prove Google account ownership.
+Messages, threads, emoji reactions, search and responsive layout all use the
+original shared JSON file. No separate shared folder or attachment features.
+There is one self-claimed blue Verified title and no privileged roles.
+
+Shared JSON is NOT a transactional database: concurrent saves may overwrite
+another client's changes. The checkmark does not prove Google ownership.
 """
 import base64
 import hashlib
@@ -17,7 +19,6 @@ import threading
 import time
 import uuid
 import unicodedata
-import mimetypes
 import shlex
 from datetime import datetime
 
@@ -35,7 +36,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 1.5
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.18'
+CLIENT_VERSION = '5.19'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -61,43 +62,6 @@ if not os.path.isfile(CHAT_FILE_PATH):
 PRIVATE_FOLDER = os.path.join(DRIVE_ROOT, '.schoolchat')
 PRIVATE_IDENTITY_PATH = os.path.join(PRIVATE_FOLDER, 'identity.json')
 
-# Everyone must add a SHORTCUT to the SAME shared folder in their My Drive.
-# Unlike a shared JSON array, independent event files never replace each
-# other's contents. Original chat.json is kept read-only for older history.
-EVENT_ROOT = os.path.join(DRIVE_ROOT, 'SchoolChatEvents')
-EVENT_FOLDER = os.path.join(EVENT_ROOT, 'events')
-ATTACHMENT_FOLDER = os.path.join(EVENT_ROOT, 'attachments')
-ROOM_MARKER = os.path.join(EVENT_ROOT, 'room.json')
-MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
-ALLOWED_ATTACHMENTS = {
-    'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp',
-    'image/gif': '.gif', 'application/pdf': '.pdf',
-    'text/plain': '.txt', 'text/markdown': '.md',
-}
-if not os.path.isdir(EVENT_ROOT):
-    raise FileNotFoundError(
-        'A shared Drive folder is required for non-overwriting chat updates. '
-        'Create one folder named SchoolChatEvents, share it with everyone as Editor, '
-        'and have each student add a SHORTCUT to it in My Drive root. '
-        'Do not create a separate folder for each student.'
-    )
-os.makedirs(EVENT_FOLDER, exist_ok=True)
-os.makedirs(ATTACHMENT_FOLDER, exist_ok=True)
-if not os.path.isfile(ROOM_MARKER):
-    try:
-        with open(ROOM_MARKER, 'x', encoding='utf-8') as marker:
-            json.dump({'type': 'school-chat-event-room-v1',
-                       'history_anchor': ORIGINAL_HISTORY_ANCHOR}, marker)
-    except FileExistsError:
-        pass
-try:
-    with open(ROOM_MARKER, encoding='utf-8') as marker:
-        marker_data = json.load(marker)
-    if marker_data.get('history_anchor') != ORIGINAL_HISTORY_ANCHOR:
-        raise ValueError('Wrong event-room marker')
-except (ValueError, OSError) as exc:
-    raise RuntimeError('SchoolChatEvents is not the correct shared room. '
-                       'Check the shared folder shortcut.') from exc
 
 # Google Colab uses the same system username for many students. Do not use
 # ColabUser or getpass as a chat nickname, not even momentarily.
@@ -119,9 +83,6 @@ minimum_client_version = ''
 update_required = False
 update_notice_shown = False
 last_upstream_version_check = 0.0
-legacy_cache = None
-event_cache = {}
-last_event_scan = 0.0
 
 class ChatFileError(Exception):
     pass
@@ -303,84 +264,60 @@ def valid_signature(event):
 
 
 def read_messages():
-    """Read original JSON history plus independent, append-only event files.
-
-    No code in this client opens chat.json in write mode. Listing the shared
-    event folder is cached briefly to keep Colab's Drive mount responsive.
-    Files that are only partially synchronized are retried on the next poll.
-    """
-    global legacy_cache, last_event_scan
+    """Read the ORIGINAL shared Google Drive chat.json; do not create a folder."""
     with file_lock:
-        if legacy_cache is None:
+        for attempt in range(4):
             try:
                 with open(CHAT_FILE_PATH, encoding='utf-8') as fh:
-                    legacy = json.load(fh)
+                    events = json.load(fh)
+                break
             except (OSError, ValueError) as exc:
-                raise ChatFileError('Original chat.json could not be read: ' + str(exc)) from exc
-            if not isinstance(legacy, list) or not any(
-                    isinstance(e, dict) and e.get('id') == ORIGINAL_HISTORY_ANCHOR
-                    for e in legacy):
-                raise ChatFileError('Wrong original chat.json shortcut.')
-            legacy_cache = legacy
-
-        if time.monotonic() - last_event_scan >= 1.5:
-            try:
-                names = sorted(n for n in os.listdir(EVENT_FOLDER)
-                               if re.fullmatch(r'(?:[0-9]{10}|[0-9]{19})-[0-9a-f]{32}\.json', n))
-            except OSError as exc:
-                raise ChatFileError('Shared event folder is unavailable: ' + str(exc)) from exc
-            for name in names:
-                if name in event_cache:
-                    continue
-                try:
-                    full_path = os.path.join(EVENT_FOLDER, name)
-                    if os.path.getsize(full_path) > 16384:
-                        continue
-                    with open(full_path, encoding='utf-8') as fh:
-                        event = json.load(fh)
-                    if isinstance(event, dict) and valid_signature(event):
-                        event_cache[name] = event
-                except (OSError, ValueError):
-                    # A different student's file may still be syncing.
-                    continue
-            last_event_scan = time.monotonic()
-        return list(legacy_cache) + [event_cache[name] for name in sorted(event_cache)]
+                if attempt == 3:
+                    raise ChatFileError('Cannot read shared chat.json: ' + str(exc)) from exc
+                time.sleep(0.1 * (attempt + 1))
+        if not isinstance(events, list):
+            raise ChatFileError('The shared chat.json must contain a JSON array.')
+        if not any(isinstance(e, dict) and e.get('id') == ORIGINAL_HISTORY_ANCHOR
+                   for e in events):
+            raise ChatFileError('Wrong chat.json. Use the original shared file shortcut.')
+        return events
 
 
-read_messages()  # Validate original history and event folder before starting.
+read_messages()  # Verify the correct shared history before showing the chat.
 
 
 def write_event(event):
-    """Create an immutable, uniquely named Drive file; NEVER rewrite history."""
+    """Best-effort shared JSON update; the file cannot safely be appended to.
+
+    Writing additional bytes after the final ] would make JSON invalid.
+    Re-read, append, write, then check the event was retained. Google Drive
+    does not provide a cross-user transaction or atomic append here.
+    """
     if not valid_signature(event):
-        raise ChatFileError('Refusing to save an unsigned/invalid chat event.')
-    event_id = str(event.get('id', ''))
-    try:
-        suffix = uuid.UUID(event_id).hex
-    except (ValueError, AttributeError):
-        raise ChatFileError('Invalid signed event ID.')
-    name = f'{int(event.get("issued_at_ns", time.time_ns())):019d}-{suffix}.json'
-    full_path = os.path.join(EVENT_FOLDER, name)
+        raise ChatFileError('Cannot save an unsigned chat event.')
     with file_lock:
-        try:
-            with open(full_path, 'x', encoding='utf-8') as fh:
-                json.dump(event, fh, ensure_ascii=False, separators=(',', ':'))
-                fh.flush()
-        except FileExistsError:
-            pass
-        except OSError as exc:
-            raise ChatFileError('Cannot create event in shared Drive folder: ' + str(exc)) from exc
         for attempt in range(4):
+            records = read_messages()
+            if any(isinstance(e, dict) and e.get('id') == event.get('id')
+                   for e in records):
+                return True
+            records.append(event)
             try:
-                with open(full_path, encoding='utf-8') as fh:
-                    saved = json.load(fh)
-                if saved == event:
-                    event_cache[name] = event
+                # Never replace a Drive shortcut: update the existing file.
+                with open(CHAT_FILE_PATH, 'w', encoding='utf-8') as fh:
+                    json.dump(records, fh, ensure_ascii=False, indent=2)
+                    fh.flush()
+            except OSError as exc:
+                raise ChatFileError('Shared chat.json write failed: ' + str(exc)) from exc
+            time.sleep(0.15 * (attempt + 1))
+            try:
+                if any(isinstance(e, dict) and e.get('id') == event.get('id')
+                       for e in read_messages()):
                     return True
-            except (OSError, ValueError):
-                pass
-            time.sleep(0.2 * (attempt + 1))
-    return False
+            except ChatFileError:
+                if attempt == 3:
+                    raise
+        return False
 
 
 def event_now(kind, **fields):
@@ -392,100 +329,6 @@ def event_now(kind, **fields):
                            issued_at_ns=time.time_ns(),
                            time=time.strftime('%H:%M:%S', time.localtime()),
                            user=username, **fields))
-
-
-def validate_attachment_bytes(payload, mime):
-    """Reject executables, HTML, SVG and disguised image/PDF files."""
-    if mime == 'image/png':
-        return payload.startswith(b'\x89PNG\r\n\x1a\n')
-    if mime == 'image/jpeg':
-        return payload.startswith(b'\xff\xd8\xff')
-    if mime == 'image/gif':
-        return payload.startswith((b'GIF87a', b'GIF89a'))
-    if mime == 'image/webp':
-        return payload[:4] == b'RIFF' and payload[8:12] == b'WEBP'
-    if mime == 'application/pdf':
-        return payload.startswith(b'%PDF-')
-    if mime in ('text/plain', 'text/markdown'):
-        try:
-            return b'\x00' not in payload and payload.decode('utf-8') is not None
-        except UnicodeDecodeError:
-            return False
-    return False
-
-
-def upload_attachment(raw):
-    """Store an allowed file in shared Drive, not inside chat.json or event JSON."""
-    if not isinstance(raw, dict):
-        raise ChatFileError('Invalid attachment request.')
-    mime = str(raw.get('mime', '')).strip().lower()
-    if mime not in ALLOWED_ATTACHMENTS:
-        raise ChatFileError('Only PNG, JPEG, WebP, GIF, PDF, TXT, or MD files are allowed.')
-    name = os.path.basename(str(raw.get('name', '')).replace('\\', '/'))
-    name = re.sub(r'[^a-zA-Z0-9._() -]', '_', name).strip('. ')[:72]
-    if not name or name.startswith('.'):
-        raise ChatFileError('Invalid attachment filename.')
-    encoded = raw.get('base64')
-    if not isinstance(encoded, str) or len(encoded) > MAX_ATTACHMENT_BYTES * 2:
-        raise ChatFileError('Attachment is too large (maximum 2 MB).')
-    try:
-        payload = b64decode(encoded)
-    except Exception as exc:
-        raise ChatFileError('Invalid attachment data.') from exc
-    if not payload or len(payload) > MAX_ATTACHMENT_BYTES:
-        raise ChatFileError('Attachment must be between 1 byte and 2 MB.')
-    if not validate_attachment_bytes(payload, mime):
-        raise ChatFileError('File contents do not match its allowed type.')
-    filename = uuid.uuid4().hex + ALLOWED_ATTACHMENTS[mime]
-    path = os.path.join(ATTACHMENT_FOLDER, filename)
-    try:
-        with open(path, 'xb') as fh:
-            fh.write(payload)
-            fh.flush()
-    except OSError as exc:
-        raise ChatFileError('Drive attachment upload failed: ' + str(exc)) from exc
-    sha = hashlib.sha256(payload).hexdigest()
-    event = event_now('message',
-                      text='📎 ' + name,
-                      attachment={'name': name, 'file': filename,
-                                  'mime': mime, 'size': len(payload), 'sha256': sha})
-    if not write_event(event):
-        raise ChatFileError('Attachment uploaded, but message event not confirmed. Retry.')
-    return event['id']
-
-
-def get_attachment(event_id):
-    """Load a signed referenced attachment on demand, never on every refresh."""
-    if not isinstance(event_id, str) or len(event_id) > 80:
-        raise ChatFileError('Invalid attachment message ID.')
-    a = latest_analysis()
-    message = next((x for x in a['messages'] if x['id'] == event_id), None)
-    if not message or not isinstance(message.get('attachment'), dict):
-        raise ChatFileError('The attachment is missing or not trusted.')
-    info = message['attachment']
-    file_name, mime = info.get('file'), info.get('mime')
-    if (mime not in ALLOWED_ATTACHMENTS or not isinstance(file_name, str)
-            or not re.fullmatch(r'[0-9a-f]{32}\.[a-z]{2,4}', file_name)):
-        raise ChatFileError('Invalid attachment reference.')
-    path = os.path.join(ATTACHMENT_FOLDER, file_name)
-    try:
-        with open(path, 'rb') as fh:
-            payload = fh.read(MAX_ATTACHMENT_BYTES + 1)
-    except OSError as exc:
-        raise ChatFileError('Cannot read the attachment from shared Drive.') from exc
-    if (len(payload) > MAX_ATTACHMENT_BYTES or
-            len(payload) != info.get('size') or
-            hashlib.sha256(payload).hexdigest() != info.get('sha256') or
-            not validate_attachment_bytes(payload, mime)):
-        raise ChatFileError('Attachment failed integrity/type verification.')
-    return JSON({'name': info.get('name'), 'mime': mime, 'base64': b64(payload)})
-
-
-def attachment_callback(message_id):
-    try:
-        return get_attachment(message_id)
-    except ChatFileError as exc:
-        return JSON({'error': str(exc)})
 
 
 def valid_incoming_message(text):
@@ -640,8 +483,6 @@ def analyze(events):
             'signed': signed,
             'reply_to': e.get('reply_to') if signed else None,
             'issued_at': e.get('issued_at') if signed else None,
-            'attachment': (e.get('attachment') if signed and
-                           isinstance(e.get('attachment'), dict) else None),
         }
         messages.append(item)
         by_number[post_number] = item
@@ -1068,13 +909,6 @@ def send_message(body, reply_to=None):
 
 def submit_message(raw):
     global username, running, visible_count, clear_through, last_message_time
-    if isinstance(raw, dict) and raw.get('action') == 'upload_attachment':
-        with state_lock:
-            try:
-                upload_attachment(raw)
-            except (ChatFileError, OSError) as exc:
-                note('Attachment: ' + str(exc))
-            return snapshot()
     cleaned = str(raw)[:1800].strip()
     with state_lock:
         if not running or not cleaned:
@@ -1251,10 +1085,8 @@ def submit_message(raw):
 SESSION = uuid.uuid4().hex
 STATE_CALLBACK = f'school_chat.{SESSION}.state'
 SEND_CALLBACK = f'school_chat.{SESSION}.send'
-ATTACH_CALLBACK = f'school_chat.{SESSION}.attachment'
 output.register_callback(STATE_CALLBACK, snapshot)
 output.register_callback(SEND_CALLBACK, submit_message)
-output.register_callback(ATTACH_CALLBACK, attachment_callback)
 
 # One permanent chat display + one short input. Neither is cleared on updates.
 CHAT_HTML = r'''<div id="school-chat-SESSION_ID" class="school-chat-v18">
@@ -1609,7 +1441,6 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" class="school-chat-v18">
 CHAT_HTML = CHAT_HTML.replace('SESSION_ID', SESSION)
 CHAT_HTML = CHAT_HTML.replace('STATE_CALLBACK_JSON', json.dumps(STATE_CALLBACK))
 CHAT_HTML = CHAT_HTML.replace('SEND_CALLBACK_JSON', json.dumps(SEND_CALLBACK))
-CHAT_HTML = CHAT_HTML.replace('ATTACH_CALLBACK_JSON', json.dumps(ATTACH_CALLBACK))
 CHAT_HTML = CHAT_HTML.replace('WRAPCH', str(WRAP_WIDTH_CH))
 CHAT_HTML = CHAT_HTML.replace('INPUTPX', str(INPUT_WIDTH_PX))
 CHAT_HTML = CHAT_HTML.replace('REFRESHMS', str(REFRESH_INTERVAL_MS))
