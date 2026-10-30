@@ -60,8 +60,23 @@ def canonical(obj):
                       separators=(",", ":")).encode("utf-8")
 
 
-def event_id(event):
-    return event.get("id") if isinstance(event, dict) else None
+def simple_message(event):
+    """Only the four public message fields; unsigned by design."""
+    return (isinstance(event,dict) and
+            set(event)=={"kind","time","user","text"} and
+            event.get("kind")=="message" and
+            isinstance(event.get("time"),str) and
+            re.fullmatch(r"\d{2}:\d{2}:\d{2}",event["time"]) is not None and
+            valid_name(event.get("user")) and
+            invalid_text(event.get("text")) is None)
+
+
+def event_id(event, position=None):
+    """Storage index for the private ledger; NOT written to chat.json."""
+    if simple_message(event) and position is not None:
+        raw=canonical_event(event).encode("utf-8")
+        return "plain-%d-%s" % (position,hashlib.sha256(raw).hexdigest()[:16])
+    return event.get("id") if isinstance(event,dict) else None
 
 
 def digest(raw):
@@ -141,6 +156,21 @@ def check_new_event(event, accepted, rate_log, now=None):
     now = time.time() if now is None else now
     if not isinstance(event,dict):
         return "event is not an object"
+    # Four-field chat messages deliberately have no signature or sender ID.
+    # They can be checked for format and spam, NOT identity/authenticity.
+    if simple_message(event):
+        sender="display-name:"+event["user"].casefold()
+        history=rate_log.setdefault(sender,[])
+        stamp=now
+        history[:]=[(ts,body) for ts,body in history if stamp-ts<=60]
+        normalized=" ".join(event["text"].casefold().split())
+        if sum(0<=stamp-ts<=10 for ts,_ in history)>=12:
+            return "message rate exceeded"
+        if sum(normalized==body and 0<=stamp-ts<=15
+               for ts,body in history)>=4:
+            return "duplicate-message flood"
+        history.append((stamp,normalized))
+        return None
     kind=event.get("kind")
     if kind not in FIELDS:
         return "unknown event kind"
@@ -281,12 +311,13 @@ def count_events(conn):
 
 
 def save_approved(conn, events):
-    for event in events:
+    start=count_events(conn)
+    for offset,event in enumerate(events):
         line=canonical_event(event)
         conn.execute(
             "INSERT OR IGNORE INTO approved(event_id,kind,sender,json,sha256) "
             "VALUES(?,?,?,?,?)",
-            (event["id"],event.get("kind"),event.get("sender_key"),
+            (event_id(event,start+offset),event.get("kind"),event.get("sender_key"),
              line,digest(line.encode())))
     conn.commit()
 
@@ -429,18 +460,19 @@ class Guardian:
             seen=set()
             prepared=[]
             for index,event in enumerate(initial):
-                if not isinstance(event,dict) or not isinstance(event_id(event),str):
+                ident=event_id(event,index)
+                if not isinstance(event,dict) or not isinstance(ident,str):
                     raise ValueError("initial history contains an event without ID")
-                if event_id(event) in seen:
+                if ident in seen:
                     raise ValueError("initial history contains duplicate IDs")
-                seen.add(event_id(event))
+                seen.add(ident)
                 prepared.append(event)
             save_approved(self.db,prepared)
             self.backup()
             self.log(f"Baseline enrolled: {len(initial)} events, {len(raw)} bytes."
                      " Historical records grandfathered; new events enforced.")
             return "enrolled"
-        expected={item["id"]:item for item in known}
+        expected={event_id(item,index):item for index,item in enumerate(known)}
         try:
             raw,live=read_shared(self.shared)
         except (FileNotFoundError,ValueError,OSError) as exc:
@@ -486,8 +518,8 @@ class Guardian:
                     approved["issued_at"],
                     " ".join(approved["text"].casefold().split())))
         live_known_order=[]
-        for entry in live:
-            eid=event_id(entry)
+        for position,entry in enumerate(live):
+            eid=event_id(entry,position)
             if not isinstance(eid,str) or eid in observed:
                 changed=True
                 invalid.append(("duplicate/malformed event ID",entry))
@@ -511,7 +543,8 @@ class Guardian:
         # Reordering approved events changes the meaning of role grants and
         # reactions, even if every signature remains valid.
         expected_known_order=[
-            e["id"] for e in known if e["id"] in observed]
+            event_id(e,index) for index,e in enumerate(known)
+            if event_id(e,index) in observed]
         if live_known_order!=expected_known_order:
             changed=True
             incident(self.db,"Approved history was reordered",action="restore_attempt")
@@ -524,10 +557,12 @@ class Guardian:
         if missing:
             incident(self.db,f"{len(missing)} approved events deleted",action="restore_attempt")
             self.log(f"ALERT: {len(missing)} approved events disappeared")
-        if additions:
+        if additions and not changed:
             save_approved(self.db,additions)
             self.backup()
-            self.log(f"Accepted {len(additions)} signed new events")
+            self.log(f"Accepted {len(additions)} new events")
+        elif additions:
+            self.log("New events found during tampering; not approving until clean.")
         if changed:
             if not self.repair:
                 self.backup()
