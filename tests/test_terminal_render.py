@@ -61,13 +61,17 @@ const state = {
       text:'Hello!',reply_to:'a',verified:false,reactions:{},private:false}],total_replies:1},
   ],
 };
+const sentCommands = [];
 const google = {colab:{kernel:{invokeFunction: async(name,args) => {
   if (name.endsWith('.state')) return {data:{'application/json':state}};
-  if (name.endsWith('.send')) return {data:{'application/json':state}};
+  if (name.endsWith('.send')) {
+    sentCommands.push(args[0]);
+    return {data:{'application/json':state}};
+  }
   throw Error('unexpected callback: '+name);
 }}}};
 const sandbox = {
-  document, google, console, setInterval:()=>0, clearInterval:()=>{},
+  document, google, console, setTimeout, setInterval:()=>0, clearInterval:()=>{},
   STATE_CALLBACK_JSON:'messaging_app.test.state',
   SEND_CALLBACK_JSON:'messaging_app.test.send',
   REFRESHMS:1000,
@@ -102,7 +106,24 @@ setTimeout(() => {
     assert(close);
     close.events.click({stopPropagation(){}});
     assert.strictEqual(area.textContent,original);
-    console.log('Terminal display and nested replies with click-to-open actions: PASS');
+    // Submit again while the first send is pending. The input must stay
+    // enabled, with both messages queued and sent in their original order.
+    const input = elements['messaging-input-SESSION_ID'];
+    const form = elements['messaging-form-SESSION_ID'];
+    input.value='first queued message';
+    form.events.submit({preventDefault(){}});
+    input.value='second queued message';
+    form.events.submit({preventDefault(){}});
+    assert.strictEqual(input.disabled, undefined);
+    setTimeout(() => {
+      try {
+        assert.deepStrictEqual(sentCommands,
+          ['first queued message','second queued message']);
+        console.log('Terminal threads and rapid-send queue: PASS');
+      } catch(err) {
+        console.error(err);process.exitCode=1;
+      }
+    }, 1100);
   } catch(error) {
     console.error(error);
     process.exitCode=1;
