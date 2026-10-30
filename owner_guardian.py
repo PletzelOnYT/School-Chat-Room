@@ -442,6 +442,19 @@ class Guardian:
         additions=[]
         ids=dict(expected)
         rate={}
+        # Carry recent message-rate history across monitoring passes, not
+        # merely across newly appended events in this particular scan.
+        for approved in known:
+            if (approved.get("kind")=="message" and
+                    isinstance(approved.get("sender_key"),str) and
+                    isinstance(approved.get("text"),str) and
+                    type(approved.get("issued_at")) is int and
+                    abs(time.time()-approved["issued_at"])<70):
+                sender=approved["sender_key"]
+                rate.setdefault(sender,[]).append((
+                    approved["issued_at"],
+                    " ".join(approved["text"].casefold().split())))
+        live_known_order=[]
         for entry in live:
             eid=event_id(entry)
             if not isinstance(eid,str) or eid in observed:
@@ -450,6 +463,7 @@ class Guardian:
                 continue
             observed.add(eid)
             if eid in expected:
+                live_known_order.append(eid)
                 if canonical_event(expected[eid]) != canonical_event(entry):
                     changed=True
                     invalid.append(("approved history was altered",entry))
@@ -463,6 +477,13 @@ class Guardian:
             additions.append(entry)
 
         missing=set(expected)-observed
+        # Reordering approved events changes the meaning of role grants and
+        # reactions, even if every signature remains valid.
+        expected_known_order=[
+            e["id"] for e in known if e["id"] in observed]
+        if live_known_order!=expected_known_order:
+            changed=True
+            incident(self.db,"Approved history was reordered",action="restore_attempt")
         if missing:
             changed=True
         if invalid:
@@ -529,7 +550,8 @@ def main(argv=None):
             args.file_id=file_id_file.read_text().strip()
     # SQLite runs locally, with every approved version checkpointed to private
     # Google Drive using the SQLite backup API. No SQLite lock on Drive FUSE.
-    local_db=Path(tempfile.gettempdir())/"messaging_owner_guardian.sqlite3"
+    local_temp=tempfile.TemporaryDirectory(prefix="messaging_guardian_")
+    local_db=Path(local_temp.name)/"guardian.sqlite3"
     guardian=Guardian(shared,private,local_db,args.file_id,not args.audit_only)
     try:
         print("OWNER GUARDIAN started; this process must remain running.",flush=True)
@@ -548,6 +570,7 @@ def main(argv=None):
         guardian.log("Stopped by owner")
     finally:
         guardian.close()
+        local_temp.cleanup()
 
 
 if __name__=="__main__":
