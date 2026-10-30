@@ -622,7 +622,7 @@ HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /users                     Unique signed identities and display names
 /verified                  List users with the blue checkmark
 /mentions                  Find your recent @mentions
-/search <filters>          Find by name, date, file or reply
+/search <filters>          Find by name, date, reactions or replies
 /reply <#> <message>        Reply to a numbered post
 /react <#> <emoji>          React to a message (/reacte also works)
 /unreact <#> <emoji>        Remove your reaction
@@ -635,18 +635,18 @@ HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /ping                      Check shared file
 /exit                      Close the chat
 
-Search: from:Alex after:2026-10-01 before:2026-11-01 has:attachment in:replies
+Search: from:Alex after:2026-10-01 before:2026-11-01 has:reaction in:replies
 Verified users may use /rename <name> to claim a unique nickname.
 The blue checkmark is self-claimed, not an independently verified identity.'''
 
 
-RULES = '''SCHOOL CHAT RULES
+RULES = '''MESSAGING APP RULES
 1. No bullying, harassment, threats, or hateful content.
 2. Do not post passwords, private addresses, personal contact details or records.
 3. No impersonation. Reserved names are rejected; only signed self-claims get checkmarks.
 4. Avoid spam and flooding.
-5. Report serious issues to school staff. Any Editor can change or erase
-   the shared chat.json file, so this is not a fully secure service.'''
+5. Report abuse to someone you trust. Editors can change or erase the
+   shared chat.json file, so this is not a fully secure messaging service.'''
 
 
 def check_upstream_version(force=False):
@@ -664,11 +664,11 @@ def check_upstream_version(force=False):
     try:
         request = urllib.request.Request(
             GITHUB_CHAT_SOURCE_URL,
-            headers={'User-Agent': 'SchoolChat-VersionCheck',
+            headers={'User-Agent': 'MessagingApp-VersionCheck',
                      'Cache-Control': 'no-cache', 'Range': 'bytes=0-255'})
         with urllib.request.urlopen(request, timeout=5) as response:
             heading = response.read(256).decode('utf-8', errors='replace')
-        match = re.search(r'^# @title School ChatRoom v(\d+\.\d+)', heading)
+        match = re.search(r'^# @title Messaging App v(\d+\.\d+)', heading)
         if not match:
             return
         latest_version = match.group(1)
@@ -760,8 +760,8 @@ def search_messages(query, messages):
                 datetime.strptime(filters[field], '%Y-%m-%d')
             except ValueError:
                 raise ChatFileError(f'Invalid {field}: date. Use YYYY-MM-DD.')
-    if filters.get('has', '').casefold() not in ('', 'attachment', 'reaction'):
-        raise ChatFileError('Valid has: filters: attachment or reaction.')
+    if filters.get('has', '').casefold() not in ('', 'reaction'):
+        raise ChatFileError('Valid has: filter: reaction.')
     if filters.get('in', '').casefold() not in ('', 'replies'):
         raise ChatFileError('Valid in: filter: replies.')
     results = []
@@ -771,8 +771,6 @@ def search_messages(query, messages):
             continue
         if words and not all(term.casefold() in message['text'].casefold()
                              for term in words):
-            continue
-        if filters.get('has', '').casefold() == 'attachment' and not message.get('attachment'):
             continue
         if filters.get('has', '').casefold() == 'reaction' and not message.get('reactions'):
             continue
@@ -953,7 +951,7 @@ def submit_message(raw):
                     note('Could not save the checkmark to shared chat.json. Retry.')
                 return snapshot()
             if command in ('/help', '/hellp'):
-                popup('SCHOOL CHAT COMMANDS', HELP_TEXT)
+                popup('MESSAGING APP COMMANDS', HELP_TEXT)
                 return snapshot()
             if command == '/rules':
                 note(RULES)
@@ -1001,7 +999,7 @@ def submit_message(raw):
                 if not arg:
                     note('Search examples: /search homework  |  '
                          '/search from:Alex after:2026-10-01  |  '
-                         '/search has:attachment  |  /search in:replies "quiz"')
+                         '/search has:reaction  |  /search in:replies "quiz"')
                 else:
                     hits = search_messages(arg, a['messages'])
                     note('SEARCH RESULTS (' + str(len(hits)) + ' most recent matches)\n'
@@ -1083,8 +1081,8 @@ def submit_message(raw):
 
 # Per-session callbacks avoid collisions if the notebook is re-run.
 SESSION = uuid.uuid4().hex
-STATE_CALLBACK = f'school_chat.{SESSION}.state'
-SEND_CALLBACK = f'school_chat.{SESSION}.send'
+STATE_CALLBACK = f'messaging_app.{SESSION}.state'
+SEND_CALLBACK = f'messaging_app.{SESSION}.send'
 output.register_callback(STATE_CALLBACK, snapshot)
 output.register_callback(SEND_CALLBACK, submit_message)
 
