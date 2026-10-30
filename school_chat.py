@@ -920,17 +920,24 @@ def resolve_target(arg, a):
 
 
 def ensure_account_profile():
-    """Publish the Google account prefix once per identity/account pair."""
+    """Register each identity once; update an available Google name when permitted.
+
+    When extra account information is restricted, don't write a new profile on
+    every restart. A single signed identity record is enough for Guest access.
+    """
     records = read_messages()
     for record in reversed(records):
-        if (isinstance(record, dict) and record.get('sender_key') == identity_public
-                and record.get('account_username') == GOOGLE_ACCOUNT_USERNAME
-                and record.get('kind') in ('profile', 'message')
-                and valid_signature(record)):
+        if not (isinstance(record, dict) and
+                record.get('sender_key') == identity_public and
+                record.get('kind') in ('profile', 'message') and
+                valid_signature(record)):
+            continue
+        if (not GOOGLE_ACCOUNT_NAME_AVAILABLE or
+                record.get('account_username') == GOOGLE_ACCOUNT_USERNAME):
             return
     if not write_event(event_now('profile')):
-        raise ChatFileError('Could not save your Google account display name '
-                            'to the shared chat.json. Try launching again.')
+        raise ChatFileError('Could not register your chat identity in shared '
+                            'chat.json. Check Google Drive access and try again.')
 
 
 ensure_account_profile()
