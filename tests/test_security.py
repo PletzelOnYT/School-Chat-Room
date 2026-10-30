@@ -169,7 +169,7 @@ class VerifiedOnlyTests(unittest.TestCase):
         resolver = env["resolve_verified_target"]
         self.assertEqual(resolver("alex", state), self.a)
         self.assertEqual(resolver("@Emma Marie", state), self.b)
-        self.assertEqual(resolver(self.b[:12], state), self.b)
+        self.assertEqual(resolver(env["short_id"](self.b), state), self.b)
         self.assertIsNone(resolver("Emm", state))
         self.assertIsNone(resolver("", state))
         self.assertIsNone(resolver("Alex", {
