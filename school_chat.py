@@ -223,6 +223,18 @@ def google_account_username():
             except (ValueError, OSError):
                 continue
         if not email or '@' not in email:
+            # Some Colab Google authentication sessions allow only gcloud
+            # account introspection, not Drive/about or OIDC userinfo scopes.
+            # This is still the Google account authorized in this runtime.
+            import subprocess
+            result = subprocess.run(
+                ['gcloud', 'auth', 'list', '--filter=status:ACTIVE',
+                 '--format=value(account)'],
+                capture_output=True, text=True, check=True, timeout=12)
+            candidates = [x.strip() for x in result.stdout.splitlines()
+                          if '@' in x.strip()]
+            email = candidates[0] if candidates else ''
+        if not email or '@' not in email:
             raise ValueError('Google did not return an email address for this account')
         local_part = email.rsplit('@', 1)[0]
         # Display only letters, digits, dots, underscores and hyphens.
