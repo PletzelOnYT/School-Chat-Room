@@ -276,7 +276,7 @@ def is_plain_message(event):
             and set(event) == PLAIN_MESSAGE_FIELDS
             and event.get('kind') == 'message'
             and isinstance(event.get('time'), str)
-            and re.fullmatch(r'\\d{2}:\\d{2}:\\d{2}', event['time']) is not None
+            and re.fullmatch(r'\d{2}:\d{2}:\d{2}', event['time']) is not None
             and isinstance(event.get('user'), str)
             and 0 < len(event['user']) <= 128
             and isinstance(event.get('text'), str)
@@ -348,7 +348,7 @@ def append_event_in_place(event):
     """
     if not is_plain_message(event):
         raise ChatFileError('Only four-field message records are supported.')
-    body = json.dumps(event, indent=2, ensure_ascii=False).replace('\\n', '\\n  ')
+    body = json.dumps(event, indent=2, ensure_ascii=False).replace('\n', '\n  ')
     rendered = ('  '+body).encode('utf-8')
     with open(CHAT_FILE_PATH, 'r+b') as fh:
         fh.seek(0, os.SEEK_END)
@@ -365,7 +365,7 @@ def append_event_in_place(event):
         empty=before[-1:] == b'['
         trailer=tail[close+1:]
         fh.seek(size-scan+len(before))
-        fh.write((b'' if empty else b',')+b'\\n'+rendered+b'\\n]'+trailer)
+        fh.write((b'' if empty else b',')+b'\n'+rendered+b'\n]'+trailer)
         fh.truncate()
         fh.flush()
 
