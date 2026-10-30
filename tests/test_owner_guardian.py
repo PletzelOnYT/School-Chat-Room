@@ -150,6 +150,30 @@ class GuardianTests(unittest.TestCase):
                    role="owner",target_key=self.other_public,active=True)
         self.assertIn("role",guardian.check_new_event(bad,known,{}))
 
+    def test_nickname_change_requires_current_v2_verification(self):
+        known={self.legacy["id"]:self.legacy}
+        rename=signed(self.private_key,self.public,kind="profile",
+                      renamed=True)
+        self.assertIn("nickname change",
+                      guardian.check_new_event(rename,known,{}))
+        claim=signed(self.private_key,self.public,kind="role",
+                     role="verified",target_key=self.public,
+                     active=True,self_verified=True,
+                     verification_version=2)
+        known[claim["id"]]=claim
+        self.assertIsNone(guardian.check_new_event(rename,known,{}))
+        revoke=signed(self.other_key,self.other_public,kind="role",
+                      role="verified",target_key=self.public,
+                      active=False,unverify_anyone=True,
+                      verification_version=2)
+        known[revoke["id"]]=revoke
+        self.assertIn("nickname change",
+                      guardian.check_new_event(rename,known,{}))
+
+    def test_drive_id_recovery_rejects_invalid_ids_without_auth(self):
+        self.assertIn("Invalid",guardian.restore_trash_by_id("../dangerous"))
+        self.assertIn("No Drive file ID",guardian.restore_trash_by_id(""))
+
     def test_reject_unapproved_fields_and_invalid_reply_targets(self):
         known={self.legacy["id"]:self.legacy}
         invalid=signed(self.private_key,self.public,text="hello",
