@@ -194,6 +194,20 @@ class GuardianTests(unittest.TestCase):
         self.assertEqual([e["id"] for e in self.current()],
                          [self.legacy["id"],first["id"],second["id"]])
 
+    def test_accept_and_restore_four_field_messages_without_ids(self):
+        self.mon.process()
+        simple={"kind":"message","time":"04:15:50",
+                "user":"Pletzel","text":"fdg"}
+        self.assertTrue(guardian.simple_message(simple))
+        self.assertIsNone(guardian.check_new_event(simple,{},{}))
+        self.shared.write_text(json.dumps([self.legacy,simple]))
+        self.assertEqual(self.mon.process(),"healthy")
+        self.assertEqual(guardian.count_events(self.mon.db),2)
+        self.assertEqual(json.loads(self.shared.read_text())[-1],simple)
+        self.shared.write_text(json.dumps([self.legacy]))
+        self.assertEqual(self.mon.process(),"restored")
+        self.assertEqual(json.loads(self.shared.read_text())[-1],simple)
+
     def test_tampered_approved_text_restored(self):
         self.mon.process()
         e=self.event("safely signed text")
