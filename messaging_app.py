@@ -1,4 +1,4 @@
-# @title Messaging App v5.19 — Google Drive Messenger
+# @title Messaging App v5.20 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -36,7 +36,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 1.5
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.19'
+CLIENT_VERSION = '5.20'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1087,52 +1087,19 @@ output.register_callback(STATE_CALLBACK, snapshot)
 output.register_callback(SEND_CALLBACK, submit_message)
 
 # One permanent chat display + one short input. Neither is cleared on updates.
-CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" class="messaging-app-v19">
-<style>
-.messaging-app-v19 {font:13px/1.5 monospace; color:inherit; width:100%; max-width:100%; box-sizing:border-box}
-.messaging-app-v19 .chat-toolbar {display:flex; gap:7px; align-items:center; flex-wrap:wrap; padding:4px 0 7px}
-.messaging-app-v19 button {font:12px monospace; padding:4px 9px; border:1px solid #64748b; border-radius:5px; color:inherit; background:transparent; cursor:pointer}
-.messaging-app-v19 button:hover,.messaging-app-v19 .attach-label:hover {background:rgba(125,125,125,.14)}
-.messaging-app-v19 .chat-viewport {height:min(66vh,620px); min-height:220px; overflow:auto; overscroll-behavior:contain; padding:8px; border:1px solid #64748b55; border-radius:6px; white-space:pre-wrap; overflow-wrap:anywhere}
-.messaging-app-v19 .chat-line {padding:2px 0; overflow-wrap:anywhere}
-.messaging-app-v19 .chat-line.reply {border-left:2px solid #3b82f6; margin-left:12px; padding:3px 7px}
-.messaging-app-v19 .chat-actions {display:flex; align-items:center; flex-wrap:wrap; gap:4px; margin:3px 0 5px 16px}
-.messaging-app-v19 .chat-actions button {padding:1px 6px; font-size:11px; border-color:#64748b66}
-.messaging-app-v19 .chat-actions button.mine {border-color:#3498ff; color:#60a5fa}
-.messaging-app-v19 .thread-toggle {color:#60a5fa; border:none!important; font-weight:bold}
-.messaging-app-v19 .picker {display:flex; flex-wrap:wrap; gap:4px; margin:3px 0}
-.messaging-app-v19 .chat-compose {display:flex; align-items:stretch; width:min(720px,100%); gap:6px; margin-top:7px}
-.messaging-app-v19 .chat-compose input {flex:1; min-width:0; box-sizing:border-box; color:#111; background:#fff; border:1px solid #94a3b8; border-radius:4px; font:13px monospace; padding:8px; height:36px}
-.messaging-app-v19 .chat-compose button {min-height:36px; padding:5px 12px; background:#166534; color:#fff}
-.messaging-app-v19 .reply-hint {display:none; font-size:12px; padding:5px 2px; color:#60a5fa}
-.messaging-app-v19.is-expanded .chat-viewport {height:calc(90vh - 135px); max-height:none}
-.messaging-app-v19:fullscreen {padding:12px; background:#101820; color:#e5e7eb; height:100vh; overflow:hidden}
-.messaging-app-v19:fullscreen .chat-viewport {height:calc(100vh - 160px); max-height:none}
-@media (max-width:600px) {
- .messaging-app-v19 {font-size:12px}
- .messaging-app-v19 .chat-viewport {height:60vh; padding:5px; min-height:240px}
- .messaging-app-v19 .chat-toolbar {gap:5px}
- .messaging-app-v19 button {min-height:32px; padding:5px 7px}
- .messaging-app-v19 .chat-compose input {font-size:16px; height:43px}
- .messaging-app-v19 .chat-compose button {min-height:43px}
- .messaging-app-v19 .chat-line.reply {margin-left:5px}
-}
-</style>
-<div class="chat-toolbar">
-  <button type="button" id="chat-expand-SESSION_ID" title="Toggle full-screen view">⛶ Full screen</button>
-  <button type="button" id="chat-search-SESSION_ID" title="Advanced search">⌕ Search</button>
-  <span id="chat-status-SESSION_ID" style="font-size:11px;color:#94a3b8">Google Drive chat.json</span>
-</div>
-<div id="messaging-display-SESSION_ID" class="chat-viewport" aria-live="polite"></div>
-<div id="chat-reply-hint-SESSION_ID" class="reply-hint"></div>
-<form class="chat-compose" id="messaging-form-SESSION_ID" autocomplete="off">
-  <input id="messaging-input-SESSION_ID" type="text" aria-label="Chat message" placeholder="Message or /command..." maxlength="1800" />
-  <button type="submit">Send</button>
-</form>
-<div id="messaging-closed-SESSION_ID" style="display:none">Chat stopped — rerun the GitHub launcher to reconnect.</div>
-<div id="messaging-help-fallback-SESSION_ID" style="display:none;margin-top:6px">
-  <a id="messaging-help-link-SESSION_ID" href="#" target="_blank" rel="noopener" style="color:#38bdf8">Open chat help in a separate tab</a>
-</div>
+CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;font-size:13px;color:inherit;position:relative;">
+  <div id="messaging-display-SESSION_ID" style="white-space:pre-wrap;overflow-wrap:anywhere;max-width:WRAPCHch;line-height:normal;margin:0;"></div>
+  <form id="messaging-form-SESSION_ID" autocomplete="off" style="margin:0;padding:0;">
+    <input id="messaging-input-SESSION_ID" type="text" aria-label="Chat message"
+      style="display:block;box-sizing:border-box;width:min(INPUTPXpx,100%);height:19px;margin:0;padding:1px 2px;
+             background:white;border:1px solid #999;border-radius:0;color:black;
+             font-family:monospace;font-size:13px;outline:auto;outline-width:0;" />
+  </form>
+  <div id="messaging-closed-SESSION_ID" style="display:none;white-space:pre-wrap;">--- Chat closed ---</div>
+  <div id="messaging-help-fallback-SESSION_ID" style="display:none;margin-top:4px;">
+    <a id="messaging-help-link-SESSION_ID" href="#" target="_blank" rel="noopener" style="color:#00BFFF;text-decoration:underline;">Open help in new window</a>
+    <span style="font-size:11px;color:gray;"> (Click if Chrome blocked the popup.)</span>
+  </div>
 </div>
 <script>
 (() => {
@@ -1143,223 +1110,283 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" class="messaging-app-v19">
   const closed = document.getElementById('messaging-closed-SESSION_ID');
   const helpFallback = document.getElementById('messaging-help-fallback-SESSION_ID');
   const helpLink = document.getElementById('messaging-help-link-SESSION_ID');
-  const replyHint = document.getElementById('chat-reply-hint-SESSION_ID');
-  const status = document.getElementById('chat-status-SESSION_ID');
   const stateCallback = STATE_CALLBACK_JSON;
   const sendCallback = SEND_CALLBACK_JSON;
-  let stopped = false, busy = false, sending = false, generation = 0;
-  let pendingReplyNumber = null, lastPopupId = null, helpWindow = null, lastHelpURL = null;
-  const expandedThreads = new Set(), activePickers = new Set();
-  const emojiChoices = ['👍','❤️','😂','🔥','🎉','💀','👀'];
-  const colored = (value, color, bold=false) => {
-    const x = document.createElement('span');
-    x.textContent = String(value ?? '');
-    x.style.color = color;
-    if (bold) x.style.fontWeight = 'bold';
-    return x;
-  };
-  const newline = (where=area) => where.appendChild(document.createTextNode('\n'));
-  const replyData = x => x?.data?.['application/json'] ?? null;
-  const makeButton = (label, action, title='') => {
-    const b = document.createElement('button');
-    b.type = 'button'; b.textContent = label; b.title = title || label;
-    b.addEventListener('click', action); return b;
-  };
-  function createHelpWindow() {
-    try {
-      const w = window.open('', '_blank', 'width=690,height=640,resizable=yes,scrollbars=yes');
-      if (w) {
-        helpWindow = w;
-        w.document.open();
-        w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Chat commands</title></head>'+
-          '<body style="background:#111827;color:#eee;font:14px monospace;padding:24px">'+
-          '<h2 id="help-heading">Loading help...</h2><pre id="help-body" style="white-space:pre-wrap"></pre></body></html>');
-        w.document.close();
-      }
-    } catch (_) { helpWindow = null; }
+  let busy = false;
+  let stopped = false;
+  let generation = 0;
+  let sending = false;
+  let lastPopupId = null;
+  let pendingHelpWindow = null;
+  let lastHelpURL = null;
+
+  function helpDocument(title, body) {
+    // The text is displayed as textContent, never interpreted as HTML.
+    return '<!doctype html><html><head><meta charset="utf-8"><title>Messaging App Commands</title>' +
+      '<style>body{background:#151515;color:#eaeaea;font:13px monospace;margin:24px;}' +
+      'h2{color:#00ffff;font-size:17px;}pre{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;}' +
+      'button{background:#242424;color:#fff;border:1px solid #777;padding:6px 12px;cursor:pointer;}' +
+      '</style></head><body><h2 id="heading"></h2><pre id="commands"></pre>' +
+      '<button onclick="window.close()">Close</button></body></html>';
   }
-  function showHelp(data) {
-    if (helpWindow && !helpWindow.closed) {
-      helpWindow.document.getElementById('help-heading').textContent = data.title || 'Commands';
-      helpWindow.document.getElementById('help-body').textContent = data.text || '';
-      helpWindow.focus(); helpWindow = null; helpFallback.style.display = 'none'; return;
+  function openHelpWindow() {
+    // Must run synchronously in the user submit event, before any await.
+    try {
+      const win = window.open('', '_blank', 'width=710,height=650,resizable=yes,scrollbars=yes');
+      if (win) {
+        pendingHelpWindow = win;
+        win.document.open();
+        win.document.write(helpDocument());
+        win.document.close();
+        win.document.getElementById('heading').textContent = 'Loading commands...';
+        helpFallback.style.display = 'none';
+        return;
+      }
+    } catch (error) { console.debug('Separate help window blocked:', error); }
+    pendingHelpWindow = null;
+  }
+  function showHelpPopup(popup) {
+    if (!popup) return;
+    const title = String(popup.title || 'CHAT COMMANDS');
+    const body = String(popup.text || '');
+    if (pendingHelpWindow && !pendingHelpWindow.closed) {
+      try {
+        const doc = pendingHelpWindow.document;
+        doc.getElementById('heading').textContent = title;
+        doc.getElementById('commands').textContent = body;
+        pendingHelpWindow.focus();
+        pendingHelpWindow = null;
+        helpFallback.style.display = 'none';
+        return;
+      } catch (error) { console.debug('Help window could not be updated:', error); }
     }
-    const esc = s => String(s).replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
-    const page = '<html><body style="background:#111827;color:#eee;font:14px monospace;padding:24px"><h2>'+
-      esc(data.title || 'Commands')+'</h2><pre style="white-space:pre-wrap">'+
-      esc(data.text || '')+'</pre></body></html>';
+    // Sandbox/popup-blocker fallback: a REAL clickable link that opens a new tab.
+    // No in-chat modal is created.
+    const escapeHTML = text => text.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    const page = '<!doctype html><html><head><meta charset="utf-8"><title>Messaging App Help</title>'+
+      '<style>body{background:#151515;color:#eee;font:13px monospace;padding:22px}h2{color:cyan}pre{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}</style></head>'+
+      '<body><h2>'+escapeHTML(title)+'</h2><pre>'+escapeHTML(body)+'</pre></body></html>';
     if (lastHelpURL) URL.revokeObjectURL(lastHelpURL);
     lastHelpURL = URL.createObjectURL(new Blob([page], {type:'text/html'}));
-    helpLink.href = lastHelpURL; helpFallback.style.display = 'block';
+    helpLink.href = lastHelpURL;
+    helpFallback.style.display = 'block';
+    pendingHelpWindow = null;
   }
-  function mentionText(container, raw, myName) {
-    const src = String(raw ?? '');
-    if (!myName) {container.appendChild(document.createTextNode(src));return;}
-    const esc = String(myName).replace(/[.*+?^$()|[\]{}\\]/g, '\\$&');
-    const re = new RegExp('(^|[^\\w@])(@' + esc + ')(?!\\w)', 'gi');
-    let last = 0, found;
-    while ((found = re.exec(src)) !== null) {
-      container.appendChild(document.createTextNode(src.slice(last, found.index)+found[1]));
-      container.appendChild(colored(found[2], '#FBBF24', true));
-      last = found.index + found[0].length;
+
+  function colored(text, color, bold = false) {
+    const span = document.createElement('span');
+    span.style.color = color;
+    if (bold) span.style.fontWeight = 'bold';
+    span.textContent = String(text ?? '');
+    return span;
+  }
+  const newline = () => area.appendChild(document.createTextNode('\n'));
+  function replyData(reply) { return reply?.data?.['application/json'] ?? null; }
+
+  function renderTextWithMentions(text, currentUsername) {
+    const s = String(text ?? '');
+    const escaped = currentUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = currentUsername ? new RegExp('(^|[^\\w@])(@' + escaped + ')(?!\\w)', 'gi') : null;
+    if (!regex) { area.appendChild(document.createTextNode(s)); return; }
+    let last = 0, m;
+    while ((m = regex.exec(s)) !== null) {
+      area.appendChild(document.createTextNode(s.slice(last, m.index) + m[1]));
+      area.appendChild(colored(m[2], '#FFB900', true));
+      last = m.index + m[0].length;
     }
-    container.appendChild(document.createTextNode(src.slice(last)));
+    area.appendChild(document.createTextNode(s.slice(last)));
   }
-  function setReply(number, user) {
-    pendingReplyNumber = number;
-    replyHint.style.display = 'block';
-    replyHint.replaceChildren(
-      document.createTextNode('↳ Reply to #' + number + ' @' + user + '  '),
-      makeButton('× Cancel', () => {
-        pendingReplyNumber = null; replyHint.style.display = 'none'; input.focus();
-      })
-    );
-    input.focus();
+
+  function appendVerifiedTitle(isVerified) {
+    if (isVerified) area.appendChild(colored('☑ ', '#3498FF', true));
   }
-  async function sendCommand(command) {
+
+  // All extra controls are tiny inline text, not panels or large buttons.
+  const expandedThreads = new Set();
+  const activePickers = new Set();
+  let latestState = null;
+  const emojiChoices = ['👍','❤️','😂','🔥','🎉','💀','👀'];
+  function textControl(text, action, color = '#999999') {
+    const span = colored(text, color);
+    span.setAttribute('role','button');
+    span.tabIndex = 0;
+    span.style.cursor = 'pointer';
+    span.title = text;
+    span.addEventListener('click', action);
+    span.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {e.preventDefault();action();}
+    });
+    return span;
+  }
+  async function sendInline(command) {
     if (sending || stopped) return;
     sending = true;
+    input.disabled = true;
     try {
-      const gen = ++generation;
+      const current = ++generation;
       const reply = await google.colab.kernel.invokeFunction(sendCallback, [command], {});
-      if (gen === generation) render(replyData(reply));
-    } catch (error) {
-      status.textContent = 'Drive send failed — retry';
-      console.error(error);
-    } finally { sending = false; input.focus(); }
-  }
-  function renderMessage(msg, name, isReply=false) {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'chat-line' + (isReply ? ' reply' : '');
-    wrapper.appendChild(colored('[' + (msg.time || '') + ']', '#22d3ee'));
-    if (!msg.private) wrapper.appendChild(colored(' #' + msg.number + ' ', '#94a3b8'));
-    else wrapper.appendChild(document.createTextNode(' '));
-    if (!msg.private && msg.verified) wrapper.appendChild(colored('☑ ', '#3498FF', true));
-    wrapper.appendChild(colored(msg.user || '', msg.private ? '#fb7185' : '#4ade80', true));
-    wrapper.appendChild(document.createTextNode(': '));
-    if (msg.private) wrapper.appendChild(colored(msg.text || '', '#fb7185'));
-    else mentionText(wrapper, msg.text || '', name);
-    area.appendChild(wrapper);
-    if (msg.private) return;
-    const actions = document.createElement('div');
-    actions.className = 'chat-actions';
-    const reactions = msg.reactions || {};
-    for (const [emoji,count] of Object.entries(reactions)) {
-      if (count <= 0) continue;
-      const mine = (msg.my_reactions || []).includes(emoji);
-      const b = makeButton(emoji + ' ' + count,
-        () => sendCommand((mine ? '/unreact ' : '/react ') + msg.number + ' ' + emoji),
-        mine ? 'Remove your reaction' : 'React');
-      if (mine) b.className = 'mine';
-      actions.appendChild(b);
+      if (current === generation) render(replyData(reply));
+    } catch(error) {
+      console.debug('Action could not be saved:', error);
+    } finally {
+      sending = false; input.disabled = false;
+      if (!stopped) input.focus();
     }
-    actions.appendChild(makeButton('＋ React', () => {
+  }
+  function renderLine(msg, currentUsername, nested=false) {
+    if (nested) area.appendChild(document.createTextNode('  ↳ '));
+    area.appendChild(colored('[' + (msg.time || '') + ']', '#00FFFF'));
+    if (!msg.private) area.appendChild(colored(' #' + msg.number, '#999999'));
+    area.appendChild(document.createTextNode(' '));
+    if (!msg.private) appendVerifiedTitle(msg.verified);
+    area.appendChild(colored(msg.user || '', msg.private ? '#FF5555' : 'green', true));
+    area.appendChild(document.createTextNode(': '));
+    if (msg.private) {
+      area.appendChild(colored(msg.text || '', '#FF5555'));
+      newline();
+      return;
+    }
+    renderTextWithMentions(msg.text || '', currentUsername);
+    const active = Object.entries(msg.reactions || {}).filter(pair=>pair[1] > 0);
+    for (const [emoji, count] of active) {
+      const mine = (msg.my_reactions || []).includes(emoji);
+      area.appendChild(textControl('  ' + emoji + ' ' + count,
+        ()=>sendInline((mine ? '/unreact ' : '/react ') + msg.number + ' ' + emoji),
+        mine ? '#3498FF' : '#bbbbbb'));
+    }
+    area.appendChild(textControl('  +', ()=>{
       if (activePickers.has(msg.id)) activePickers.delete(msg.id);
       else activePickers.add(msg.id);
-      render(lastState);
+      render(latestState);
     }));
-    actions.appendChild(makeButton('↳ Reply', () => setReply(msg.number,msg.user)));
+    area.appendChild(textControl('  ↳', ()=>{
+      input.value = '/reply ' + msg.number + ' ';
+      input.focus();
+      input.setSelectionRange(input.value.length,input.value.length);
+    }));
+    newline();
     if (activePickers.has(msg.id)) {
-      const picker = document.createElement('div');picker.className = 'picker';
-      picker.style.marginLeft = '16px';
+      area.appendChild(document.createTextNode('    '));
       for (const emoji of emojiChoices) {
-        const mine=(msg.my_reactions || []).includes(emoji);
-        picker.appendChild(makeButton(emoji, () => {
+        const mine = (msg.my_reactions || []).includes(emoji);
+        area.appendChild(textControl(emoji + ' ', ()=>{
           activePickers.delete(msg.id);
-          sendCommand((mine?'/unreact ':'/react ')+msg.number+' '+emoji);
-        }));
+          sendInline((mine ? '/unreact ' : '/react ') + msg.number + ' ' + emoji);
+        }, '#3498FF'));
       }
-      area.appendChild(picker);
+      newline();
     }
   }
-  let lastState = null;
-  function render(data) {
-    if (!data || !root.isConnected) return;
-    lastState = data;
-    const atBottom = area.scrollTop + area.clientHeight >= area.scrollHeight - 75;
-    const previousY = area.scrollTop;
+
+  function render(state) {
+    if (!state || !root.isConnected) return;
+    latestState = state;
     area.replaceChildren();
     area.appendChild(document.createTextNode('--- Connected as: '));
-    if (data.my_verified) area.appendChild(colored('☑ ', '#3498FF', true));
-    area.appendChild(colored(data.username||'', '#4ade80', true));
+    appendVerifiedTitle(state.my_verified);
+    area.appendChild(colored(state.username, 'green', true));
     area.appendChild(document.createTextNode(' ---'));
-    newline();area.appendChild(colored('Messaging App · reactions · threads · Drive sync','#94a3b8'));
-    newline();newline();
-    if (Array.isArray(data.threads)) {
-      for (const thread of data.threads) {
-        renderMessage(thread.root, data.username);
-        const replies = Array.isArray(thread.replies)?thread.replies:[];
-        if (thread.total_replies > 0) {
-          const toggle = makeButton(
-            (expandedThreads.has(thread.root.id) ? '▾ Hide' : '▸ Show')+
-            ' ' + thread.total_replies + ' repl' + (thread.total_replies===1?'y':'ies'),
-            () => {if (expandedThreads.has(thread.root.id)) expandedThreads.delete(thread.root.id);
-                   else expandedThreads.add(thread.root.id);render(lastState);});
-          toggle.className = 'thread-toggle';
-          toggle.style.marginLeft = '12px';area.appendChild(toggle);newline();
-          if (expandedThreads.has(thread.root.id)) {
-            for (const reply of replies) renderMessage(reply,data.username,true);
+    area.appendChild(textControl(' ⛶', ()=>{
+      try {
+        if (document.fullscreenElement === root) document.exitFullscreen();
+        else if (root.requestFullscreen) root.requestFullscreen();
+      } catch(error) {console.debug('Full screen unavailable:',error);}
+    }, '#999999'));
+    newline();
+    area.appendChild(document.createTextNode(
+      "--- Type your message and press Enter. Type '/exit' to quit. ---"));
+    newline(); newline();
+
+    const threads = Array.isArray(state.threads) ? state.threads : null;
+    if (threads) {
+      for (const thread of threads) {
+        renderLine(thread.root, state.username || '');
+        const count = thread.total_replies || 0;
+        if (count > 0) {
+          const open = expandedThreads.has(thread.root.id);
+          area.appendChild(textControl(
+            '  ' + (open ? '▾ Hide ' : '▸ Show ') + count + ' repl' +
+            (count === 1 ? 'y' : 'ies'),
+            ()=>{
+              if (open) expandedThreads.delete(thread.root.id);
+              else expandedThreads.add(thread.root.id);
+              render(latestState);
+            }, '#3498FF'
+          ));
+          newline();
+          if (open) for (const reply of (thread.replies || [])) {
+            renderLine(reply,state.username || '',true);
           }
         }
       }
-      for (const m of (data.messages||[]).filter(x=>x.private)) renderMessage(m,data.username);
-    } else {
-      for (const m of (data.messages||[])) renderMessage(m,data.username);
+      for (const message of (state.messages || []).filter(m => m.private)) {
+        renderLine(message, state.username || '');
+      }
+    } else for (const message of (state.messages || [])) {
+      renderLine(message, state.username || '');
     }
-    if (data.popup && data.popup.id !== lastPopupId) {
-      lastPopupId = data.popup.id;showHelp(data.popup);
+    if (state.popup && state.popup.id !== lastPopupId) {
+      lastPopupId = state.popup.id;
+      showHelpPopup(state.popup);
     }
-    if (atBottom) area.scrollTop = area.scrollHeight;
-    else area.scrollTop = previousY;
-    if (!data.running) {
-      stopped=true;form.style.display='none';closed.style.display='block';
+    if (!state.running) {
+      stopped = true;
+      form.style.display = 'none';
+      closed.style.display = 'block';
     }
   }
+
   async function refreshChat() {
     if (busy || sending || stopped || !root.isConnected) return;
-    busy=true;
+    busy = true;
     try {
-      const gen=++generation;
-      const data=replyData(await google.colab.kernel.invokeFunction(stateCallback, [], {}));
-      if (gen===generation) render(data);
-    } catch(error) {
-      console.debug('Drive refresh pending:',error);
-    } finally {busy=false;}
+      const current = ++generation;
+      const reply = await google.colab.kernel.invokeFunction(stateCallback, [], {});
+      if (current === generation) render(replyData(reply));
+    } catch (error) {
+      console.debug('Chat refresh temporarily unavailable:', error);
+    } finally {
+      busy = false;
+    }
   }
-  document.getElementById('chat-expand-SESSION_ID').onclick = async () => {
-    if (document.fullscreenElement===root) {
-      try {await document.exitFullscreen();return;} catch(_) {}
-    }
-    try {if (root.requestFullscreen) {await root.requestFullscreen();return;}} catch(_) {}
-    root.classList.toggle('is-expanded');
-    status.textContent=root.classList.contains('is-expanded')?'Expanded view':'Regular view';
-  };
-  document.getElementById('chat-search-SESSION_ID').onclick=()=>{
-    input.value='/search ';input.focus();input.setSelectionRange(input.value.length,input.value.length);
-    status.textContent='Try from:Alex after:2026-10-01 has:reaction in:replies';
-  };
-  form.addEventListener('submit',async event=>{
-    event.preventDefault();if(stopped||sending)return;
-    const typed=input.value.trim();if(!typed)return;
-    if(['/help','/hellp'].includes(typed.toLowerCase()))createHelpWindow();
-    let outgoing=typed;
-    if(pendingReplyNumber!==null && !typed.startsWith('/')) {
-      outgoing='/reply '+pendingReplyNumber+' '+typed;
-    }
-    input.value='';
-    await sendCommand(outgoing);
-    if(outgoing!==typed) {
-      pendingReplyNumber=null;replyHint.style.display='none';
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (stopped || sending) return;
+    let value = input.value;
+    if (!value.trim()) return;
+    const isHelp = ['/help', '/hellp'].includes(value.trim().toLowerCase());
+    if (isHelp) openHelpWindow();
+    sending = true;
+    input.value = '';
+    input.disabled = true;
+    ++generation;
+    try {
+      const reply = await google.colab.kernel.invokeFunction(sendCallback, [value], {});
+      render(replyData(reply));
+    } catch (error) {
+      input.value = value;
+      if (pendingHelpWindow && !pendingHelpWindow.closed) {
+        pendingHelpWindow.document.getElementById('heading').textContent = 'Unable to load commands';
+        pendingHelpWindow = null;
+      }
+      console.error('Could not send message:', error);
+    } finally {
+      sending = false;
+      input.disabled = false;
+      if (!stopped) input.focus();
     }
   });
+
   refreshChat();
-  const timer=setInterval(()=>{
-    if(!root.isConnected||stopped){clearInterval(timer);return;}
+  const timer = setInterval(() => {
+    if (!root.isConnected || stopped) { clearInterval(timer); return; }
     refreshChat();
   }, REFRESHMS);
   input.focus();
 })();
 </script>'''
+
 CHAT_HTML = CHAT_HTML.replace('SESSION_ID', SESSION)
 CHAT_HTML = CHAT_HTML.replace('STATE_CALLBACK_JSON', json.dumps(STATE_CALLBACK))
 CHAT_HTML = CHAT_HTML.replace('SEND_CALLBACK_JSON', json.dumps(SEND_CALLBACK))
