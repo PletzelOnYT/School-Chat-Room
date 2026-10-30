@@ -780,7 +780,7 @@ HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /users                     Unique signed identities and display names
 /verified                  List users with the blue checkmark
 /mentions                  Find your recent @mentions
-/search <text>             Search chat (/find also works)
+/search <filters>          Find by name, date, file or reply
 /reply <#> <message>        Reply to a numbered post
 /react <#> <emoji>          React to a message (/reacte also works)
 /unreact <#> <emoji>        Remove your reaction
@@ -793,6 +793,7 @@ HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /ping                      Check shared file
 /exit                      Close the chat
 
+Search: from:Alex after:2026-10-01 before:2026-11-01 has:attachment in:replies
 Verified users may use /rename <name> to claim a unique nickname.
 The blue checkmark is self-claimed, not an independently verified identity.'''
 
@@ -897,6 +898,88 @@ def is_mentioned(text, name):
     return bool(re.search(r'(?<![\w@])@' + re.escape(name) + r'(?!\w)', text, flags=re.I))
 
 
+def search_messages(query, messages):
+    """Search by words and optional from:/after:/before:/has:/in: filters."""
+    try:
+        terms = shlex.split(query)
+    except ValueError:
+        raise ChatFileError('Unclosed quote in search. Example: /search "math quiz"')
+    filters = {}
+    words = []
+    for term in terms:
+        prefix, sep, value = term.partition(':')
+        if sep and prefix.casefold() in ('from', 'after', 'before', 'has', 'in'):
+            filters[prefix.casefold()] = value
+        else:
+            words.append(term)
+    for field in ('after', 'before'):
+        if field in filters:
+            try:
+                datetime.strptime(filters[field], '%Y-%m-%d')
+            except ValueError:
+                raise ChatFileError(f'Invalid {field}: date. Use YYYY-MM-DD.')
+    if filters.get('has', '').casefold() not in ('', 'attachment', 'reaction'):
+        raise ChatFileError('Valid has: filters: attachment or reaction.')
+    if filters.get('in', '').casefold() not in ('', 'replies'):
+        raise ChatFileError('Valid in: filter: replies.')
+    results = []
+    for message in messages:
+        if 'from' in filters and filters['from'].casefold().lstrip('@') not in (
+                message['user'].casefold(), short_id(message.get('sender_key'))):
+            continue
+        if words and not all(term.casefold() in message['text'].casefold()
+                             for term in words):
+            continue
+        if filters.get('has') == 'attachment' and not message.get('attachment'):
+            continue
+        if filters.get('has') == 'reaction' and not message.get('reactions'):
+            continue
+        if filters.get('in') == 'replies' and not message.get('reply_to'):
+            continue
+        if 'after' in filters or 'before' in filters:
+            stamp = message.get('issued_at')
+            if not isinstance(stamp, int):
+                continue
+            date = datetime.fromtimestamp(stamp).strftime('%Y-%m-%d')
+            if 'after' in filters and date < filters['after']:
+                continue
+            if 'before' in filters and date > filters['before']:
+                continue
+        results.append(message)
+    return results[-20:]
+
+
+def build_threads(messages, count, muted, cleared):
+    """Group signed reply events under the parent, keeping recent threads first."""
+    by_id = {m['id']: m for m in messages}
+    roots = {}
+    groups = {}
+    for msg in messages:
+        current = msg
+        seen = set()
+        while (current.get('reply_to') in by_id and
+               current.get('reply_to') not in seen):
+            seen.add(current['id'])
+            current = by_id[current['reply_to']]
+        root_id = current['id']
+        roots[msg['id']] = root_id
+        groups.setdefault(root_id, []).append(msg)
+    candidates = []
+    for root_id, nodes in groups.items():
+        parent = by_id[root_id]
+        available = [m for m in nodes if m['number'] > cleared and
+                     m['user'].casefold() not in muted]
+        if not available:
+            continue
+        replies = [m for m in available if m['id'] != root_id]
+        candidates.append((max(m['number'] for m in available), {
+            'root': parent, 'replies': replies[-40:],
+            'total_replies': len(replies),
+        }))
+    candidates.sort(key=lambda item: item[0])
+    return [group for _, group in candidates[-count:]]
+
+
 def snapshot():
     global next_popup, running, update_notice_shown
     try:
@@ -935,7 +1018,10 @@ def snapshot():
             shown.append({'id': 'read-error', 'number': None, 'private': True,
                           'time': time.strftime('%H:%M:%S'), 'user': 'System',
                           'text': error, 'reactions': {}})
+        threads = build_threads(a['messages'], visible_count,
+                                muted_names, clear_through)
         return JSON({'username': username, 'messages': shown,
+                     'threads': threads,
                      'popup': next_popup,
                      'running': running,
                      'my_verified': identity_public in a['verified']})
@@ -1078,12 +1164,15 @@ def submit_message(raw):
                 return snapshot()
             if command in ('/search', '/find'):
                 if not arg:
-                    note('Usage: /search <word or phrase>')
+                    note('Search examples: /search homework  |  '
+                         '/search from:Alex after:2026-10-01  |  '
+                         '/search has:attachment  |  /search in:replies "quiz"')
                 else:
-                    hits = [m for m in a['messages'] if arg.casefold() in m['text'].casefold()][-10:]
-                    note('SEARCH RESULTS\n' + ('\n'.join(
-                        f'#{m["number"]} [{m["time"]}] {m["user"]}: {m["text"][:90]}'
-                        for m in hits) or 'No matches.'))
+                    hits = search_messages(arg, a['messages'])
+                    note('SEARCH RESULTS (' + str(len(hits)) + ' most recent matches)\n'
+                         + ('\n'.join(
+                            f'#{m["number"]} [{m["time"]}] {m["user"]}: {m["text"][:110]}'
+                            for m in hits) or 'No matches.'))
                 return snapshot()
             if command == '/last':
                 if arg.isdecimal() and 1 <= int(arg) <= 100:
