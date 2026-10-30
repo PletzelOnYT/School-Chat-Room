@@ -327,7 +327,12 @@ def recover_existing(path, events, private_directory):
         fh.write(data)
         fh.truncate()
         fh.flush()
-        os.fsync(fh.fileno())
+        try:
+            os.fsync(fh.fileno())
+        except OSError:
+            # Some Google Drive FUSE mounts do not implement fsync().
+            # The readback below is the actual verification step.
+            pass
     raw,check=read_shared(path)
     if check!=events:
         raise IOError("recovery write could not be verified")
@@ -423,6 +428,7 @@ class Guardian:
             except (FileNotFoundError,ValueError,OSError):
                 reason="Missing or invalid shared chat.json: "+str(exc)
                 incident(self.db,reason,action="restore_attempt")
+                self.backup()
                 self.log("ALERT: "+reason)
                 if isinstance(exc,FileNotFoundError):
                     result=restore_trash_by_id(self.drive_file_id)
@@ -500,6 +506,7 @@ class Guardian:
             self.log(f"Accepted {len(additions)} signed new events")
         if changed:
             if not self.repair:
+                self.backup()
                 return "needs_repair"
             # Re-read to avoid clobbering a newer, valid concurrent save.
             # This is still a best-effort check, NOT a transaction.
