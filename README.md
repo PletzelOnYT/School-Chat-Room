@@ -6,13 +6,15 @@ A lightweight Google Colab messaging app. Your existing shared Google Drive **`c
 
 - Fast terminal-inspired interface: green names, cyan timestamps, one blue ☑ self-claimed Verified badge
 - Clickable emoji reactions and removable reactions
-- Expandable reply threads, including nested replies
+- Replies shown directly beneath their parent message, including nested replies
 - Advanced search by name, date, reactions and replies
 - Mobile-friendly input, scrollable history, and expanded/full-screen controls
 - Signed private identity persisted across restarts in the original `.schoolchat/identity.json` (path retained to **preserve existing IDs**)
 - Google account username prefix used when already available without extra school-restricted login; otherwise a short unique Guest label
 - `/rename` only when Verified; private `/vf` self-check command, not advertised in help
-- Basic spam/duplicate filtering
+- Much stronger multi-signal keysmash/repetition filtering, plus duplicate and rate checks
+- Rapid sends queued in order instead of disabling the text box
+- Byte-minimal in-place JSON array tail writes and a private sender retry outbox
 
 ## How to run
 
@@ -31,7 +33,11 @@ A lightweight Google Colab messaging app. Your existing shared Google Drive **`c
 
 ## Important storage limitation
 
-`chat.json` is a JSON array. A raw append after its closing `]` would make the file invalid. Since Colab's Google Drive mount has no reliable **cross-user transactional append**, this version must read, add an event and rewrite the shared JSON file. It retries and verifies writes, but **simultaneous saves from multiple Colab sessions can still overwrite messages, reactions or profile changes**. This is a known limitation of the single-file choice.
+`chat.json` is a JSON array. A raw append after its closing `]` would make the file invalid. In v5.22, the client instead opens the **existing file in read/write binary mode**, locates its final closing bracket, and inserts only the new signed JSON event plus a new closing bracket. **It does not reserialize the whole message history.**
+
+This is **not an atomic multi-user append**. Colab's Google Drive mount does not provide cross-user transactions or distributed locking. If two sessions write simultaneously, Drive may still drop updates or produce a partial/conflicting version. The client verifies saved event IDs and keeps a limited recent sender outbox at `.schoolchat/message_outbox.json` in **that user's private My Drive**. During active sessions it retries lost signed events. This reduces losses but does not guarantee delivery, especially after another user writes concurrently or if Drive is offline.
+
+If `chat.json` becomes invalid JSON, the app refuses to overwrite it automatically. Restore a prior revision with **Google Drive's version history** rather than letting multiple clients overwrite broken data. Keep your own backup of important messages.
 
 Do not use this app to exchange confidential information. Anyone who has Editor access to the shared file can modify or erase it. The blue checkmark is self-claimed, not verified Google identity.
 
