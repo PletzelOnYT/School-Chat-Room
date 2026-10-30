@@ -925,6 +925,26 @@ def ensure_account_profile():
 ensure_account_profile()
 
 
+def resolve_verified_target(query, state):
+    """Match a unique display name, @name, or 12-character chat identity ID.
+
+    Never resolve from untrusted text messages or partial nickname substrings.
+    """
+    if not isinstance(query, str):
+        return None
+    target = query.strip()
+    if target.startswith('@'):
+        target = target[1:]
+    if not target:
+        return None
+    folded = target.casefold()
+    matches = [
+        key for key, display in state['display_names'].items()
+        if display.casefold() == folded or short_id(key).casefold() == folded
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
 def claim_self_verified():
     """Set one blue checkmark for the calling signed identity, never anyone else."""
     current = latest_analysis()
@@ -1163,10 +1183,36 @@ def submit_message(raw):
 
         try:
             if command == '/vf':
-                # Hidden from all command/help menus. Only the issuer's own
-                # signed identity is eligible; no chat message is broadcast.
+                # Explicit local self-claim. Drive mounting alone is never proof.
                 if not claim_self_verified():
                     note('Could not save the checkmark to shared chat.json. Retry.')
+                return snapshot()
+            if command == '/uvf':
+                # Intentionally unlisted in all help/command menus. Any
+                # authenticated chat identity can revoke anyone's checkmark.
+                # The target can later use /vf to claim it again.
+                current = latest_analysis()
+                target_key = resolve_verified_target(arg, current)
+                if target_key is None:
+                    note('User not found or ambiguous. Use the exact @name '
+                         'or a 12-character identity ID from /users.')
+                    return snapshot()
+                target_name = current['display_names'].get(target_key, arg)
+                if target_key not in current['verified']:
+                    note(target_name + ' does not currently have a checkmark.')
+                    return snapshot()
+                evt = event_now('role', role='verified',
+                                target_key=target_key, active=False,
+                                unverify_anyone=True, verification_version=2)
+                if write_event(evt):
+                    result = latest_analysis()
+                    if target_key not in result['verified']:
+                        note('Blue checkmark removed from ' + target_name + '.')
+                    else:
+                        note('Revocation saved, but Drive has not yet '
+                             'confirmed the new badge state.')
+                else:
+                    note('Could not save the checkmark revocation. Retry.')
                 return snapshot()
             if command in ('/help', '/hellp'):
                 popup('MESSAGING APP COMMANDS', HELP_TEXT)
