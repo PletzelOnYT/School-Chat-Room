@@ -15,6 +15,7 @@ names = {
     "analyze", "valid_username", "valid_incoming_message", "is_gibberish",
     "gibberish_reason",
     "guest_digest", "fallback_username", "short_id",
+    "resolve_verified_target",
 }
 functions = [node for node in tree.body
              if isinstance(node, ast.FunctionDef) and node.name in names]
@@ -53,7 +54,7 @@ class VerifiedOnlyTests(unittest.TestCase):
             self.evt("first", sender_key=self.a, user="Guest-101", text="hello"),
             self.evt("claim", kind="role", sender_key=self.a,
                      role="verified", target_key=self.a, active=True,
-                     self_verified=True),
+                     self_verified=True, verification_version=2),
             self.evt("second", sender_key=self.a, user="Guest-101", text="after"),
         ]
         state = env["analyze"](entries)
@@ -85,7 +86,7 @@ class VerifiedOnlyTests(unittest.TestCase):
         state = env["analyze"]([
             self.evt("spoof", kind="role", sender_key=self.a,
                      role="verified", target_key=self.b, active=True,
-                     self_verified=True),
+                     self_verified=True, verification_version=2),
             self.evt("other", kind="role", sender_key=self.a,
                      role="verified", target_key=self.a, active=True,
                      self_verified=False),
@@ -110,6 +111,70 @@ class VerifiedOnlyTests(unittest.TestCase):
         state = env["analyze"]([base, spoof, claim, valid])
         self.assertEqual(state["display_names"][self.a], "CoolName")
 
+    def test_no_automatic_or_legacy_verification(self):
+        legacy = self.evt("old-auto", kind="role", sender_key=self.a,
+                          role="verified", target_key=self.a, active=True,
+                          self_verified=True)
+        data = env["analyze"]([legacy])
+        self.assertNotIn(self.a, data["verified"])
+        self.assertIn("if command == '/vf':", source)
+        self.assertNotIn("if os.path.ismount('/content/drive'):\n    try:\n        claim_self_verified()", source)
+
+    def test_any_signed_user_can_unverify_any_signed_user(self):
+        entries = [
+            self.evt("claim", kind="role", sender_key=self.a,
+                     role="verified", target_key=self.a, active=True,
+                     self_verified=True, verification_version=2),
+            self.evt("revoke", kind="role", sender_key=self.b,
+                     role="verified", target_key=self.a, active=False,
+                     unverify_anyone=True, verification_version=2),
+        ]
+        result = env["analyze"](entries)
+        self.assertNotIn(self.a, result["verified"])
+        # A subsequent explicit /vf restores the checkmark.
+        entries.append(self.evt("again", kind="role", sender_key=self.a,
+                                role="verified", target_key=self.a,
+                                active=True, self_verified=True,
+                                verification_version=2))
+        self.assertIn(self.a, env["analyze"](entries)["verified"])
+
+    def test_bad_revoke_or_fake_verify_is_ignored(self):
+        events = [
+            self.evt("new-claim", kind="role", sender_key=self.a,
+                     role="verified", target_key=self.a, active=True,
+                     self_verified=True, verification_version=2),
+            self.evt("wrong-version", kind="role", sender_key=self.b,
+                     role="verified", target_key=self.a, active=False,
+                     unverify_anyone=True),
+            self.evt("wrong-role", kind="role", sender_key=self.b,
+                     role="moderator", target_key=self.a, active=False,
+                     unverify_anyone=True, verification_version=2),
+            self.evt("unsigned", kind="role", sender_key=self.b,
+                     role="verified", target_key=self.a, active=False,
+                     unverify_anyone=True, verification_version=2,
+                     sig="bad"),
+        ]
+        self.assertIn(self.a, env["analyze"](events)["verified"])
+        events.append(self.evt("forged-self", kind="role", sender_key=self.b,
+                               role="verified", target_key=self.a,
+                               active=True, self_verified=True,
+                               verification_version=2))
+        self.assertNotIn(self.b, env["analyze"](events)["verified"])
+
+    def test_revoke_resolution_is_exact_and_disambiguated(self):
+        state = {"display_names": {
+            self.a: "Alex",
+            self.b: "Emma Marie",
+        }}
+        resolver = env["resolve_verified_target"]
+        self.assertEqual(resolver("alex", state), self.a)
+        self.assertEqual(resolver("@Emma Marie", state), self.b)
+        self.assertEqual(resolver(self.b[:12], state), self.b)
+        self.assertIsNone(resolver("Emm", state))
+        self.assertIsNone(resolver("", state))
+        self.assertIsNone(resolver("Alex", {
+            "display_names": {self.a: "Alex", self.b: "alex"}}))
+
     def test_name_conflicts_do_not_merge_identity(self):
         events = [
             self.evt("first", kind="profile", sender_key=self.a,
@@ -133,6 +198,8 @@ class VerifiedOnlyTests(unittest.TestCase):
                           and any(isinstance(t, ast.Name) and t.id == "HELP_TEXT"
                                   for t in node.targets))
         self.assertNotIn("/vf", ast.literal_eval(help_const))
+        self.assertNotIn("/uvf", ast.literal_eval(help_const))
+        self.assertIn("if command == '/uvf':", source)
         for absent in (
             "OWNER_AUTH_URL", "SERVER_PUBLIC_KEY", "call_owner_server",
             "call_moderator_server", "read_remote_role_events",
