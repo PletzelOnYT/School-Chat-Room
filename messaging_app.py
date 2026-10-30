@@ -470,7 +470,9 @@ def gibberish_reason(text):
         return 'Keyboard-row flood'
     # Ignore punctuation between repeats (asdasd-asdasd-asdasd...).
     compact = re.sub(r'[\s\W_]+', '', raw, flags=re.UNICODE)
-    if len(compact) >= 30 and re.search(r'([a-z]{2,9}?)\1{4,}', compact):
+    if len(compact) >= 30 and (
+            re.search(r'([a-z]{2,9}?)\1{4,}', compact) or
+            (len(compact) >= 40 and re.search(r'([a-z]{8,24}?)\1{2,}', compact))):
         return 'Repeated keyboard pattern'
     tokens = re.findall(r"[\w']+", raw, flags=re.UNICODE)
     if len(tokens) >= 9:
