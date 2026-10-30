@@ -1,4 +1,4 @@
-# @title School ChatRoom v5.3 — School terminal chat with Vercel owner login
+# @title School ChatRoom v5.6 — School terminal chat with Vercel owner login
 """Google Colab school chat — the same shared Google Drive chat.json.
 
 The ONLY hosted API is for checking the owner's key and signing role grants.
@@ -79,6 +79,7 @@ file_lock = threading.RLock()
 state_lock = threading.RLock()
 started_at = time.monotonic()
 last_message_time = 0.0
+recent_sent_messages = []  # Only local: (timestamp, normalized text)
 running = True
 owner_access_key = None  # Only in memory; never written to chat.json or private Drive.
 local_messages = []  # Private, inline System messages, NEVER sent to Drive.
@@ -101,23 +102,35 @@ def b64decode(value):
 
 
 def load_identity():
-    """A locally generated, persistent private key, stored in each student's OWN Drive."""
+    """Keep a stable ID across renames and Colab restarts, using OWN Drive.
+
+    IP addresses are shared/changeable; Colab OS usernames are usually all
+    'root'. We never silently collect school email addresses or IPs.
+    Only possession of this locally stored private key establishes identity.
+    """
     os.makedirs(PRIVATE_FOLDER, exist_ok=True)
-    if os.path.exists(PRIVATE_IDENTITY_PATH):
-        with open(PRIVATE_IDENTITY_PATH, encoding='utf-8') as f:
-            obj = json.load(f)
-        key = Ed25519PrivateKey.from_private_bytes(b64decode(obj['private_key']))
-    else:
+    if not os.path.exists(PRIVATE_IDENTITY_PATH):
         key = Ed25519PrivateKey.generate()
         raw = key.private_bytes(serialization.Encoding.Raw,
                                 serialization.PrivateFormat.Raw,
                                 serialization.NoEncryption())
         pub = key.public_key().public_bytes(serialization.Encoding.Raw,
                                              serialization.PublicFormat.Raw)
-        # Exclusive-create only; don't accidentally overwrite a private identity.
-        with open(PRIVATE_IDENTITY_PATH, 'x', encoding='utf-8') as f:
-            json.dump({'type': 'school-chat-identity-v1',
-                       'private_key': b64(raw), 'public_key': b64(pub)}, f, indent=2)
+        try:
+            # Multiple Colab tabs can start simultaneously. Never overwrite
+            # the key already created by another session on this Drive.
+            with open(PRIVATE_IDENTITY_PATH, 'x', encoding='utf-8') as f:
+                json.dump({'type': 'school-chat-identity-v1',
+                           'private_key': b64(raw), 'public_key': b64(pub)}, f, indent=2)
+        except FileExistsError:
+            pass
+    try:
+        with open(PRIVATE_IDENTITY_PATH, encoding='utf-8') as f:
+            obj = json.load(f)
+        key = Ed25519PrivateKey.from_private_bytes(b64decode(obj['private_key']))
+    except Exception as exc:
+        raise ChatFileError('Your private identity file could not be read. '
+                            'Do NOT delete it: it controls your permanent chat ID.') from exc
     public = b64(key.public_key().public_bytes(serialization.Encoding.Raw,
                                                serialization.PublicFormat.Raw))
     return key, public
@@ -191,6 +204,8 @@ RESERVED_USERNAMES = {
     'schoolchat', 'security', 'support',
 }
 GENERIC_USERNAMES = {'colabuser', 'user', 'guest'}
+# Guests are generated from each signed identity. They cannot be claimed manually.
+GUEST_NAME_RE = re.compile(r'(?i)^guest-[0-9a-f]{8,12}$')
 
 
 def valid_username(value):
@@ -204,7 +219,7 @@ def valid_username(value):
     clean = unicodedata.normalize('NFKC', value)
     if clean != clean.strip() or not 1 <= len(clean) <= 32:
         return None
-    if clean.casefold() in RESERVED_USERNAMES:
+    if clean.casefold() in RESERVED_USERNAMES | GENERIC_USERNAMES or GUEST_NAME_RE.fullmatch(clean):
         return None
     # Unicode format chars include invisible / bidirectional control codes.
     if any(unicodedata.category(ch).startswith('C') for ch in clean):
@@ -220,10 +235,12 @@ def valid_username(value):
 
 def fallback_username(sender):
     """Cannot impersonate a known name using malformed/untrusted metadata."""
-    return 'Guest-' + short_id(sender)[:8] if sender else 'LegacyUser'
+    return 'Guest-' + short_id(sender) if sender else 'LegacyUser'
 
 
-username = valid_username(username) or 'ColabUser'
+# Colab returns the same operating-system username for almost every student.
+# A unique Guest ID is used instead, based on the persistent private identity.
+username = valid_username(username) or fallback_username(identity_public)
 
 
 def canonical(event):
@@ -343,26 +360,25 @@ def event_now(kind, **fields):
 
 
 def is_gibberish(text):
-    """Preserve original anti-spam filtering for regular chat."""
+    """Low-false-positive flood filter, not a dictionary/spelling checker.
+
+    Ordinary slang, multilingual text, links, code, punctuation, emojis, names,
+    and even short consonant-heavy words are allowed. Block only obvious
+    character/pattern floods; separate cooldown and length limits still apply.
+    """
     if not text or not text.strip():
         return False
-    text_len = len(text)
-    clean = re.sub(r'[^a-zA-Z]', '', text).lower()
-    length = len(clean)
-    if text_len >= 6 and (text_len - length) / text_len > 0.45:
+    # Twelve identical characters/emojis in a row is an obvious flood;
+    # five periods, elongated 'noooo', smileys, etc. are fine.
+    if re.search(r'(.)\1{11,}', text, re.DOTALL):
         return True
-    if text_len < 5:
-        return False
-    if re.search(r'(.)\1{3,}', text):
+    # Repeated keyboard patterns: e.g. asdfasdfasdf... or abcabcabc...
+    # Avoid flagging small, legitimate repeating expressions.
+    if len(text) >= 32 and re.search(r'(.{2,8}?)\1{7,}', text, re.DOTALL):
         return True
-    if length >= 8 and len(set(clean)) / length < 0.35:
+    # One word pasted 12+ times in succession, including spaces/newlines.
+    if re.search(r'(?i)(?<!\w)([\w]{1,24})(?:\s+\1){11,}(?!\w)', text):
         return True
-    if length >= 5:
-        vowels = sum(ch in 'aeiouy' for ch in clean)
-        if not vowels or vowels / length < 0.15 or vowels / length > 0.85:
-            return True
-        if re.search(r'[^aeiouy]{4,}', clean):
-            return True
     return False
 
 
@@ -382,8 +398,8 @@ def analyze(events):
     seen_ids = set()
     post_number = 0
     reaction_state = {}
-    first_seen = {}
-    name_claims = {}
+    claim_order = {}  # (identity, normalized name) -> first signed appearance
+    seen_aliases = {}  # Signed aliases owned by a stable identity (for diagnostics)
     now = time.time()
 
     for index, e in enumerate(events):
@@ -397,14 +413,16 @@ def analyze(events):
         signed = valid_signature(e)
         sender = str(e.get('sender_key', '')) if signed else None
         from_server = bool(SERVER_PUBLIC_KEY) and sender == SERVER_PUBLIC_KEY and signed
-        # Identity aliases come only from valid, SIGNED user events, not from
-        # arbitrary JSON or a forged role grant.
+        # Signed people are identified by public keys, NOT the local Colab login.
+        # /rename writes a signed, hidden profile event, so nicknames persist
+        # across restarts without requiring the next public chat message.
         clean_name = valid_username(e.get('user'))
-        if signed and not from_server and clean_name and kind in ('message', 'reaction'):
-            identities[sender] = clean_name
-            if sender not in first_seen:
-                first_seen[sender] = index
-            name_claims.setdefault(clean_name.casefold(), set()).add(sender)
+        if signed and not from_server and kind in ('message', 'reaction', 'profile'):
+            identities.setdefault(sender, fallback_username(sender))
+            if clean_name:
+                identities[sender] = clean_name
+                seen_aliases.setdefault(sender, set()).add(clean_name)
+                claim_order.setdefault((sender, clean_name.casefold()), index)
 
         if kind == 'role':
             if not signed:
@@ -472,45 +490,38 @@ def analyze(events):
         messages.append(item)
         by_number[post_number] = item
 
-    # Protect registered names on the receiving side, even when someone
-    # modifies their personal notebook to bypass the /rename checks.
-    # A signed OWNER always wins their current nickname; then moderator,
-    # verified, and finally earliest signed claimant. This is a client-side
-    # display defense, not an authoritative name registry (Drive is editable).
-    name_owners = {}
-    for lower, claimants in name_claims.items():
-        if len(claimants) < 2:
-            continue
-        if lower in GENERIC_USERNAMES and not any(
-                pub in owners or pub in moderators or pub in verified
-                for pub in claimants):
-            continue
-        name_owners[lower] = min(
-            claimants,
-            key=lambda pub: (
-                0 if pub in owners else 1 if pub in moderators else
-                2 if pub in verified else 3,
-                first_seen.get(pub, 10**18), pub
-            )
-        )
-
-    # In addition reserve every privileged user's current name, even if an
-    # imitator has not posted that name until later.
+    # One current display name per signed identity; only one identity can own
+    # any nickname (case-insensitive / Unicode-normalized). This is enforced
+    # on the receiver, even if a student edits their own Python notebook.
+    # First signed claimant wins; OWNER status does not steal a student's name.
+    # Concurrent Google Drive edits aren't atomic: this provides consistent
+    # display, not a tamper-proof server-side name registry.
+    name_claims = {}
     for pub, name in identities.items():
-        if pub not in owners and pub not in moderators and pub not in verified:
-            continue
-        lower = name.casefold()
-        previous = name_owners.get(lower)
-        if previous is None or (pub in owners and previous not in owners) or (
-                pub in moderators and previous not in owners and previous not in moderators):
-            name_owners[lower] = pub
+        if not GUEST_NAME_RE.fullmatch(name):
+            name_claims.setdefault(name.casefold(), []).append(pub)
+    name_owners = {
+        normalized: min(claimants,
+            key=lambda pub: (claim_order.get((pub, normalized), 10**18), pub))
+        for normalized, claimants in name_claims.items()
+    }
+    display_names = {}
+    for pub, name in identities.items():
+        display_names[pub] = (name if name_owners.get(name.casefold()) == pub
+                               else fallback_username(pub))
 
+    # Display CURRENT signed aliases across message history, not a stale
+    # 'ColabUser' from a different session. Legacy unsigned history is kept
+    # visible, but cannot acquire role badges or impersonate a signed user.
     for msg in messages:
-        owner_of_name = name_owners.get(msg['user'].casefold())
-        if owner_of_name is not None and owner_of_name != msg['sender_key']:
-            msg['user'] = fallback_username(msg['sender_key'])
-            msg['name_conflict'] = True
+        sender = msg['sender_key']
+        if sender:
+            msg['user'] = display_names.get(sender, fallback_username(sender))
+            msg['name_conflict'] = False
         else:
+            original = msg['user']
+            if original.casefold() in name_owners:
+                msg['user'] = original + ' (legacy)'
             msg['name_conflict'] = False
 
     reaction_totals = {}
@@ -526,7 +537,8 @@ def analyze(events):
         msg['owner'] = bool(sender and sender in owners)
         msg['moderator'] = bool(sender and sender in moderators)
     return dict(messages=messages, by_number=by_number,
-                identities=identities, owners=owners,
+                identities=identities, seen_aliases=seen_aliases, display_names=display_names,
+                name_owners=name_owners, owners=owners,
                 moderators=moderators, verified=verified)
 
 
@@ -568,9 +580,10 @@ def popup(title, content):
 HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /help or /hellp            Open commands in a separate window
 /rules                     Chat rules
-/whoami                    Your name, identity ID and roles
-/users                     Students seen posting signed messages
+/whoami or /id             Your permanent signed identity ID and roles
+/users                     Unique student identities and display names
 /verified                  List verified identities
+/rolecheck <name or ID>    Check a student's effective shared roles
 /mentions                  Find your recent @mentions
 /search <text>             Search chat (/find also works)
 /reply <#> <message>        Reply to a numbered post
@@ -587,6 +600,7 @@ HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /owner                     Owner login (asks for private key)
 /exit                      Close the chat
 
+Use /rename <name> to claim a unique nickname. Commands and role tags cannot be nicknames.
 @mention a username in a normal message to highlight it for that person.
 Numbers (#) appear next to chat messages. Moderator role changes are saved
 into the SAME shared chat.json.'''
@@ -596,9 +610,11 @@ MOD_HELP = '''MODERATOR COMMANDS (signed changes, visible to everyone)
 /unverify <name or ID>      Revoke Verified badge
 /addmod <name or ID>        Owner only: assign Moderator role
 /removemod <name or ID>     Owner only: revoke Moderator role
+/rolecheck <name or ID>    Check the exact effective roles for an identity
 /owner                     Privately authenticate as Owner
 
-For ambiguous nicknames, use the unique ID from /users. Roles are tied
+Use /whoami on the OTHER student's Colab to confirm their ID before you grant a role.
+Use the unique ID from /users to avoid verifying the wrong student. Roles are tied
 to a private identity key, never to a changeable display name.'''
 
 RULES = '''SCHOOL CHAT RULES
@@ -611,23 +627,45 @@ RULES = '''SCHOOL CHAT RULES
 
 
 def latest_analysis():
-    return analyze(read_messages())
+    global username
+    result = analyze(read_messages())
+    # Keep the input/header nickname equal to the receiver-verified nickname.
+    # If a competing student already owns that name, both the header and all
+    # future messages use this identity's unique Guest ID instead.
+    username = result['display_names'].get(identity_public, fallback_username(identity_public))
+    return result
 
 
 def resolve_target(arg, a):
-    """Find a signed identity by stable 12-digit ID or unique current nickname."""
-    needle = arg.strip().lstrip('@').casefold()
-    if not needle:
+    """Resolve a stable identity, never infer moderator rights from a name.
+
+    Accept /users' 12-character hex ID (or a unique >=8-character prefix),
+    the current unique nickname, or a Guest-<ID>. Refuse ambiguous names and
+    require a signed identity; profile renames never change the target key.
+    """
+    needle = arg.strip()
+    if needle.startswith('@'):
+        needle = needle[1:]
+    needle_lower = needle.casefold()
+    if not needle_lower:
         return None, 'Provide a username or ID. Use /users to find it.'
-    ids = [(pub, name) for pub, name in a['identities'].items() if short_id(pub) == needle]
-    if not ids:
-        ids = [(pub, name) for pub, name in a['identities'].items()
-               if name.casefold() == needle]
-    if not ids:
-        return None, 'No signed identity found. Ask them to send a new message, then use /users.'
-    if len(ids) > 1:
-        return None, 'Several students use that name. Choose their unique ID from /users.'
-    return ids[0][0], None
+    people = a['display_names']
+    # An ID is much safer than a nickname, and the name can later change.
+    id_needle = needle_lower.removeprefix('guest-')
+    if re.fullmatch(r'[0-9a-f]{8,12}', id_needle):
+        ids = [pub for pub in people if short_id(pub).startswith(id_needle)]
+        if len(ids) == 1:
+            return ids[0], None
+        if len(ids) > 1:
+            return None, 'That ID prefix matches multiple students. Use the full 12-character ID.'
+    matches = [pub for pub, name in people.items()
+               if name.casefold() == needle_lower]
+    if len(matches) == 1:
+        return matches[0], None
+    if len(matches) > 1:
+        return None, 'Several signed students match that name. Use the ID from /users.'
+    return None, ('No signed student found for that name/ID. Ask them to open '
+                  'the chat, send one message, and copy their ID from /whoami.')
 
 
 def is_mentioned(text, name):
@@ -672,23 +710,34 @@ def snapshot():
 
 def send_message(body, reply_to=None):
     global last_message_time
-    if time.time() - last_message_time < COOLDOWN_SECONDS:
-        note('[System]: Slow down! You are typing too fast.')
+    now = time.time()
+    if now - last_message_time < COOLDOWN_SECONDS:
+        note('Slow down! Wait a moment before sending another message.')
         return False
     if len(body) > MESSAGE_LIMIT:
-        note(f'[System]: Maximum message length is {MESSAGE_LIMIT} characters.')
+        note(f'Maximum message length is {MESSAGE_LIMIT} characters.')
         return False
     if is_gibberish(body):
-        note('[System]: Message blocked. Gibberish/Spam detected.')
+        note('Message blocked: repeated characters/pattern flood. Normal text is allowed.')
+        return False
+    # Only block a *fifth* duplicate in 15 seconds. A couple of repeated
+    # replies such as "hi" are normal and should not be misclassified.
+    recent_sent_messages[:] = [(t, value) for t, value in recent_sent_messages
+                               if now - t <= 15]
+    normalized_body = ' '.join(body.split()).casefold()
+    if sum(1 for _, value in recent_sent_messages if value == normalized_body) >= 4:
+        note('Repeated-message flood blocked. You can send a different message.')
         return False
     evt = event_now('message', text=body)
     if reply_to:
         evt['reply_to'] = reply_to
         evt = sign_event({k: v for k, v in evt.items() if k != 'sig'})
     ok = write_event(evt)
-    last_message_time = time.time()
-    if not ok:
-        note('[System]: Delivery could not be confirmed. Check history before retrying.')
+    if ok:
+        last_message_time = now
+        recent_sent_messages.append((now, normalized_body))
+    else:
+        note('Delivery could not be confirmed. Check history before retrying.')
     return ok
 
 
@@ -710,13 +759,19 @@ def submit_message(raw):
                 note('Cannot check nickname right now: ' + str(exc))
                 return snapshot()
             other_names = {
-                pub: name for pub, name in current['identities'].items()
+                pub: name for pub, name in current['display_names'].items()
                 if pub != identity_public and name.casefold() == new_name.casefold()
             }
-            if other_names and new_name.casefold() not in GENERIC_USERNAMES:
-                note('Nickname already claimed by another signed identity. Choose another name.')
+            if other_names:
+                note('That username is already taken. Choose a different name.')
                 return snapshot()
+            # Reserving the name via a signed event lets other clients and
+            # fresh Colab sessions see the same username without a public post.
+            previous_name = username
             username = new_name
+            if not write_event(event_now('profile')):
+                username = previous_name
+                note('Could not save your new name. Please try again.')
             return snapshot()
         command, _, arg = cleaned.partition(' ')
         command, arg = command.casefold(), arg.strip()
@@ -751,16 +806,17 @@ def submit_message(raw):
             a = latest_analysis()
             me_owner = identity_public in a['owners']
             me_mod = identity_public in a['moderators'] or me_owner
-            if command == '/whoami':
+            if command in ('/whoami', '/id'):
                 roles = ((['Owner'] if me_owner else []) +
                          (['Moderator'] if me_mod and not me_owner else []) +
                          (['Verified'] if identity_public in a['verified'] else []))
                 note('Name: ' + username + '\nYour identity ID: ' + short_id(identity_public) +
                      '\nRoles: ' + (', '.join(roles) or 'Member') +
-                     '\nYour private key is in your own Google Drive.')
+                     '\nThis ID does not change when you rename yourself. '
+                     'Keep your Google Drive .schoolchat/identity.json private and backed up.')
                 return snapshot()
             if command in ('/users', '/verified'):
-                people = sorted(a['identities'].items(), key=lambda pair: pair[1].casefold())
+                people = sorted(a['display_names'].items(), key=lambda pair: pair[1].casefold())
                 if command == '/verified':
                     people = [(pub, name) for pub, name in people if pub in a['verified']]
                 lines = [
@@ -785,8 +841,12 @@ def submit_message(raw):
                 return snapshot()
             if command in ('/verify', '/unverify', '/addmod', '/removemod'):
                 is_owner_command = command in ('/addmod', '/removemod')
-                if (is_owner_command and not (me_owner and owner_access_key)) or (not is_owner_command and not me_mod):
-                    note('Insufficient permissions. Owner: type /owner to sign in first.')
+                if is_owner_command and not (me_owner and owner_access_key):
+                    note('Owner login needed. Enter /owner and your private key first, '
+                         'then try this command again.')
+                    return snapshot()
+                if not is_owner_command and not me_mod:
+                    note('Moderator permission required. Owner: use /owner first.')
                     return snapshot()
                 target, error = resolve_target(arg, a)
                 if error:
@@ -794,16 +854,44 @@ def submit_message(raw):
                     return snapshot()
                 role = 'moderator' if is_owner_command else 'verified'
                 active = command in ('/verify', '/addmod')
-                # Server grants all owner actions, so public Colab code cannot
-                # simply forge a moderator by returning status=granted.
+                target_name = a['display_names'].get(target, fallback_username(target))
+                # An OWNER authorization is signed by Vercel; regular moderators
+                # can sign verified grants themselves with persistent identities.
                 if me_owner and owner_access_key:
                     grant = call_owner_server('role', owner_access_key,
-                                               target_key=target, role=role, active=active)
+                                              target_key=target, role=role, active=active)
                 else:
                     grant = event_now('role', role=role, target_key=target, active=active)
-                ok = write_event(grant)
-                note(f'{role.title()} {"assigned" if active else "revoked"} for ID {short_id(target)}.'
-                     if ok else 'Role change could not be confirmed.')
+                if not write_event(grant):
+                    note('Could not confirm the role change in shared chat.json. Retry.')
+                    return snapshot()
+                # Do not report success on a mere file append. Read and check
+                # the actual role state that all v5.6 clients will calculate.
+                updated = latest_analysis()
+                current_role_set = updated['moderators'] if is_owner_command else updated['verified']
+                effective = target in current_role_set
+                if effective != active:
+                    note('Role event was saved, but has not taken effect. '
+                         'Check /whoami, /users and the Vercel public key. '
+                         f'Target: {target_name} (ID {short_id(target)}).')
+                else:
+                    note(f'{role.title()} {"assigned" if active else "revoked"} '
+                         f'for {target_name} (ID {short_id(target)}). '
+                         'The recipient must run the latest GitHub chat code '
+                         'on THEIR own Google Drive identity.')
+                return snapshot()
+            if command == '/rolecheck':
+                target, error = resolve_target(arg, a)
+                if error:
+                    note(error)
+                    return snapshot()
+                name = a['display_names'].get(target, fallback_username(target))
+                labels = (['Owner'] if target in a['owners'] else []) + \
+                         (['Moderator'] if target in a['moderators'] else []) + \
+                         (['Verified'] if target in a['verified'] else [])
+                note(f'{name} | ID {short_id(target)} | Roles: '
+                     + (', '.join(labels) or 'Member')
+                     + '\nNames are not identities: have this student compare /whoami ID.')
                 return snapshot()
             if command == '/mentions':
                 hits = [m for m in a['messages'] if is_mentioned(m['text'], username)][-10:]
