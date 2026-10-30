@@ -3,6 +3,7 @@ on:
   push:
     paths:
       - 'school_chat.py'
+      - 'tests/**'
       - '.github/workflows/check-python.yml'
   pull_request:
     paths:
@@ -19,3 +20,5 @@ jobs:
           python-version: '3.12'
       - name: Check chat syntax without running Colab
         run: python -m py_compile school_chat.py
+      - name: Test roles, bans, and spam checks
+        run: python -m unittest discover -s tests -v
