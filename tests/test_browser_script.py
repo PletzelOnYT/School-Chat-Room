@@ -24,15 +24,25 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_one_title_no_owner_password_prompt(self):
-        self.assertIn("if (data.my_verified)", script)
-        self.assertIn("if (!msg.private && msg.verified)", script)
+        self.assertIn("appendVerifiedTitle(state.my_verified)", script)
+        self.assertIn("if (!msg.private) appendVerifiedTitle(msg.verified)", script)
         self.assertIn("expandedThreads", script)
         self.assertIn("emojiChoices", script)
         self.assertIn("requestFullscreen", script)
         self.assertNotIn("upload_attachment", script)
         self.assertNotIn("attachCallback", script)
         self.assertNotIn("fileInput", script)
-        self.assertIn("messaging-app-v19", html)
+        # Match the original v5.17 compact terminal layout, not the
+        # v5.18/v5.19 tall bordered HTML application.
+        self.assertIn('height:19px', html)
+        self.assertIn('width:min(INPUTPXpx,100%)', html)
+        self.assertIn('max-width:WRAPCHch', html)
+        self.assertIn('font-family:monospace;font-size:13px', html)
+        self.assertNotIn('chat-toolbar', html)
+        self.assertNotIn('chat-viewport', html)
+        self.assertNotIn('chat-compose', html)
+        self.assertIn('textControl', script)
+        self.assertIn('renderLine', script)
         for forbidden in ("awaitingOwnerKey", "my_owner", "my_mod",
                           "[OWNER]", "[MOD]", "appendRolePrefixes"):
             self.assertNotIn(forbidden, script)
