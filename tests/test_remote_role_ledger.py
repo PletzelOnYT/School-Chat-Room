@@ -34,6 +34,24 @@ class RemoteRolesTests(unittest.TestCase):
         url_body = json.dumps(data).encode("utf-8")
         return env, url_body
 
+    def test_github_updates_stop_old_clients(self):
+        func_node = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                         and n.name == "check_upstream_version")
+        env = {
+            "time": time, "urllib": urllib, "re": __import__("re"),
+            "GITHUB_CHAT_SOURCE_URL": "https://raw.example/school_chat.py",
+            "CLIENT_VERSION": "5.16", "UPSTREAM_VERSION_CHECK_SECONDS": 25.0,
+            "last_upstream_version_check": 0.0,
+            "update_required": False, "minimum_client_version": "",
+        }
+        exec(compile(ast.Module(body=[func_node], type_ignores=[]),
+                     "<upstream-version>", "exec"), env)
+        newer = b"# @title School ChatRoom v5.17 - New release\\n"
+        with patch("urllib.request.urlopen", return_value=io.BytesIO(newer)):
+            env["check_upstream_version"]()
+        self.assertTrue(env["update_required"])
+        self.assertEqual(env["minimum_client_version"], "5.17")
+
     def test_signed_durable_grants_are_loaded(self):
         data = {
             "status": "online", "role_storage": "durable",
