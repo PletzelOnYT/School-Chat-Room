@@ -1330,10 +1330,20 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       showSelectedThread = false;
     }
     area.replaceChildren();
-    area.appendChild(document.createTextNode('--- Connected as: '));
-    appendVerifiedTitle(state.my_verified);
-    area.appendChild(colored(state.username, 'green', true));
-    area.appendChild(document.createTextNode(' ---'));
+    const header = document.createElement('span');
+    header.appendChild(document.createTextNode('--- Connected as: '));
+    appendVerifiedTitle(state.my_verified, header);
+    header.appendChild(colored(state.username, 'green', true));
+    header.appendChild(document.createTextNode(' ---'));
+    // Fullscreen is still available without adding any icons to the classic UI.
+    header.title = 'Double-click to toggle fullscreen';
+    header.addEventListener('dblclick', () => {
+      try {
+        if (document.fullscreenElement) document.exitFullscreen();
+        else if (root.requestFullscreen) root.requestFullscreen();
+      } catch(error) { console.debug('Fullscreen unavailable:', error); }
+    });
+    area.appendChild(header);
     newline();
     area.appendChild(document.createTextNode(
       "--- Type your message and press Enter. Type '/exit' to quit. ---"));
