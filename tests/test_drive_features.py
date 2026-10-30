@@ -1,4 +1,4 @@
-"""Simulated shared Drive journal, attachments, advanced search and threads."""
+"""Single shared chat.json storage, advanced search, and threads tests."""
 import ast
 import base64
 import hashlib
@@ -13,187 +13,101 @@ import unittest
 import uuid
 from datetime import datetime
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
 
-SOURCE = Path(__file__).resolve().parents[1].joinpath("school_chat.py").read_text()
+SOURCE = Path(__file__).resolve().parents[1].joinpath("messaging_app.py").read_text()
 TREE = ast.parse(SOURCE)
-FUNCTIONS = [
-    node for node in TREE.body if isinstance(node, ast.FunctionDef) and
-    node.name in {"read_messages", "write_event", "validate_attachment_bytes",
-                  "upload_attachment", "get_attachment", "search_messages",
-                  "build_threads"}
-]
+NAMES = {"read_messages", "write_event", "search_messages", "build_threads"}
+NODES = [n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name in NAMES]
 
 
 def methods(overrides=None):
     env = dict(
         os=os, re=re, shlex=shlex, json=json, time=time, uuid=uuid,
-        hashlib=hashlib, threading=threading, datetime=datetime,
-        b64decode=lambda s: base64.b64decode(s, validate=True),
-        b64=lambda x: base64.b64encode(x).decode("ascii"),
-        valid_signature=lambda e: e.get("sig") == "valid",
-        short_id=lambda key: str(key)[:12],
-        event_cache={}, last_event_scan=0.0,
+        hashlib=hashlib, datetime=datetime,
+        valid_signature=lambda e: isinstance(e, dict) and e.get("sig") == "valid",
         ChatFileError=type("ChatFileError", (Exception,), {}),
-        MESSAGE_LIMIT=1000,
-        MAX_ATTACHMENT_BYTES=2*1024*1024,
-        ALLOWED_ATTACHMENTS={
-            "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
-            "image/webp": ".webp", "application/pdf": ".pdf",
-            "text/plain": ".txt", "text/markdown": ".md",
-        },
+        file_lock=threading.RLock(),
+        short_id=lambda key: (key or "")[:12],
     )
     if overrides:
         env.update(overrides)
-    exec(compile(ast.Module(body=FUNCTIONS, type_ignores=[]),
-                 "<shared-drive-functions>", "exec"), env)
+    exec(compile(ast.Module(body=NODES, type_ignores=[]), "<messaging-app-storage>", "exec"), env)
     return env
 
 
-class DriveJournalTests(unittest.TestCase):
+class SingleDriveFileTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.base = Path(self.tmp.name)
-        self.events = self.base / "events"
-        self.events.mkdir()
-        self.attachments = self.base / "attachments"
-        self.attachments.mkdir()
-        self.old = self.base / "chat.json"
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.folder = Path(self.temp.name)
+        self.file = self.folder / "chat.json"
         self.anchor = str(uuid.uuid4())
-        self.old.write_text(json.dumps([{"id": self.anchor, "kind": "message",
-                                        "text": "Old history is preserved"}]))
+        self.original = {"id": self.anchor, "kind": "message", "text": "Original history"}
+        self.file.write_text(json.dumps([self.original]))
         self.env = methods({
-            "CHAT_FILE_PATH": str(self.old),
-            "EVENT_FOLDER": str(self.events),
-            "ATTACHMENT_FOLDER": str(self.attachments),
+            "CHAT_FILE_PATH": str(self.file),
             "ORIGINAL_HISTORY_ANCHOR": self.anchor,
-            "file_lock": threading.RLock(),
-            "legacy_cache": None, "event_cache": {}, "last_event_scan": 0.0,
         })
 
-    def event(self, content):
+    def event(self, msg):
         return {
             "id": str(uuid.uuid4()), "kind": "message", "sig": "valid",
-            "issued_at": int(time.time()), "text": content,
-            "sender_key": base64.b64encode(b"a"*32).decode(),
+            "issued_at": int(time.time()), "text": msg,
         }
 
-    def test_writes_separate_files_without_touching_original_history(self):
-        original = self.old.read_bytes()
-        writes = [self.event("message " + str(i)) for i in range(50)]
-        # Every simulated client has a different process-local lock and cache.
-        def write(index):
-            env = methods({
-                "EVENT_FOLDER": str(self.events),
-                "file_lock": threading.RLock(),
-            })
-            return env["write_event"](writes[index])
-        with ThreadPoolExecutor(max_workers=12) as pool:
-            self.assertTrue(all(pool.map(write, range(len(writes)))))
-        self.assertEqual(original, self.old.read_bytes())
-        self.assertEqual(len(list(self.events.glob("*.json"))), 50)
-        messages = self.env["read_messages"]()
-        self.assertEqual(len(messages), 51)
-        self.assertEqual(messages[0]["id"], self.anchor)
-        self.assertEqual({e["id"] for e in messages[1:]},
-                         {e["id"] for e in writes})
+    def test_read_existing_history_and_write_in_one_json(self):
+        saved = self.env["read_messages"]()
+        self.assertEqual(saved, [self.original])
+        for i in range(12):
+            self.assertTrue(self.env["write_event"](self.event(f"New message {i}")))
+        records = json.loads(self.file.read_text())
+        self.assertEqual(len(records), 13)
+        self.assertEqual(records[0], self.original)
+        self.assertEqual(len(list(self.folder.iterdir())), 1)
+        self.assertEqual(self.file.name, "chat.json")
 
-    def test_syncing_partial_file_can_be_read_on_next_poll(self):
-        event = self.event("recent")
-        filename = f'{event["issued_at"]:010d}-{uuid.UUID(event["id"]).hex}.json'
-        target = self.events / filename
-        target.write_text("{")
-        self.env["read_messages"]()
-        target.write_text(json.dumps(event))
-        self.env["last_event_scan"] = 0
-        self.assertIn(event["id"],
-                      [e["id"] for e in self.env["read_messages"]()])
+    def test_invalid_signature_cannot_be_saved(self):
+        invalid = self.event("spoofed")
+        invalid["sig"] = "invalid"
+        with self.assertRaises(self.env["ChatFileError"]):
+            self.env["write_event"](invalid)
+        self.assertEqual(len(json.loads(self.file.read_text())), 1)
 
-    def test_attachment_validation(self):
-        validate = self.env["validate_attachment_bytes"]
-        self.assertTrue(validate(b"%PDF-1.7\n", "application/pdf"))
-        self.assertFalse(validate(b"<script>bad</script>", "application/pdf"))
-        self.assertFalse(validate(b"<svg></svg>", "image/svg+xml"))
-        self.assertTrue(validate(b"school notes", "text/plain"))
-        self.assertFalse(validate(b"\x00exe", "text/plain"))
+    def test_wrong_original_chat_is_rejected(self):
+        other = self.event("not this room")
+        self.file.write_text(json.dumps([other]))
+        with self.assertRaises(self.env["ChatFileError"]):
+            self.env["read_messages"]()
 
-    def test_attachment_upload_no_json_history_changes(self):
-        payload = b"%PDF-1.7\ntest"
-        saved = []
-        env = methods({
-            "ATTACHMENT_FOLDER": str(self.attachments),
-            "event_now": lambda kind, **fields: {
-                "kind": kind, "id": str(uuid.uuid4()), **fields},
-            "write_event": lambda e: saved.append(e) or True,
-        })
-        env["write_event"] = lambda e: saved.append(e) or True
-        result = env["upload_attachment"]({
-            "mime": "application/pdf", "name": "algebra.pdf",
-            "base64": base64.b64encode(payload).decode(),
-        })
-        self.assertEqual(result, saved[0]["id"])
-        self.assertEqual(saved[0]["attachment"]["name"], "algebra.pdf")
-        self.assertEqual(len(list(self.attachments.iterdir())), 1)
-        self.assertIn(b"Old history is preserved", self.old.read_bytes())
-        with self.assertRaises(env["ChatFileError"]):
-            env["upload_attachment"]({
-                "mime": "application/pdf", "name": "bad.pdf",
-                "base64": base64.b64encode(b"<html>").decode(),
-            })
-
-    def test_attachment_download_checks_sha256(self):
-        payload = b"PDF-attachment verified"
-        name = uuid.uuid4().hex + ".txt"
-        (self.attachments / name).write_bytes(payload)
-        event_id = str(uuid.uuid4())
-        descriptor = {
-            "file": name, "name": "notes.txt", "mime": "text/plain",
-            "size": len(payload), "sha256": hashlib.sha256(payload).hexdigest(),
-        }
-        env = methods({
-            "ATTACHMENT_FOLDER": str(self.attachments),
-            "latest_analysis": lambda: {"messages": [
-                {"id": event_id, "attachment": descriptor},
-            ]},
-            "JSON": lambda item: item,
-        })
-        output = env["get_attachment"](event_id)
-        self.assertEqual(base64.b64decode(output["base64"]), payload)
-        (self.attachments / name).write_bytes(b"tampered")
-        with self.assertRaises(env["ChatFileError"]):
-            env["get_attachment"](event_id)
-
-    def test_search_by_name_date_and_attachments(self):
-        a = self.event("math homework")
+    def test_search_filters_work_without_attachments(self):
         messages = [
-            {"user": "Alex", "text": "math homework",
-             "issued_at": 1793491200, "attachment": None,
-             "sender_key": "a", "reactions": {}, "reply_to": None},
-            {"user": "Emma", "text": "notes attached",
-             "issued_at": 1793577600, "attachment": {"name": "a.pdf"},
-             "sender_key": "b", "reactions": {"❤️": 2}, "reply_to": "old"},
+            {"user": "Alex", "text": "math homework", "issued_at": 1793491200,
+             "sender_key": "keyAlex", "reactions": {}, "reply_to": None},
+            {"user": "Emma", "text": "quiz notes", "issued_at": 1793577600,
+             "sender_key": "keyEmma", "reactions": {"❤️": 2}, "reply_to": "msg1"},
         ]
         search = self.env["search_messages"]
-        self.assertEqual(len(search('from:Emma has:attachment', messages)), 1)
-        self.assertEqual(len(search('in:replies has:reaction', messages)), 1)
-        self.assertEqual(len(search('from:Alex math', messages)), 1)
-        self.assertEqual(len(search('after:2026-11-01 has:attachment', messages)), 1)
+        self.assertEqual(len(search("from:Emma has:reaction", messages)), 1)
+        self.assertEqual(len(search("in:replies", messages)), 1)
+        self.assertEqual(len(search("from:Alex math", messages)), 1)
+        self.assertEqual(len(search("after:2026-11-01 has:reaction", messages)), 1)
         with self.assertRaises(self.env["ChatFileError"]):
-            search('after:2026-99-99', messages)
+            search("has:attachment", messages)
+        with self.assertRaises(self.env["ChatFileError"]):
+            search("after:2026-99-99", messages)
 
-    def test_nested_replies_form_one_expandable_thread(self):
-        records = [
+    def test_nested_replies_expand_under_one_root(self):
+        rows = [
             {"id": "a", "number": 1, "user": "Alex", "reply_to": None},
             {"id": "b", "number": 2, "user": "Emma", "reply_to": "a"},
             {"id": "c", "number": 3, "user": "Alex", "reply_to": "b"},
             {"id": "d", "number": 4, "user": "Jay", "reply_to": None},
         ]
-        groups = self.env["build_threads"](records, 15, set(), 0)
-        self.assertEqual(len(groups), 2)
-        self.assertEqual(groups[0]["root"]["id"], "a")
-        self.assertEqual(groups[0]["total_replies"], 2)
-        self.assertEqual([x["id"] for x in groups[0]["replies"]], ["b","c"])
+        threads = self.env["build_threads"](rows, 15, set(), 0)
+        self.assertEqual(len(threads), 2)
+        self.assertEqual(threads[0]["root"]["id"], "a")
+        self.assertEqual(threads[0]["total_replies"], 2)
+        self.assertEqual([row["id"] for row in threads[0]["replies"]], ["b", "c"])
 
 
 if __name__ == "__main__":
