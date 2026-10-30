@@ -1318,6 +1318,8 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   let stopped = false;
   let generation = 0;
   let sending = false;
+  const sendQueue = [];
+  let lastQueuedDispatch = 0;
   let lastPopupId = null;
   let pendingHelpWindow = null;
   let lastHelpURL = null;
@@ -1423,20 +1425,37 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     });
     return span;
   }
-  async function sendInline(command) {
+  async function drainSendQueue() {
     if (sending || stopped) return;
     sending = true;
-    input.disabled = true;
     try {
-      const current = ++generation;
-      const reply = await google.colab.kernel.invokeFunction(sendCallback, [command], {});
-      if (current === generation) render(replyData(reply));
-    } catch(error) {
-      console.debug('Action could not be saved:', error);
+      while (sendQueue.length && !stopped) {
+        // The backend's legitimate-user cooldown is 0.65 seconds.
+        const wait = Math.max(0, 750 - (Date.now() - lastQueuedDispatch));
+        if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+        const command = sendQueue[0];
+        lastQueuedDispatch = Date.now();
+        try {
+          const current = ++generation;
+          const reply = await google.colab.kernel.invokeFunction(sendCallback, [command], {});
+          if (current === generation) render(replyData(reply));
+          sendQueue.shift();
+        } catch(error) {
+          console.error('Message could not be submitted:', error);
+          // Preserve the next unsent text in the input if possible.
+          if (!input.value.trim() && !command.startsWith('/')) input.value = command;
+          sendQueue.shift();
+        }
+      }
     } finally {
-      sending = false; input.disabled = false;
+      sending = false;
       if (!stopped) input.focus();
     }
+  }
+  function sendInline(command) {
+    if (stopped) return;
+    sendQueue.push(command);
+    drainSendQueue();
   }
   function threadFor(messageId) {
     return (latestState?.threads || []).find(group =>
@@ -1601,32 +1620,16 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     }
   }
 
-  form.addEventListener('submit', async event => {
+  form.addEventListener('submit', event => {
     event.preventDefault();
-    if (stopped || sending) return;
-    let value = input.value;
+    if (stopped) return;
+    const value = input.value;
     if (!value.trim()) return;
-    const isHelp = ['/help', '/hellp'].includes(value.trim().toLowerCase());
-    if (isHelp) openHelpWindow();
-    sending = true;
+    if (['/help', '/hellp'].includes(value.trim().toLowerCase())) openHelpWindow();
     input.value = '';
-    input.disabled = true;
-    ++generation;
-    try {
-      const reply = await google.colab.kernel.invokeFunction(sendCallback, [value], {});
-      render(replyData(reply));
-    } catch (error) {
-      input.value = value;
-      if (pendingHelpWindow && !pendingHelpWindow.closed) {
-        pendingHelpWindow.document.getElementById('heading').textContent = 'Unable to load commands';
-        pendingHelpWindow = null;
-      }
-      console.error('Could not send message:', error);
-    } finally {
-      sending = false;
-      input.disabled = false;
-      if (!stopped) input.focus();
-    }
+    // Do not disable the text input just because another message is pending.
+    // This client's messages are queued and sent in submission order.
+    sendInline(value);
   });
 
   refreshChat();
