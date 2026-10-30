@@ -229,6 +229,9 @@ def google_account_username():
         candidate = re.sub(r'[^A-Za-z0-9._-]', '', local_part)[:32]
         if not candidate:
             raise ValueError('No usable Google account username')
+        # Prevent a real email prefix from becoming a misleading role label.
+        if candidate.casefold() in RESERVED_USERNAMES | GENERIC_USERNAMES:
+            candidate = (candidate[:23] + '-' + short_id(identity_public)[:4])
         return candidate
     except Exception as exc:
         raise ChatFileError(
@@ -666,15 +669,28 @@ def analyze(events):
         occupied_guest_numbers.add(candidate)
         guest_names[pub] = f'Guest-{candidate}'
 
+    # Name collisions are resolved with the stable signed identity, not by
+    # switching a Google account user back to a random Guest label.
     display_names = {}
+    taken_names = set(name_owners)
     for pub, name in identities.items():
-        # The default Guest label is not a user-claimed nickname. Treat it as
-        # a valid displayed name, not as an invalid/reserved custom nickname.
         if GUEST_NAME_RE.fullmatch(name):
             display_names[pub] = guest_names[pub]
+        elif name_owners.get(name.casefold()) == pub:
+            display_names[pub] = name
         else:
-            display_names[pub] = (name if name_owners.get(name.casefold()) == pub
-                                  else guest_names[pub])
+            base = account_names.get(pub, name)
+            digest = guest_digest(pub)
+            chosen = None
+            for digits in (4, 6, 8, 12, 16):
+                candidate = base[:31-digits] + '-' + digest[:digits]
+                if candidate.casefold() not in taken_names:
+                    chosen = candidate
+                    break
+            if not chosen:
+                chosen = guest_names[pub]
+            display_names[pub] = chosen
+            taken_names.add(chosen.casefold())
 
     # Display CURRENT signed aliases across message history, not a stale
     # 'ColabUser' from a different session. Legacy unsigned history is kept
@@ -879,37 +895,8 @@ RULES = '''SCHOOL CHAT RULES
 def latest_analysis():
     global username
     result = analyze(read_messages())
-    # Keep the input/header nickname equal to the receiver-verified nickname.
-    # If a competing student already owns that name, both the header and all
-    # future messages use this identity's unique Guest ID instead.
-    username = result['display_names'].get(identity_public)
-    if not username:
-        # Before the first signed profile reaches the shared file, use the
-        # account-derived name locally rather than a random Guest number.
-        username = GOOGLE_ACCOUNT_USERNAME
-    if False:
-        # A first-time student has not sent a signed event yet; choose a
-        # Guest number absent from the current shared history as well.
-        reserved = {name.casefold() for name in result['display_names'].values()}
-        number = int(fallback_username(identity_public).split('-')[1])
-        for _ in range(900):
-            candidate = f'Guest-{number}'
-            if candidate.casefold() not in reserved:
-                username = candidate
-                break
-            number = 100 + (number - 99) % 900
-        if not username:
-            number = 10 + int(guest_digest(identity_public)[8:16], 16) % 90
-            for _ in range(90):
-                candidate = f'Guest-{number}'
-                if candidate.casefold() not in reserved:
-                    username = candidate
-                    break
-                number = 10 + (number - 9) % 90
-        if not username:
-            username = 'Guest-' + guest_digest(identity_public)[:16]
-    if username.casefold() in GENERIC_USERNAMES:
-        username = fallback_username(identity_public)
+    # The header and outgoing messages use the same effective shared name.
+    username = result['display_names'].get(identity_public, GOOGLE_ACCOUNT_USERNAME)
     return result
 
 
