@@ -29,7 +29,10 @@ class BrowserTests(unittest.TestCase):
         self.assertIn("expandedThreads", script)
         self.assertIn("emojiChoices", script)
         self.assertIn("requestFullscreen", script)
-        self.assertIn("upload_attachment", script)
+        self.assertNotIn("upload_attachment", script)
+        self.assertNotIn("attachCallback", script)
+        self.assertNotIn("fileInput", script)
+        self.assertIn("messaging-app-v19", html)
         for forbidden in ("awaitingOwnerKey", "my_owner", "my_mod",
                           "[OWNER]", "[MOD]", "appendRolePrefixes"):
             self.assertNotIn(forbidden, script)
