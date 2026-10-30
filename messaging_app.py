@@ -1,4 +1,4 @@
-# @title Messaging App v5.22 — Google Drive Messenger
+# @title Messaging App v5.23 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -37,7 +37,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.22'
+CLIENT_VERSION = '5.23'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -562,6 +562,9 @@ def analyze(events):
     All legacy privileged role records are ignored.
     """
     verified = set()
+    # Old auto-grants had no separate marker from /vf. They cannot establish
+    # a badge in v5.23; people must explicitly claim with the new format.
+    legacy_claimed = set()
     identities = {}
     messages = []
     by_number = {}
@@ -597,7 +600,14 @@ def analyze(events):
                 account_names[sender] = account_name
                 seen_aliases.setdefault(sender, set()).add(account_name)
                 claim_order.setdefault((sender, account_name.casefold()), index)
-            can_rename = sender in verified
+            # Previously saved nicknames remain displayed after migration,
+            # but only a currently verified user may issue NEW rename events.
+            can_rename = sender in verified or (
+                kind == 'profile' and e.get('renamed') is True and
+                sender in legacy_claimed and
+                type(e.get('issued_at')) is int and
+                e.get('issued_at') < 1793404800
+            )
             if can_rename and kind in ('message', 'profile') and clean_name:
                 # Support older signed profile records and new explicit
                 # rename records. New plain messages cannot silently rename.
@@ -611,18 +621,29 @@ def analyze(events):
                 sender, account_names.get(sender, fallback_username(sender)))
 
         if kind == 'role':
-            # Only the holder of the signed identity can issue its blue check.
-            # All other historical role-grant records are inert.
-            if (signed and sender and e.get('role') == 'verified'
-                    and e.get('self_verified') is True
-                    and e.get('active') is True
-                    and e.get('target_key') == sender):
-                try:
-                    if len(b64decode(sender)) == 32:
-                        verified.add(sender)
-                        identities.setdefault(sender, fallback_username(sender))
-                except (TypeError, ValueError):
-                    pass
+            # One title only: blue checkmark. New claims require the explicit
+            # v2 marker, so historical Drive-mount auto-grants are ignored.
+            # Any signed chat participant may unverify any target identity.
+            if not signed or e.get('role') != 'verified':
+                continue
+            target = e.get('target_key')
+            try:
+                valid_target = isinstance(target, str) and len(b64decode(target)) == 32
+            except (TypeError, ValueError):
+                valid_target = False
+            if not valid_target:
+                continue
+            if (e.get('active') is True and target == sender and
+                    e.get('self_verified') is True):
+                if e.get('verification_version') == 2:
+                    verified.add(sender)
+                else:
+                    legacy_claimed.add(sender)
+                identities.setdefault(sender, fallback_username(sender))
+            elif (e.get('active') is False and
+                    e.get('unverify_anyone') is True and
+                    e.get('verification_version') == 2):
+                verified.discard(target)
             continue
 
         if kind == 'reaction':
@@ -910,18 +931,13 @@ def claim_self_verified():
     if identity_public in current['verified']:
         return True
     event = event_now('role', role='verified', target_key=identity_public,
-                      active=True, self_verified=True)
+                      active=True, self_verified=True, verification_version=2)
     return bool(write_event(event) and
                 identity_public in latest_analysis()['verified'])
 
 
-# A Google Drive mount is already required by the chat. Never prompt for
-# extra school-account authorization to claim the self-verified checkmark.
-if os.path.ismount('/content/drive'):
-    try:
-        claim_self_verified()
-    except (ChatFileError, OSError):
-        pass
+# Mounting Drive is necessary to load chat history, but it is NOT evidence
+# of successful independent Google identity verification. No automatic badge.
 
 
 def is_mentioned(text, name):
