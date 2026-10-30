@@ -41,6 +41,10 @@ COOLDOWN_SECONDS = 1.5
 MESSAGE_LIMIT = 1000
 CLIENT_VERSION = '5.16'
 REMOTE_ROLE_REFRESH_SECONDS = 2.0
+UPSTREAM_VERSION_CHECK_SECONDS = 25.0
+GITHUB_CHAT_SOURCE_URL = (
+    'https://raw.githubusercontent.com/PletzelOnYT/'
+    'School-Chat-Room/main/school_chat.py')
 # Only PUBLIC configuration goes in the distributed notebook.
 # Never put CHAT_OWNER_KEY or CHAT_SIGNING_SEED here!
 OWNER_AUTH_URL = 'https://chat-room-owner-api-xi.vercel.app/api/owner'
@@ -94,6 +98,7 @@ last_remote_role_check = 0.0
 minimum_client_version = ''
 update_required = False
 update_notice_shown = False
+last_upstream_version_check = 0.0
 
 
 class ChatFileError(Exception):
@@ -941,6 +946,39 @@ RULES = '''SCHOOL CHAT RULES
    erased by anybody who has Editor access; moderation isn't tamper-proof.'''
 
 
+def check_upstream_version(force=False):
+    """New clients fail closed if a newer GitHub script has been published.
+
+    This is a safety check for v5.16+ only. It CANNOT remotely stop old
+    versions that never included a version gate.
+    """
+    global last_upstream_version_check, update_required, minimum_client_version
+    now = time.monotonic()
+    if (not force and
+            now - last_upstream_version_check < UPSTREAM_VERSION_CHECK_SECONDS):
+        return
+    last_upstream_version_check = now
+    try:
+        request = urllib.request.Request(
+            GITHUB_CHAT_SOURCE_URL,
+            headers={'User-Agent': 'SchoolChat-VersionCheck',
+                     'Cache-Control': 'no-cache', 'Range': 'bytes=0-255'})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            heading = response.read(256).decode('utf-8', errors='replace')
+        match = re.search(r'^# @title School ChatRoom v(\\d+\\.\\d+)', heading)
+        if not match:
+            return
+        latest_version = match.group(1)
+        latest_tuple = tuple(int(x) for x in latest_version.split('.'))
+        current_tuple = tuple(int(x) for x in CLIENT_VERSION.split('.'))
+        if latest_tuple > current_tuple:
+            update_required = True
+            minimum_client_version = latest_version
+    except (OSError, ValueError, urllib.error.URLError):
+        # Connection failures do not prove a newer version exists.
+        pass
+
+
 def read_remote_role_events(force=False):
     """Get the canonical server-signed role ledger, independent of chat.json.
 
@@ -1101,6 +1139,7 @@ def is_mentioned(text, name):
 def snapshot():
     global next_popup, running, update_notice_shown
     try:
+        check_upstream_version()
         # Reconcile queued signed grants that another Drive writer may have
         # overwritten. No secret owner password is saved to disk.
         reconcile_role_recovery()
