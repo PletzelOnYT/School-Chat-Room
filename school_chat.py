@@ -1,4 +1,4 @@
-# @title School ChatRoom v5.10 — School terminal chat with Vercel owner login
+# @title School ChatRoom v5.11 — School terminal chat with Vercel owner login
 """Google Colab school chat — the same shared Google Drive chat.json.
 
 The ONLY hosted API is for checking the owner's key and signing role grants.
@@ -417,6 +417,7 @@ def analyze(events):
     owners = set()
     moderators = set()
     verified = set()
+    banned = set()
     identities = {}
     messages = []
     by_number = {}
@@ -450,7 +451,7 @@ def analyze(events):
         clean_name = valid_username(e.get('user'))
         if signed and not from_server and kind in ('message', 'reaction', 'profile'):
             identities.setdefault(sender, fallback_username(sender))
-            if kind in ('message', 'profile') and sender in verified and clean_name:
+            if kind in ('message', 'profile') and sender in verified and sender not in banned and clean_name:
                 identities[sender] = clean_name
                 seen_aliases.setdefault(sender, set()).add(clean_name)
                 claim_order.setdefault((sender, clean_name.casefold()), index)
@@ -486,6 +487,11 @@ def analyze(events):
                         verified.add(target)
                     else:
                         verified.discard(target)
+                elif role == 'banned':
+                    if active:
+                        banned.add(target)
+                    else:
+                        banned.discard(target)
             elif role == 'verified' and sender in moderators:
                 if active:
                     verified.add(target)
@@ -513,6 +519,8 @@ def analyze(events):
         # allowing edits to chat.json to impersonate students.
         if not signed and seen_any_signed_event:
             continue
+        if signed and sender in banned:
+            continue  # Globally hide posts sent while banned
         message_text = e.get('text')
         if signed and not valid_incoming_message(message_text):
             continue
@@ -624,7 +632,7 @@ def analyze(events):
     return dict(messages=messages, by_number=by_number,
                 identities=identities, seen_aliases=seen_aliases, display_names=display_names,
                 name_owners=name_owners, owners=owners,
-                moderators=moderators, verified=verified)
+                moderators=moderators, verified=verified, banned=banned)
 
 
 def is_valid_emoji(emoji):
@@ -691,7 +699,7 @@ def reconcile_role_recovery(force=False):
             age = time.time() - float(item.get('saved_at', 0))
             if age < 0 or age > 86400 or not valid_signature(event):
                 continue
-            if event.get('kind') != 'role' or event.get('role') not in ('moderator', 'verified'):
+            if event.get('kind') != 'role' or event.get('role') not in ('moderator', 'verified', 'banned'):
                 continue
             # A later signed event for this role and target supersedes the
             # grant. Never resurrect an old grant after someone revoked it.
@@ -761,6 +769,7 @@ HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /stats                     Chat statistics
 /ping                      Check shared file
 /modhelp                   Moderator commands (mods only)
+/banlist                   View banned accounts
 /owner                     Owner login (asks for private key)
 /exit                      Close the chat
 
@@ -775,6 +784,9 @@ MOD_HELP = '''MODERATOR COMMANDS (signed changes, visible to everyone)
 /addmod <name or ID>        Owner only: assign Moderator role
 /removemod <name or ID>     Owner only: revoke Moderator role
 /rolecheck <name or ID>    Check the exact effective roles for an identity
+/ban <name or ID>          Owner only: block posts from a signed identity
+/unban <name or ID>        Owner only: remove a ban
+/banlist                   List blocked signed identities
 /owner                     Privately authenticate as Owner
 
 Use /whoami on the OTHER student's Colab to confirm their ID before you grant a role.
@@ -870,7 +882,7 @@ def snapshot():
         a = latest_analysis()
         error = ''
     except ChatFileError as exc:
-        a = {'messages': [], 'moderators': set(), 'owners': set(), 'verified': set()}
+        a = {'messages': [], 'moderators': set(), 'owners': set(), 'verified': set(), 'banned': set()}
         error = str(exc)
     with state_lock:
         # Place private system messages at the conversational position where
@@ -893,7 +905,8 @@ def snapshot():
                      'running': running,
                      'my_owner': identity_public in a['owners'],
                      'my_mod': identity_public in a['moderators'],
-                     'my_verified': identity_public in a['verified']})
+                     'my_verified': identity_public in a['verified'],
+                     'my_banned': identity_public in a['banned']})
 
 
 
@@ -901,6 +914,9 @@ def snapshot():
 def send_message(body, reply_to=None):
     global last_message_time
     now = time.time()
+    if identity_public in latest_analysis()['banned']:
+        note('This account is banned from posting. Contact the Owner if this is a mistake.')
+        return False
     if now - last_message_time < COOLDOWN_SECONDS:
         note('Slow down! Wait a moment before sending another message.')
         return False
@@ -1035,8 +1051,16 @@ def submit_message(raw):
                 else:
                     note('Moderator permissions required.')
                 return snapshot()
-            if command in ('/verify', '/unverify', '/addmod', '/removemod'):
-                is_owner_command = command in ('/addmod', '/removemod')
+            if command == '/banlist':
+                if not me_mod:
+                    note('Moderator permission required.')
+                else:
+                    names = [f'@{a["display_names"].get(pub, fallback_username(pub))} | ID {short_id(pub)}'
+                             for pub in sorted(a['banned'])]
+                    note('BANNED IDENTITIES\n' + ('\n'.join(names) or '(none)'))
+                return snapshot()
+            if command in ('/verify', '/unverify', '/addmod', '/removemod', '/ban', '/unban'):
+                is_owner_command = command in ('/addmod', '/removemod', '/ban', '/unban')
                 if is_owner_command and not (me_owner and owner_access_key):
                     note('Owner login needed. Enter /owner and your private key first, '
                          'then try this command again.')
@@ -1048,9 +1072,13 @@ def submit_message(raw):
                 if error:
                     note(error)
                     return snapshot()
-                role = 'moderator' if is_owner_command else 'verified'
-                active = command in ('/verify', '/addmod')
+                role = ('banned' if command in ('/ban', '/unban') else
+                        'moderator' if command in ('/addmod', '/removemod') else 'verified')
+                active = command in ('/verify', '/addmod', '/ban')
                 target_name = a['display_names'].get(target, fallback_username(target))
+                if command == '/ban' and (target == identity_public or target in a['owners']):
+                    note('You cannot ban yourself or an active Owner.')
+                    return snapshot()
                 # An OWNER authorization is signed by Vercel; regular moderators
                 # can sign verified grants themselves with persistent identities.
                 if me_owner and owner_access_key:
@@ -1071,14 +1099,16 @@ def submit_message(raw):
                     if not write_event(grant):
                         continue
                     updated = latest_analysis()
-                    current_role_set = updated['moderators'] if is_owner_command else updated['verified']
+                    current_role_set = updated[{'moderator': 'moderators',
+                                            'verified': 'verified', 'banned': 'banned'}[role]]
                     effective = (target in current_role_set) == active
                     if effective:
                         # Confirm once more after a short pause to catch an
                         # overlapping write before showing success.
                         time.sleep(0.3)
                         check = latest_analysis()
-                        actual = check['moderators'] if is_owner_command else check['verified']
+                        actual = check[{'moderator': 'moderators',
+                                        'verified': 'verified', 'banned': 'banned'}[role]]
                         effective = (target in actual) == active
                     if effective:
                         break
@@ -1108,7 +1138,8 @@ def submit_message(raw):
                 name = a['display_names'].get(target, fallback_username(target))
                 labels = (['Owner'] if target in a['owners'] else []) + \
                          (['Moderator'] if target in a['moderators'] else []) + \
-                         (['Verified'] if target in a['verified'] else [])
+                         (['Verified'] if target in a['verified'] else []) + \
+                      (['Banned'] if target in a['banned'] else [])
                 note(f'{name} | ID {short_id(target)} | Roles: '
                      + (', '.join(labels) or 'Member')
                      + '\nNames are not identities: have this student compare /whoami ID.')
