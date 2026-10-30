@@ -82,7 +82,7 @@ class SecurityTests(unittest.TestCase):
 
     def test_receivers_filter_bot_floods(self):
         self.assertFalse(env["valid_incoming_message"]("a" * 20))
-        self.assertFalse(env["valid_incoming_message"]("Hi\\u202einvalid"))
+        self.assertFalse(env["valid_incoming_message"]("Hi" + chr(0x202e) + "invalid"))
         self.assertTrue(env["valid_incoming_message"]("Hey, how are you? :)"))
         arr = [self.evt("msg" + str(i), sender_key=self.a, user="Guest-111",
                         text="spam " + str(i)) for i in range(15)]
