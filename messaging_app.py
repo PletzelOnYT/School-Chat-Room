@@ -1,4 +1,4 @@
-# @title Messaging App v5.23 — Google Drive Messenger
+# @title Messaging App v5.24 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -37,7 +37,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.23'
+CLIENT_VERSION = '5.24'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -266,6 +266,56 @@ def valid_signature(event):
         return False
 
 
+PLAIN_MESSAGE_FIELDS = frozenset(('kind','time','user','text'))
+REPLY_TEXT_RE = re.compile(r'^↳ \[reply:#(\d+)\] (.+)$', re.DOTALL)
+
+
+def is_plain_message(event):
+    """Exactly four fields; no message IDs or private keys on disk."""
+    return (isinstance(event,dict) and set(event)==PLAIN_MESSAGE_FIELDS
+            and event.get('kind')=='message'
+            and isinstance(event.get('time'),str)
+            and re.fullmatch(r'\d{2}:\d{2}:\d{2}',event['time']) is not None
+            and valid_username(event.get('user')) is not None
+            and isinstance(event.get('text'),str)
+            and valid_incoming_message(event['text']))
+
+
+def plain_message(text):
+    return {'kind':'message',
+            'time':time.strftime('%H:%M:%S',time.localtime()),
+            'user':username,'text':text}
+
+
+def display_only_message_id(event,position):
+    """Local reaction/thread reference, not part of JSON message."""
+    raw=json.dumps(event,sort_keys=True,ensure_ascii=False,
+                   separators=(',',':')).encode('utf-8')
+    return 'plain-%d-%s' % (position,hashlib.sha256(raw).hexdigest()[:16])
+
+
+def write_plain_message(event):
+    """Append only a four-field entry to the JSON array's existing tail."""
+    if not is_plain_message(event):
+        raise ChatFileError('Plain message must contain exactly four valid fields.')
+    with file_lock:
+        prior=sum(e==event for e in read_messages())
+        for attempt in range(4):
+            if attempt:
+                time.sleep(0.12*attempt)
+            try:
+                append_event_in_place(event)
+                time.sleep(0.15)
+                if sum(e==event for e in read_messages())>prior:
+                    return True
+            except OSError as exc:
+                if attempt==3:
+                    raise ChatFileError('Drive append failed: '+str(exc)) from exc
+            except ChatFileError:
+                raise
+        return False
+
+
 def read_messages():
     """Read the ORIGINAL shared Google Drive chat.json; do not create a folder."""
     with file_lock:
@@ -363,8 +413,10 @@ def write_event(event, remember=True):
     A sender's event ID is stable across retries. A corrupted or unreadable
     shared file is NEVER overwritten; ask its owner to restore a Drive version.
     """
+    if is_plain_message(event):
+        return write_plain_message(event)
     if not valid_signature(event):
-        raise ChatFileError('Cannot save an unsigned chat event.')
+        raise ChatFileError('Cannot save unsigned internal metadata.')
     if remember:
         remember_outgoing(event)
     with file_lock:
@@ -582,11 +634,13 @@ def analyze(events):
     for index, e in enumerate(events):
         if not isinstance(e, dict):
             continue
-        event_id = str(e.get('id', 'legacy-index-' + str(index)))
+        plain = is_plain_message(e)
+        event_id = (display_only_message_id(e,index) if plain else
+                    str(e.get('id','legacy-index-'+str(index))))
         if event_id in seen_ids:
             continue
         seen_ids.add(event_id)
-        kind = str(e.get('kind', 'message'))
+        kind = str(e.get('kind','message'))
         signed = valid_signature(e)
         if signed:
             seen_any_signed_event = True
@@ -664,10 +718,10 @@ def analyze(events):
         # The original pre-identity history is retained. Once signed records
         # begin, new unsigned/invalid messages are ignored, rather than
         # allowing edits to chat.json to impersonate students.
-        if not signed and seen_any_signed_event:
+        if not signed and not plain and seen_any_signed_event:
             continue
         message_text = e.get('text')
-        if signed and not valid_incoming_message(message_text):
+        if (signed or plain) and not valid_incoming_message(message_text):
             continue
         if signed and sender:
             # Receiver-side limits: ordinary clients filter obvious bot
@@ -685,14 +739,23 @@ def analyze(events):
                     continue
                 history.append((stamp, message_text.casefold().strip()))
         post_number += 1
+        display_text = str(message_text)
+        parent_id = e.get('reply_to') if signed else None
+        if plain:
+            marker = REPLY_TEXT_RE.fullmatch(display_text)
+            if marker:
+                parent = by_number.get(int(marker.group(1)))
+                if parent and parent['number'] < post_number:
+                    parent_id = parent['id']
+                    display_text = marker.group(2)
         item = {
             'number': post_number, 'id': event_id,
             'user': clean_name or fallback_username(sender),
-            'text': str(e.get('text', '')),
+            'text': display_text,
             'time': str(e.get('time', '')),
             'sender_key': sender,
             'signed': signed,
-            'reply_to': e.get('reply_to') if signed else None,
+            'reply_to': parent_id,
             'issued_at': e.get('issued_at') if signed else None,
         }
         messages.append(item)
@@ -1130,10 +1193,15 @@ def send_message(body, reply_to=None):
     # Refresh before signing: outgoing messages and the header always use
     # exactly the same effective nickname derived from the signed history.
     latest_analysis()
-    evt = event_now('message', text=body)
+    # Replies encode the target in text, so even reply records have 4 fields.
     if reply_to:
-        evt['reply_to'] = reply_to
-        evt = sign_event({k: v for k, v in evt.items() if k != 'sig'})
+        target = next((m for m in latest_analysis()['messages']
+                       if m['id'] == reply_to), None)
+        if target is None:
+            note('Cannot reply: original message no longer exists.')
+            return False
+        body = '↳ [reply:#%d] %s' % (target['number'],body)
+    evt = plain_message(body)
     ok = write_event(evt)
     if ok:
         last_message_time = now
