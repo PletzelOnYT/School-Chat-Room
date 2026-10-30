@@ -1,0 +1,21 @@
+name: Validate school chat Python
+on:
+  push:
+    paths:
+      - 'school_chat.py'
+      - '.github/workflows/check-python.yml'
+  pull_request:
+    paths:
+      - 'school_chat.py'
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check chat syntax without running Colab
+        run: python -m py_compile school_chat.py
