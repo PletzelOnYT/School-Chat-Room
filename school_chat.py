@@ -1,4 +1,4 @@
-# @title School ChatRoom v5.6 — School terminal chat with Vercel owner login
+# @title School ChatRoom v5.7 — School terminal chat with Vercel owner login
 """Google Colab school chat — the same shared Google Drive chat.json.
 
 The ONLY hosted API is for checking the owner's key and signing role grants.
@@ -67,13 +67,10 @@ if not os.path.isfile(CHAT_FILE_PATH):
 PRIVATE_FOLDER = os.path.join(DRIVE_ROOT, '.schoolchat')
 PRIVATE_IDENTITY_PATH = os.path.join(PRIVATE_FOLDER, 'identity.json')
 
-try:
-    import getpass
-    username = getpass.getuser()
-    if not username or username == 'root':
-        username = 'ColabUser'
-except Exception:
-    username = 'User'
+# Google Colab uses the same system username for many students. Do not use
+# ColabUser or getpass as a chat nickname, not even momentarily.
+# The value is assigned only after loading this person's private identity.
+username = None
 
 file_lock = threading.RLock()
 state_lock = threading.RLock()
@@ -205,7 +202,7 @@ RESERVED_USERNAMES = {
 }
 GENERIC_USERNAMES = {'colabuser', 'user', 'guest'}
 # Guests are generated from each signed identity. They cannot be claimed manually.
-GUEST_NAME_RE = re.compile(r'(?i)^guest-[0-9a-f]{8,12}$')
+GUEST_NAME_RE = re.compile(r'(?i)^guest-[0-9a-f]{8,64}$')
 
 
 def valid_username(value):
@@ -233,14 +230,23 @@ def valid_username(value):
     return clean
 
 
+def guest_digest(sender):
+    """Full random-identity fingerprint; never derived from IP, Gmail or Colab OS."""
+    try:
+        return hashlib.sha256(b64decode(sender)).hexdigest()
+    except Exception:
+        return ''
+
+
 def fallback_username(sender):
-    """Cannot impersonate a known name using malformed/untrusted metadata."""
-    return 'Guest-' + short_id(sender) if sender else 'LegacyUser'
+    """Stable, virtually collision-free Guest name from each private Drive identity."""
+    digest = guest_digest(sender)
+    return 'Guest-' + digest[:16] if digest else 'LegacyUser'
 
 
-# Colab returns the same operating-system username for almost every student.
-# A unique Guest ID is used instead, based on the persistent private identity.
-username = valid_username(username) or fallback_username(identity_public)
+# Use ONE effective nickname for the chat header and outgoing messages.
+# A new identity always begins with a random-looking unique Guest fingerprint.
+username = fallback_username(identity_public)
 
 
 def canonical(event):
@@ -505,10 +511,30 @@ def analyze(events):
             key=lambda pub: (claim_order.get((pub, normalized), 10**18), pub))
         for normalized, claimants in name_claims.items()
     }
+    # Resolve even an astronomically unlikely Guest fingerprint collision
+    # deterministically. For distinct identities in this chat, Guest labels
+    # never repeat. Custom display names are still first-claimant-wins.
+    guest_names = {pub: fallback_username(pub) for pub in identities}
+    for digits in (16, 24, 32, 64):
+        grouped = {}
+        for pub, guest in guest_names.items():
+            grouped.setdefault(guest.casefold(), []).append(pub)
+        duplicates = [group for group in grouped.values() if len(group) > 1]
+        if not duplicates:
+            break
+        for group in duplicates:
+            for pub in group:
+                guest_names[pub] = 'Guest-' + guest_digest(pub)[:digits if digits > 16 else 24]
+
     display_names = {}
     for pub, name in identities.items():
-        display_names[pub] = (name if name_owners.get(name.casefold()) == pub
-                               else fallback_username(pub))
+        # The default Guest label is not a user-claimed nickname. Treat it as
+        # a valid displayed name, not as an invalid/reserved custom nickname.
+        if GUEST_NAME_RE.fullmatch(name):
+            display_names[pub] = guest_names[pub]
+        else:
+            display_names[pub] = (name if name_owners.get(name.casefold()) == pub
+                                  else guest_names[pub])
 
     # Display CURRENT signed aliases across message history, not a stale
     # 'ColabUser' from a different session. Legacy unsigned history is kept
@@ -633,6 +659,10 @@ def latest_analysis():
     # If a competing student already owns that name, both the header and all
     # future messages use this identity's unique Guest ID instead.
     username = result['display_names'].get(identity_public, fallback_username(identity_public))
+    # Colab never supplies a trustworthy nickname. If the displayed name
+    # became invalid in a legacy session, force our own unique Guest name.
+    if not username or username.casefold() in GENERIC_USERNAMES:
+        username = fallback_username(identity_public)
     return result
 
 
@@ -728,6 +758,9 @@ def send_message(body, reply_to=None):
     if sum(1 for _, value in recent_sent_messages if value == normalized_body) >= 4:
         note('Repeated-message flood blocked. You can send a different message.')
         return False
+    # Refresh before signing: outgoing messages and the header always use
+    # exactly the same effective nickname derived from the signed history.
+    latest_analysis()
     evt = event_now('message', text=body)
     if reply_to:
         evt['reply_to'] = reply_to
