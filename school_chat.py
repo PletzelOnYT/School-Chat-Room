@@ -408,7 +408,7 @@ def analyze(events):
 
         if kind == 'role':
             # Only the holder of the signed identity can issue its blue check.
-            # All legacy Owner/Moderator/banned/server grants are inert.
+            # All other historical role-grant records are inert.
             if (signed and sender and e.get('role') == 'verified'
                     and e.get('self_verified') is True
                     and e.get('active') is True
@@ -475,7 +475,7 @@ def analyze(events):
     # One current display name per signed identity; only one identity can own
     # any nickname (case-insensitive / Unicode-normalized). This is enforced
     # on the receiver, even if a student edits their own Python notebook.
-    # First signed claimant wins; OWNER status does not steal a student's name.
+    # First signed claimant wins; no title can steal a student's name.
     # Concurrent Google Drive edits aren't atomic: this provides consistent
     # display, not a tamper-proof server-side name registry.
     name_claims = {}
@@ -1010,7 +1010,6 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;fo
   let stopped = false;
   let generation = 0;
   let sending = false;
-  let awaitingOwnerKey = false;
   let lastPopupId = null;
   let pendingHelpWindow = null;
   let lastHelpURL = null;
@@ -1092,9 +1091,7 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;fo
     area.appendChild(document.createTextNode(s.slice(last)));
   }
 
-  function appendRolePrefixes(isOwner, isMod, isVerified) {
-    if (isOwner) area.appendChild(colored('[OWNER] ', '#00FFFF', true));
-    else if (isMod) area.appendChild(colored('[MOD] ', '#00FFFF', true));
+  function appendVerifiedTitle(isVerified) {
     if (isVerified) area.appendChild(colored('☑ ', '#3498FF', true));
   }
 
@@ -1102,7 +1099,7 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;fo
     if (!state || !root.isConnected) return;
     area.replaceChildren();
     area.appendChild(document.createTextNode('--- Connected as: '));
-    appendRolePrefixes(state.my_owner, state.my_mod, state.my_verified);
+    appendVerifiedTitle(state.my_verified);
     area.appendChild(colored(state.username, 'green', true));
     area.appendChild(document.createTextNode(' ---'));
     newline();
@@ -1114,7 +1111,7 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;fo
       area.appendChild(colored('[' + (msg.time || '') + ']', '#00FFFF'));
       if (!msg.private) area.appendChild(colored(' #' + msg.number, '#999999'));
       area.appendChild(document.createTextNode(' '));
-      if (!msg.private) appendRolePrefixes(msg.owner, msg.moderator, msg.verified);
+      if (!msg.private) appendVerifiedTitle(msg.verified);
       area.appendChild(colored(msg.user || '', msg.private ? '#FF5555' : 'green', true));
       area.appendChild(document.createTextNode(': '));
       if (msg.private) area.appendChild(colored(msg.text || '', '#FF5555'));
@@ -1154,23 +1151,8 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;fo
     if (stopped || sending) return;
     let value = input.value;
     if (!value.trim()) return;
-    if (!awaitingOwnerKey && value.trim().toLowerCase() === '/owner') {
-      awaitingOwnerKey = true;
-      input.value = '';
-      input.type = 'password';
-      input.placeholder = 'Owner key (private)';
-      input.focus();
-      return;
-    }
-    const isHelp = !awaitingOwnerKey && /^\/(help|hellp|modhelp)$/i.test(value.trim());
+    const isHelp = ['/help', '/hellp'].includes(value.trim().toLowerCase());
     if (isHelp) openHelpWindow();
-    const wasOwnerPassword = awaitingOwnerKey;
-    if (awaitingOwnerKey) {
-      value = '/owner ' + value;
-      awaitingOwnerKey = false;
-      input.type = 'text';
-      input.placeholder = '';
-    }
     sending = true;
     input.value = '';
     input.disabled = true;
@@ -1179,8 +1161,7 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;fo
       const reply = await google.colab.kernel.invokeFunction(sendCallback, [value], {});
       render(replyData(reply));
     } catch (error) {
-      // Never put an owner secret back into a visible text field.
-      input.value = wasOwnerPassword ? '' : value;
+      input.value = value;
       if (pendingHelpWindow && !pendingHelpWindow.closed) {
         pendingHelpWindow.document.getElementById('heading').textContent = 'Unable to load commands';
         pendingHelpWindow = null;
@@ -1193,14 +1174,6 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;fo
     }
   });
 
-  input.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && awaitingOwnerKey) {
-      awaitingOwnerKey = false;
-      input.value = '';
-      input.type = 'text';
-      input.placeholder = '';
-    }
-  });
   refreshChat();
   const timer = setInterval(() => {
     if (!root.isConnected || stopped) { clearInterval(timer); return; }
