@@ -70,6 +70,26 @@ class SingleDriveFileTests(unittest.TestCase):
         self.assertNotIn("with open(CHAT_FILE_PATH, 'w'", SOURCE)
         self.assertIn("with open(CHAT_FILE_PATH, 'r+b')", SOURCE)
 
+    def test_in_place_append_keeps_exact_original_history_bytes(self):
+        source = (b'[\n  {"id":"' + self.anchor.encode() +
+                  b'","kind":"message","text":"Original history"}\n]\n')
+        self.file.write_bytes(source)
+        record = self.event("sent after original history")
+        self.assertTrue(self.env["write_event"](record))
+        actual = self.file.read_bytes()
+        # Old data up through the existing closing JSON-array bracket is
+        # preserved byte-for-byte; only the tail is inserted/replaced.
+        self.assertTrue(actual.startswith(source[:source.rindex(b']')]), actual)
+        self.assertEqual(json.loads(actual)[-1]["id"], record["id"])
+        self.assertEqual(actual.count(record["id"].encode()), 1)
+
+    def test_repeated_write_same_id_does_not_duplicate_event(self):
+        record = self.event("same ID")
+        self.assertTrue(self.env["write_event"](record))
+        self.assertTrue(self.env["write_event"](record))
+        self.assertEqual(sum(e.get("id") == record["id"]
+                             for e in self.env["read_messages"]()), 1)
+
     def test_invalid_signature_cannot_be_saved(self):
         invalid = self.event("spoofed")
         invalid["sig"] = "invalid"
