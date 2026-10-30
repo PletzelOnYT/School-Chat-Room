@@ -75,7 +75,7 @@ ALLOWED_ATTACHMENTS = {
     'text/plain': '.txt', 'text/markdown': '.md',
 }
 if not os.path.isdir(EVENT_ROOT):
-    raise ChatFileError if False else FileNotFoundError(
+    raise FileNotFoundError(
         'A shared Drive folder is required for non-overwriting chat updates. '
         'Create one folder named SchoolChatEvents, share it with everyone as Editor, '
         'and have each student add a SHORTCUT to it in My Drive root. '
@@ -326,7 +326,7 @@ def read_messages():
         if time.monotonic() - last_event_scan >= 1.5:
             try:
                 names = sorted(n for n in os.listdir(EVENT_FOLDER)
-                               if re.fullmatch(r'[0-9]{10}-[0-9a-f]{32}\\.json', n))
+                               if re.fullmatch(r'[0-9]{10}-[0-9a-f]{32}\.json', n))
             except OSError as exc:
                 raise ChatFileError('Shared event folder is unavailable: ' + str(exc)) from exc
             for name in names:
