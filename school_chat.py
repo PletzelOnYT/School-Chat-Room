@@ -1,4 +1,4 @@
-# @title School ChatRoom v5.13 — School terminal chat with Vercel owner login
+# @title School ChatRoom v5.14 — School terminal chat with Vercel owner login
 """Google Colab school chat — the same shared Google Drive chat.json.
 
 The ONLY hosted API is for checking the owner's key and signing role grants.
@@ -29,7 +29,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey, Ed25519PublicKey
 )
 from cryptography.hazmat.primitives import serialization
-from google.colab import auth, drive, output
+from google.colab import drive, output
 from IPython.display import HTML, JSON, display
 
 # Original terminal look and chat behavior
@@ -189,68 +189,42 @@ identity_private, identity_public = load_identity()
 
 
 def google_account_username():
-    """Read this Colab session's Google identity; never publish full email.
+    """Optional existing Google display name; no new Google sign-in is started.
 
-    Google can ask students to authorize Drive metadata access. We only use
-    the local part before @, and never save OAuth tokens in chat.json.
-    This is a display-name hint, NOT server-verifiable Google authentication.
+    Google Workspace for Education accounts can be restricted by age or
+    administrator policy. Respect that restriction: never call
+    google.colab.auth.authenticate_user(), request extra OAuth scopes, or
+    attempt a different login route just to discover a nickname. If the
+    currently authorized Drive credentials cannot provide the account name,
+    return None; the chat uses its existing signed Guest identity instead.
     """
     try:
         import google.auth
-        from google.auth.transport.requests import AuthorizedSession
-        auth.authenticate_user()
+        import requests
+
         credentials, _ = google.auth.default()
-        session = AuthorizedSession(credentials)
-        # Drive's about endpoint identifies the authenticated Drive API user.
-        # If the ADC token does not have a Drive scope, try OAuth userinfo.
-        endpoints = (
-            ('https://www.googleapis.com/drive/v3/about',
-             {'fields': 'user(emailAddress)'}, 'drive'),
-            ('https://openidconnect.googleapis.com/v1/userinfo',
-             None, 'userinfo'),
+        # Do not refresh credentials or trigger another authorization flow.
+        token = getattr(credentials, 'token', None)
+        if not token or not getattr(credentials, 'valid', False):
+            return None
+        response = requests.get(
+            'https://www.googleapis.com/drive/v3/about',
+            params={'fields': 'user(emailAddress)'},
+            headers={'Authorization': 'Bearer ' + token},
+            timeout=6,
         )
-        email = ''
-        for url, params, kind in endpoints:
-            try:
-                response = session.get(url, params=params, timeout=12)
-                if response.status_code != 200:
-                    continue
-                info = response.json()
-                email = ((info.get('user') or {}).get('emailAddress', '')
-                         if kind == 'drive' else info.get('email', ''))
-                if isinstance(email, str) and '@' in email:
-                    break
-            except (ValueError, OSError):
-                continue
-        if not email or '@' not in email:
-            # Some Colab Google authentication sessions allow only gcloud
-            # account introspection, not Drive/about or OIDC userinfo scopes.
-            # This is still the Google account authorized in this runtime.
-            import subprocess
-            result = subprocess.run(
-                ['gcloud', 'auth', 'list', '--filter=status:ACTIVE',
-                 '--format=value(account)'],
-                capture_output=True, text=True, check=True, timeout=12)
-            candidates = [x.strip() for x in result.stdout.splitlines()
-                          if '@' in x.strip()]
-            email = candidates[0] if candidates else ''
-        if not email or '@' not in email:
-            raise ValueError('Google did not return an email address for this account')
+        if response.status_code != 200:
+            return None
+        email = (response.json().get('user') or {}).get('emailAddress')
+        if not isinstance(email, str) or '@' not in email:
+            return None
         local_part = email.rsplit('@', 1)[0]
-        # Display only letters, digits, dots, underscores and hyphens.
         candidate = re.sub(r'[^A-Za-z0-9._-]', '', local_part)[:32]
-        if not candidate:
-            raise ValueError('No usable Google account username')
-        # Prevent a real email prefix from becoming a misleading role label.
-        if candidate.casefold() in RESERVED_USERNAMES | GENERIC_USERNAMES:
-            candidate = (candidate[:23] + '-' + short_id(identity_public)[:4])
-        return candidate
-    except Exception as exc:
-        raise ChatFileError(
-            'Unable to read your Google account name. Authorize your account '
-            'in Colab, then run the launcher again. Your full email is not '
-            'sent to chat.json. Details: ' + type(exc).__name__
-        ) from exc
+        return candidate or None
+    except Exception:
+        # An age-restricted or otherwise unavailable Google service should
+        # never stop the whole school chat from loading.
+        return None
 
 
 def short_id(pub):
@@ -311,12 +285,13 @@ def fallback_username(sender):
     return 'Guest-' + str(100 + int(digest[:8], 16) % 900) if digest else 'Guest-000'
 
 
-# Google account local part is the default nickname, not a random Guest ID.
-# Ask for Google authorization instead of silently assigning ColabUser/Guest.
-GOOGLE_ACCOUNT_USERNAME = google_account_username()
-if not valid_username(GOOGLE_ACCOUNT_USERNAME):
-    raise ChatFileError('Your Google account username is reserved or not allowed. '
-                        'Choose a supported account or contact the chat owner.')
+# Use an already-authorized account prefix only if permitted and available.
+# Otherwise preserve the signed, stable Guest-### name. The full email address
+# and Google tokens are never written to the shared chat file.
+_account_hint = google_account_username()
+GOOGLE_ACCOUNT_NAME_AVAILABLE = bool(_account_hint and valid_username(_account_hint))
+GOOGLE_ACCOUNT_USERNAME = (_account_hint if GOOGLE_ACCOUNT_NAME_AVAILABLE
+                           else fallback_username(identity_public))
 username = GOOGLE_ACCOUNT_USERNAME
 
 
@@ -435,8 +410,8 @@ def write_event(event):
 
 
 def event_now(kind, **fields):
-    if kind in ('message', 'profile'):
-        # Account prefix only; no full email, OAuth token, or Google ID.
+    if kind in ('message', 'profile') and GOOGLE_ACCOUNT_NAME_AVAILABLE:
+        # Only a permitted account prefix; no full email, OAuth token, or ID.
         fields.setdefault('account_username', GOOGLE_ACCOUNT_USERNAME)
     return sign_event(dict(id=str(uuid.uuid4()), kind=kind,
                            issued_at=int(time.time()),
