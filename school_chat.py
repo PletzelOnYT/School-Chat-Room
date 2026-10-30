@@ -1,4 +1,4 @@
-# @title School ChatRoom v5.12 — School terminal chat with Vercel owner login
+# @title School ChatRoom v5.13 — School terminal chat with Vercel owner login
 """Google Colab school chat — the same shared Google Drive chat.json.
 
 The ONLY hosted API is for checking the owner's key and signing role grants.
@@ -1130,7 +1130,7 @@ def submit_message(raw):
                 lines = [
                     ('[OWNER] ' if pub in a['owners'] else
                      '[MOD] ' if pub in a['moderators'] else '') +
-                    ('[VERIFIED] ' if pub in a['verified'] else '') +
+                    ('☑ ' if pub in a['verified'] else '') +
                     f'@{name} | ID {short_id(pub)}'
                     for pub, name in people[-50:]
                 ]
@@ -1448,7 +1448,7 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;fo
   function appendRolePrefixes(isOwner, isMod, isVerified) {
     if (isOwner) area.appendChild(colored('[OWNER] ', '#00FFFF', true));
     else if (isMod) area.appendChild(colored('[MOD] ', '#00FFFF', true));
-    if (isVerified) area.appendChild(colored('[VERIFIED] ', '#00FFFF', true));
+    if (isVerified) area.appendChild(colored('☑ ', '#3498FF', true));
   }
 
   function render(state) {
