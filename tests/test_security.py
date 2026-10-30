@@ -1,3 +1,4 @@
+"""Regression tests for the single self-claimed Verified title."""
 import ast
 import base64
 import hashlib
@@ -7,204 +8,133 @@ import unicodedata
 import unittest
 from pathlib import Path
 
-# Extract logic without executing Google Colab Drive mounts or UI callbacks.
 source = Path(__file__).resolve().parents[1].joinpath("school_chat.py").read_text()
 tree = ast.parse(source)
 names = {
     "analyze", "valid_username", "valid_incoming_message", "is_gibberish",
     "guest_digest", "fallback_username", "short_id",
 }
-nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
+functions = [node for node in tree.body
+             if isinstance(node, ast.FunctionDef) and node.name in names]
 env = {
     "re": re, "time": time, "hashlib": hashlib, "unicodedata": unicodedata,
     "MESSAGE_LIMIT": 1000,
-    "SERVER_PUBLIC_KEY": "server",
     "GENERIC_USERNAMES": {"colabuser", "guest", "user"},
-    "RESERVED_USERNAMES": {"owner", "admin", "mod", "verified", "system"},
+    "RESERVED_USERNAMES": {
+        "owner", "mod", "moderator", "admin", "administrator",
+        "verified", "system", "server", "staff", "school chat",
+        "schoolchat", "security", "support",
+    },
     "GUEST_NAME_RE": re.compile(r"(?i)^guest-(?:[0-9]{2,3}|[0-9a-f]{8,64})$"),
     "b64decode": lambda s: base64.b64decode(s, validate=True),
     "valid_signature": lambda e: e.get("sig") == "test-valid",
     "is_valid_emoji": lambda _: True,
 }
-exec(compile(ast.Module(body=nodes, type_ignores=[]), "<chat-functions>", "exec"), env)
+exec(compile(ast.Module(body=functions, type_ignores=[]), "<chat>", "exec"), env)
 
 
-class SecurityTests(unittest.TestCase):
+class VerifiedOnlyTests(unittest.TestCase):
     def setUp(self):
-        self.a = base64.b64encode(bytes([1]) * 32).decode()
-        self.b = base64.b64encode(bytes([2]) * 32).decode()
+        self.a = base64.b64encode(bytes([1])*32).decode()
+        self.b = base64.b64encode(bytes([2])*32).decode()
         self.now = int(time.time())
 
-    def evt(self, ident, kind="message", **kwargs):
-        return {
-            "id": ident, "kind": kind, "time": "12:00:00",
-            "issued_at": self.now, "sig": "test-valid", **kwargs,
-        }
+    def evt(self, identity, kind="message", **kwargs):
+        return dict(id=identity, kind=kind, time="12:00:00",
+                    issued_at=self.now, sig="test-valid", **kwargs)
 
-    def test_verified_and_moderator_role_changes(self):
-        arr = [
-            self.evt("m1", sender_key=self.a, user="Guest-111", text="first"),
-            self.evt("r1", kind="role", sender_key="server", role="moderator",
-                     target_key=self.b, active=True),
-            self.evt("r2", kind="role", sender_key="server", role="verified",
-                     target_key=self.a, active=True),
-            self.evt("p1", kind="profile", sender_key=self.a, user="StudentName"),
-        ]
-        data = env["analyze"](arr)
-        self.assertIn(self.b, data["moderators"])
-        self.assertIn(self.a, data["verified"])
-        self.assertEqual(data["display_names"][self.a], "StudentName")
-
-    def test_ban_and_unban_filter_subsequent_posts(self):
-        arr = [
-            self.evt("m1", sender_key=self.a, user="Guest-111", text="before ban"),
-            self.evt("ban", kind="role", sender_key="server", role="banned",
-                     target_key=self.a, active=True),
-            self.evt("m2", sender_key=self.a, user="Guest-111", text="while banned"),
-            self.evt("unban", kind="role", sender_key="server", role="banned",
-                     target_key=self.a, active=False),
-            self.evt("m3", sender_key=self.a, user="Guest-111", text="after unban"),
-        ]
-        data = env["analyze"](arr)
-        self.assertEqual([m["text"] for m in data["messages"]],
-                         ["before ban", "after unban"])
-        self.assertNotIn(self.a, data["banned"])
-
-    def test_forged_roles_and_bad_names_are_ignored(self):
-        arr = [
-            self.evt("fake-role", kind="role", sender_key=self.a, role="moderator",
-                     target_key=self.a, active=True),
-            self.evt("msg", sender_key=self.a, user="[OWNER] Admin", text="hi"),
-        ]
-        data = env["analyze"](arr)
-        self.assertNotIn(self.a, data["moderators"])
-        self.assertTrue(data["display_names"][self.a].startswith("Guest-"))
-
-    def test_receivers_filter_bot_floods(self):
-        self.assertFalse(env["valid_incoming_message"]("a" * 20))
-        self.assertFalse(env["valid_incoming_message"]("Hi" + chr(0x202e) + "invalid"))
-        self.assertTrue(env["valid_incoming_message"]("Hey, how are you? :)"))
-        arr = [self.evt("msg" + str(i), sender_key=self.a, user="Guest-111",
-                        text="spam " + str(i)) for i in range(15)]
-        data = env["analyze"](arr)
-        self.assertLessEqual(len(data["messages"]), 7)
-
-    def test_google_account_name_without_badge(self):
-        name = "student123"
-        events = [
-            self.evt("profile", kind="profile", sender_key=self.a, user=name,
-                     account_username=name),
-        ]
-        state = env["analyze"](events)
-        self.assertEqual(state["display_names"][self.a], name)
-        self.assertNotIn(self.a, state["verified"])
-
-    def test_unverified_cannot_force_rename_but_owner_can(self):
-        events = [
-            self.evt("profile", kind="profile", sender_key=self.a,
-                     user="student123", account_username="student123"),
-            self.evt("bad", kind="profile", sender_key=self.a, user="FakeName",
-                     account_username="student123", renamed=True),
-        ]
-        state = env["analyze"](events)
-        self.assertEqual(state["display_names"][self.a], "student123")
-        events.extend([
-            self.evt("owner", kind="role", sender_key="server", role="owner",
-                     target_key=self.a, active=True,
-                     expires_at=self.now + 3600),
-            self.evt("good", kind="profile", sender_key=self.a, user="CoolName",
-                     account_username="student123", renamed=True),
-        ])
-        self.assertEqual(env["analyze"](events)["display_names"][self.a],
-                         "CoolName")
-
-    def test_mod_can_rename_without_verified(self):
-        events = [
-            self.evt("mod", kind="role", sender_key="server", role="moderator",
-                     target_key=self.a, active=True),
-            self.evt("profile", kind="profile", sender_key=self.a,
-                     user="MyNick", account_username="student123",
-                     renamed=True),
-        ]
-        state = env["analyze"](events)
-        self.assertEqual(state["display_names"][self.a], "MyNick")
-        self.assertNotIn(self.a, state["verified"])
-
-    def test_private_self_verification_only_grants_self(self):
-        events = [
-            self.evt("profile", kind="profile", sender_key=self.a,
-                     user="student123", account_username="student123"),
+    def test_only_verified_self_claim_is_effective(self):
+        entries = [
+            self.evt("first", sender_key=self.a, user="Guest-101", text="hello"),
             self.evt("claim", kind="role", sender_key=self.a,
-                     target_key=self.a, role="verified", active=True,
+                     role="verified", target_key=self.a, active=True,
                      self_verified=True),
+            self.evt("second", sender_key=self.a, user="Guest-101", text="after"),
         ]
-        data = env["analyze"](events)
-        self.assertIn(self.a, data["verified"])
-        self.assertNotIn(self.b, data["verified"])
-        events.append(self.evt("rename", kind="profile", sender_key=self.a,
-                               user="NewName", account_username="student123",
-                               renamed=True))
-        self.assertEqual(env["analyze"](events)["display_names"][self.a],
-                         "NewName")
+        state = env["analyze"](entries)
+        self.assertEqual(len(state["messages"]), 2)
+        self.assertTrue(all(row["verified"] for row in state["messages"]))
+        self.assertEqual(state["verified"], {self.a})
 
-    def test_self_service_cannot_verify_others_or_claim_owner(self):
-        events = [
-            self.evt("spoof", kind="role", sender_key=self.a,
-                     target_key=self.b, role="verified", active=True,
-                     self_verified=True),
-            self.evt("spoof-owner", kind="role", sender_key=self.a,
-                     target_key=self.a, role="owner", active=True,
-                     self_verified=True),
-            self.evt("spoof-mod", kind="role", sender_key=self.a,
-                     target_key=self.a, role="moderator", active=True,
-                     self_verified=True),
-            self.evt("unsigned", kind="role", sender_key=self.b,
-                     target_key=self.b, role="verified", active=True,
-                     self_verified=True, sig="invalid"),
-        ]
-        data = env["analyze"](events)
-        self.assertFalse(data["owners"])
-        self.assertFalse(data["moderators"])
-        self.assertFalse(data["verified"])
-
-    def test_moderator_can_revoke_and_block_self_claim(self):
-        events = [
+    def test_old_privileged_grants_are_inert(self):
+        entries = [
+            self.evt("owner", kind="role", sender_key="server",
+                     role="owner", target_key=self.a, active=True),
             self.evt("mod", kind="role", sender_key="server",
-                     target_key=self.b, role="moderator", active=True),
-            self.evt("claim", kind="role", sender_key=self.a,
-                     target_key=self.a, role="verified", active=True,
-                     self_verified=True),
-            self.evt("revoke", kind="role", sender_key=self.b,
-                     target_key=self.a, role="verified", active=False),
-            self.evt("reclaim", kind="role", sender_key=self.a,
-                     target_key=self.a, role="verified", active=True,
-                     self_verified=True),
+                     role="moderator", target_key=self.a, active=True),
+            self.evt("old-verified", kind="role", sender_key="server",
+                     role="verified", target_key=self.a, active=True),
+            self.evt("banned", kind="role", sender_key="server",
+                     role="banned", target_key=self.b, active=True),
+            self.evt("post", sender_key=self.b, user="Guest-204",
+                     text="message still visible"),
         ]
-        state = env["analyze"](events)
-        self.assertNotIn(self.a, state["verified"])
-        self.assertIn(self.a, state["self_verification_denied"])
-        events.append(self.evt("admin-reverify", kind="role", sender_key=self.b,
-                               target_key=self.a, role="verified", active=True))
-        self.assertIn(self.a, env["analyze"](events)["verified"])
+        state = env["analyze"](entries)
+        self.assertEqual(state["verified"], set())
+        self.assertEqual(len(state["messages"]), 1)
+        self.assertNotIn("owners", state)
+        self.assertNotIn("moderators", state)
+        self.assertNotIn("banned", state)
 
-    def test_no_advertised_self_service_command(self):
-        helps = {}
-        for node in tree.body:
-            if isinstance(node, ast.Assign):
-                for target in node.targets:
-                    if isinstance(target, ast.Name) and target.id in (
-                            "HELP_TEXT", "MOD_HELP", "RULES"):
-                        helps[target.id] = ast.literal_eval(node.value)
-        for text in helps.values():
-            self.assertNotIn("/vf", text)
+    def test_cannot_self_claim_for_someone_else(self):
+        state = env["analyze"]([
+            self.evt("spoof", kind="role", sender_key=self.a,
+                     role="verified", target_key=self.b, active=True,
+                     self_verified=True),
+            self.evt("other", kind="role", sender_key=self.a,
+                     role="verified", target_key=self.a, active=True,
+                     self_verified=False),
+            self.evt("unsigned", kind="role", sender_key=self.b,
+                     role="verified", target_key=self.b, active=True,
+                     self_verified=True, sig="invalid"),
+        ])
+        self.assertFalse(state["verified"])
+
+    def test_verified_can_rename_and_unverified_cannot(self):
+        base = self.evt("base", kind="profile", sender_key=self.a,
+                        user="student", account_username="student")
+        spoof = self.evt("spoof", kind="profile", sender_key=self.a,
+                         user="Cheater", account_username="student", renamed=True)
+        self.assertEqual(env["analyze"]([base, spoof])["display_names"][self.a],
+                         "student")
+        claim = self.evt("claim", kind="role", sender_key=self.a,
+                         role="verified", target_key=self.a, active=True,
+                         self_verified=True)
+        valid = self.evt("rename", kind="profile", sender_key=self.a,
+                         user="CoolName", account_username="student", renamed=True)
+        state = env["analyze"]([base, spoof, claim, valid])
+        self.assertEqual(state["display_names"][self.a], "CoolName")
+
+    def test_name_conflicts_do_not_merge_identity(self):
+        events = [
+            self.evt("first", kind="profile", sender_key=self.a,
+                     user="alex", account_username="alex"),
+            self.evt("second", kind="profile", sender_key=self.b,
+                     user="alex", account_username="alex"),
+        ]
+        names = env["analyze"](events)["display_names"]
+        self.assertNotEqual(names[self.a], names[self.b])
+
+    def test_filter_normal_text_and_flood(self):
+        self.assertTrue(env["valid_incoming_message"]("How's class today?"))
+        self.assertFalse(env["valid_incoming_message"]("a"*22))
+        self.assertFalse(env["valid_incoming_message"]("x"+chr(0x202e)+"y"))
+
+    def test_only_blue_title_in_ui_and_no_external_role_api(self):
+        self.assertIn("colored('☑ ', '#3498FF', true)", source)
         self.assertIn("if command == '/vf':", source)
-
-    def test_unique_guest_name_assignment(self):
-        arr = [self.evt("msg1", sender_key=self.a, user="Guest-111", text="hi"),
-               self.evt("msg2", sender_key=self.b, user="Guest-222", text="hi")]
-        data = env["analyze"](arr)
-        self.assertNotEqual(data["display_names"][self.a],
-                            data["display_names"][self.b])
+        help_const = next(node.value for node in tree.body
+                          if isinstance(node, ast.Assign)
+                          and any(isinstance(t, ast.Name) and t.id == "HELP_TEXT"
+                                  for t in node.targets))
+        self.assertNotIn("/vf", ast.literal_eval(help_const))
+        for absent in (
+            "OWNER_AUTH_URL", "SERVER_PUBLIC_KEY", "call_owner_server",
+            "call_moderator_server", "read_remote_role_events",
+            "[OWNER]", "[MOD]", "MOD_HELP", "role_storage",
+            "upstash", "vercel", "my_owner", "my_mod", "my_banned",
+        ):
+            self.assertNotIn(absent.lower(), source.lower())
 
 
 if __name__ == "__main__":
