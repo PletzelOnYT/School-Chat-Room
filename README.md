@@ -12,6 +12,7 @@ A lightweight Google Colab messaging app. Your existing shared Google Drive **`c
 - Signed private identity persisted across restarts in the original `.schoolchat/identity.json` (path retained to **preserve existing IDs**)
 - Google account username prefix used when already available without extra school-restricted login; otherwise a short unique Guest label
 - `/rename` only when Verified; private `/vf` self-check command, not advertised in help
+- **No automatic Verified badge on Drive mount or account-prefix lookup.** Legacy auto-claims are ignored; everyone must explicitly claim again after updating.
 - Much stronger multi-signal keysmash/repetition filtering, plus duplicate and rate checks
 - Rapid sends queued in order instead of disabling the text box
 - Byte-minimal in-place JSON array tail writes and a private sender retry outbox
