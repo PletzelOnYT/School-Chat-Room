@@ -373,6 +373,7 @@ class Guardian:
         self.shared=Path(shared)
         self.private=Path(private_directory)
         self.db_path=Path(db_path)
+        self.db_path.parent.mkdir(parents=True,exist_ok=True)
         self.drive_file_id=drive_file_id
         self.repair=repair
         self.private.mkdir(parents=True,exist_ok=True)
