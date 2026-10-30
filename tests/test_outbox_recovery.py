@@ -41,6 +41,7 @@ class PrivateRecoveryTests(unittest.TestCase):
             'identity_public': 'alice-signed-key',
             'last_outbox_check': 0.0,
             'valid_signature': lambda e: e.get('sig') == 'good',
+            'is_plain_message': lambda e: False,
             'ChatFileError': type('ChatFileError', (Exception,), {}),
         }
         exec(compile(ast.Module(body=FUNCTIONS, type_ignores=[]),
