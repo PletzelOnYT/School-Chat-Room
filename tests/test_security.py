@@ -130,6 +130,75 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(state["display_names"][self.a], "MyNick")
         self.assertNotIn(self.a, state["verified"])
 
+    def test_private_self_verification_only_grants_self(self):
+        events = [
+            self.evt("profile", kind="profile", sender_key=self.a,
+                     user="student123", account_username="student123"),
+            self.evt("claim", kind="role", sender_key=self.a,
+                     target_key=self.a, role="verified", active=True,
+                     self_verified=True),
+        ]
+        data = env["analyze"](events)
+        self.assertIn(self.a, data["verified"])
+        self.assertNotIn(self.b, data["verified"])
+        events.append(self.evt("rename", kind="profile", sender_key=self.a,
+                               user="NewName", account_username="student123",
+                               renamed=True))
+        self.assertEqual(env["analyze"](events)["display_names"][self.a],
+                         "NewName")
+
+    def test_self_service_cannot_verify_others_or_claim_owner(self):
+        events = [
+            self.evt("spoof", kind="role", sender_key=self.a,
+                     target_key=self.b, role="verified", active=True,
+                     self_verified=True),
+            self.evt("spoof-owner", kind="role", sender_key=self.a,
+                     target_key=self.a, role="owner", active=True,
+                     self_verified=True),
+            self.evt("spoof-mod", kind="role", sender_key=self.a,
+                     target_key=self.a, role="moderator", active=True,
+                     self_verified=True),
+            self.evt("unsigned", kind="role", sender_key=self.b,
+                     target_key=self.b, role="verified", active=True,
+                     self_verified=True, sig="invalid"),
+        ]
+        data = env["analyze"](events)
+        self.assertFalse(data["owners"])
+        self.assertFalse(data["moderators"])
+        self.assertFalse(data["verified"])
+
+    def test_moderator_can_revoke_and_block_self_claim(self):
+        events = [
+            self.evt("mod", kind="role", sender_key="server",
+                     target_key=self.b, role="moderator", active=True),
+            self.evt("claim", kind="role", sender_key=self.a,
+                     target_key=self.a, role="verified", active=True,
+                     self_verified=True),
+            self.evt("revoke", kind="role", sender_key=self.b,
+                     target_key=self.a, role="verified", active=False),
+            self.evt("reclaim", kind="role", sender_key=self.a,
+                     target_key=self.a, role="verified", active=True,
+                     self_verified=True),
+        ]
+        state = env["analyze"](events)
+        self.assertNotIn(self.a, state["verified"])
+        self.assertIn(self.a, state["self_verification_denied"])
+        events.append(self.evt("admin-reverify", kind="role", sender_key=self.b,
+                               target_key=self.a, role="verified", active=True))
+        self.assertIn(self.a, env["analyze"](events)["verified"])
+
+    def test_no_advertised_self_service_command(self):
+        helps = {}
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id in (
+                            "HELP_TEXT", "MOD_HELP", "RULES"):
+                        helps[target.id] = ast.literal_eval(node.value)
+        for text in helps.values():
+            self.assertNotIn("/vf", text)
+        self.assertIn("if command == '/vf':", source)
+
     def test_unique_guest_name_assignment(self):
         arr = [self.evt("msg1", sender_key=self.a, user="Guest-111", text="hi"),
                self.evt("msg2", sender_key=self.b, user="Guest-222", text="hi")]
