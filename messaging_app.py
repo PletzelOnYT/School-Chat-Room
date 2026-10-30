@@ -35,7 +35,7 @@ VISIBLE_MESSAGES = 15
 INPUT_WIDTH_PX = 540
 WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
-COOLDOWN_SECONDS = 1.5
+COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
 CLIENT_VERSION = '5.22'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
@@ -62,6 +62,7 @@ if not os.path.isfile(CHAT_FILE_PATH):
 
 PRIVATE_FOLDER = os.path.join(DRIVE_ROOT, '.schoolchat')
 PRIVATE_IDENTITY_PATH = os.path.join(PRIVATE_FOLDER, 'identity.json')
+PRIVATE_OUTBOX_PATH = os.path.join(PRIVATE_FOLDER, 'message_outbox.json')
 
 
 # Google Colab uses the same system username for many students. Do not use
@@ -84,6 +85,7 @@ minimum_client_version = ''
 update_required = False
 update_notice_shown = False
 last_upstream_version_check = 0.0
+last_outbox_check = 0.0
 
 class ChatFileError(Exception):
     pass
@@ -287,38 +289,141 @@ def read_messages():
 read_messages()  # Verify the correct shared history before showing the chat.
 
 
-def write_event(event):
-    """Best-effort shared JSON update; the file cannot safely be appended to.
+def append_event_in_place(event):
+    """Extend the existing JSON array by modifying ONLY its closing tail.
 
-    Writing additional bytes after the final ] would make JSON invalid.
-    Re-read, append, write, then check the event was retained. Google Drive
-    does not provide a cross-user transaction or atomic append here.
+    The original historical content before the final ']' is never serialized
+    again, and Google Drive shortcut paths are never replaced. This is NOT an
+    atomic multi-client append; a Drive mount provides no shared transaction.
+    """
+    encoded = json.dumps(event, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+    with open(CHAT_FILE_PATH, 'r+b') as fh:
+        fh.seek(0, os.SEEK_END)
+        size = fh.tell()
+        if size < 2:
+            raise ChatFileError('chat.json is too short to append safely.')
+        scan = min(size, 8192)
+        fh.seek(size - scan)
+        tail = fh.read(scan)
+        close = len(tail.rstrip()) - 1
+        if close < 0 or tail[close:close+1] != b']':
+            raise ChatFileError('chat.json is not a closed JSON array. Refusing to edit it.')
+        # The last visible character before ] must end a valid JSON item or
+        # be [ for an empty array. We already parsed the whole array above.
+        preceding = tail[:close].rstrip()
+        if not preceding or preceding[-1:] not in (b'}', b']', b'"', b'0', b'1',
+                                                   b'2', b'3', b'4', b'5',
+                                                   b'6', b'7', b'8', b'9'):
+            raise ChatFileError('chat.json closing array cannot be safely extended.')
+        empty_array = preceding[-1:] == b'['
+        # Preserve trailing whitespace. Never append after the final ]: that
+        # would break json.load() for the older and current chat clients.
+        trailer = tail[close+1:]
+        position = size - scan + close
+        fh.seek(position)
+        fh.write((b'' if empty_array else b',') + b'\n' + encoded + b'\n]' + trailer)
+        fh.truncate()
+        fh.flush()
+
+
+def load_outbox():
+    """Only this person's private Drive contains their recovery receipts."""
+    try:
+        with open(PRIVATE_OUTBOX_PATH, encoding='utf-8') as fh:
+            records = json.load(fh)
+        if isinstance(records, list):
+            return [e for e in records if isinstance(e, dict) and
+                    valid_signature(e) and e.get('sender_key') == identity_public][-50:]
+    except (OSError, ValueError):
+        pass
+    return []
+
+
+def save_outbox(events):
+    try:
+        os.makedirs(PRIVATE_FOLDER, exist_ok=True)
+        with open(PRIVATE_OUTBOX_PATH, 'w', encoding='utf-8') as fh:
+            json.dump(events[-50:], fh, ensure_ascii=False, separators=(',', ':'))
+            fh.flush()
+    except OSError as exc:
+        raise ChatFileError('Cannot save your private retry outbox: ' + str(exc)) from exc
+
+
+def remember_outgoing(event):
+    with file_lock:
+        events = load_outbox()
+        if not any(e.get('id') == event.get('id') for e in events):
+            events.append(event)
+            save_outbox(events)
+
+
+def write_event(event, remember=True):
+    """Small tail append + verify, with durable retry receipt per sender.
+
+    A sender's event ID is stable across retries. A corrupted or unreadable
+    shared file is NEVER overwritten; ask its owner to restore a Drive version.
     """
     if not valid_signature(event):
         raise ChatFileError('Cannot save an unsigned chat event.')
+    if remember:
+        remember_outgoing(event)
     with file_lock:
-        for attempt in range(4):
-            records = read_messages()
+        for attempt in range(7):
+            existing = read_messages()
             if any(isinstance(e, dict) and e.get('id') == event.get('id')
-                   for e in records):
+                   for e in existing):
                 return True
-            records.append(event)
-            try:
-                # Never replace a Drive shortcut: update the existing file.
-                with open(CHAT_FILE_PATH, 'w', encoding='utf-8') as fh:
-                    json.dump(records, fh, ensure_ascii=False, indent=2)
-                    fh.flush()
-            except OSError as exc:
-                raise ChatFileError('Shared chat.json write failed: ' + str(exc)) from exc
-            time.sleep(0.15 * (attempt + 1))
-            try:
+            # Spread concurrent clients' writes to reduce collisions.
+            if attempt:
+                time.sleep(0.07 * attempt + (int(uuid.uuid4().hex[:4], 16) % 80)/1000)
+                existing = read_messages()
                 if any(isinstance(e, dict) and e.get('id') == event.get('id')
-                       for e in read_messages()):
+                       for e in existing):
+                    return True
+            try:
+                append_event_in_place(event)
+            except OSError as exc:
+                if attempt == 6:
+                    raise ChatFileError('Google Drive tail append failed: ' + str(exc)) from exc
+                continue
+            time.sleep(0.16 + attempt * 0.06)
+            try:
+                if any(e.get('id') == event.get('id') for e in read_messages()
+                       if isinstance(e, dict)):
                     return True
             except ChatFileError:
-                if attempt == 3:
+                # A concurrent, incomplete write may be syncing. Retry
+                # parsing, but do not rewrite the damaged contents.
+                if attempt == 6:
                     raise
         return False
+
+
+def reconcile_outbox():
+    """Restore one recently lost signed event per refresh interval.
+
+    Never auto-rewrite damaged JSON. This reduces message loss after a
+    completed Google Drive write is later overwritten by another client.
+    """
+    global last_outbox_check
+    now = time.monotonic()
+    if now - last_outbox_check < 7.0:
+        return
+    last_outbox_check = now
+    records = load_outbox()
+    if not records:
+        return
+    present = {e.get('id') for e in read_messages() if isinstance(e, dict)}
+    for event in records:
+        stamp = event.get('issued_at')
+        if type(stamp) is not int or abs(time.time() - stamp) > 86400:
+            continue
+        if event.get('id') not in present:
+            try:
+                write_event(event, remember=False)
+            except ChatFileError:
+                pass
+            break
 
 
 def event_now(kind, **fields):
@@ -539,8 +644,8 @@ def analyze(events):
             if type(stamp) is int and abs(stamp - now) <= 86400:
                 history = rate_history.setdefault(sender, [])
                 history[:] = [(ts, body) for ts, body in history if stamp - ts <= 60]
-                if (sum(1 for ts, _ in history if 0 <= stamp - ts <= 10) >= 7 or
-                        sum(1 for ts, _ in history if 0 <= stamp - ts <= 60) >= 30 or
+                if (sum(1 for ts, _ in history if 0 <= stamp - ts <= 10) >= 12 or
+                        sum(1 for ts, _ in history if 0 <= stamp - ts <= 60) >= 65 or
                         sum(1 for ts, body in history if 0 <= stamp - ts <= 30 and
                             body == message_text.casefold().strip()) >= 4):
                     continue
@@ -896,6 +1001,8 @@ def snapshot():
     global next_popup, running, update_notice_shown
     try:
         check_upstream_version()
+        # Retry an event after a competing Drive save removed it. No server.
+        reconcile_outbox()
         a = latest_analysis()
         if update_required:
             running = False
