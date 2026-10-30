@@ -135,12 +135,34 @@ class DriveJournalTests(unittest.TestCase):
         self.assertEqual(result, saved[0]["id"])
         self.assertEqual(saved[0]["attachment"]["name"], "algebra.pdf")
         self.assertEqual(len(list(self.attachments.iterdir())), 1)
-        self.assertEqual(self.old.read_bytes(), self.old.read_bytes())
+        self.assertIn(b"Old history is preserved", self.old.read_bytes())
         with self.assertRaises(env["ChatFileError"]):
             env["upload_attachment"]({
                 "mime": "application/pdf", "name": "bad.pdf",
                 "base64": base64.b64encode(b"<html>").decode(),
             })
+
+    def test_attachment_download_checks_sha256(self):
+        payload = b"PDF-attachment verified"
+        name = uuid.uuid4().hex + ".txt"
+        (self.attachments / name).write_bytes(payload)
+        event_id = str(uuid.uuid4())
+        descriptor = {
+            "file": name, "name": "notes.txt", "mime": "text/plain",
+            "size": len(payload), "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+        env = methods({
+            "ATTACHMENT_FOLDER": str(self.attachments),
+            "latest_analysis": lambda: {"messages": [
+                {"id": event_id, "attachment": descriptor},
+            ]},
+            "JSON": lambda item: item,
+        })
+        output = env["get_attachment"](event_id)
+        self.assertEqual(base64.b64decode(output["base64"]), payload)
+        (self.attachments / name).write_bytes(b"tampered")
+        with self.assertRaises(env["ChatFileError"]):
+            env["get_attachment"](event_id)
 
     def test_search_by_name_date_and_attachments(self):
         a = self.event("math homework")
@@ -156,6 +178,7 @@ class DriveJournalTests(unittest.TestCase):
         self.assertEqual(len(search('from:Emma has:attachment', messages)), 1)
         self.assertEqual(len(search('in:replies has:reaction', messages)), 1)
         self.assertEqual(len(search('from:Alex math', messages)), 1)
+        self.assertEqual(len(search('after:2026-11-01 has:attachment', messages)), 1)
         with self.assertRaises(self.env["ChatFileError"]):
             search('after:2026-99-99', messages)
 
