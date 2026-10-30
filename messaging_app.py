@@ -465,6 +465,9 @@ def gibberish_reason(text):
         return 'Excessive repeated characters or emoji'
     if len(raw) >= 24 and re.search(r'(.{2,10}?)\1{5,}', raw, re.DOTALL):
         return 'Repeated character pattern'
+    # Very long uninterrupted keyboard-row runs are almost never prose.
+    if re.search(r'(?:qwertyuiop|asdfghjkl|zxcvbnm){2,}', raw):
+        return 'Keyboard-row flood'
     # Ignore punctuation between repeats (asdasd-asdasd-asdasd...).
     compact = re.sub(r'[\s\W_]+', '', raw, flags=re.UNICODE)
     if len(compact) >= 30 and re.search(r'([a-z]{2,9}?)\1{4,}', compact):
@@ -485,6 +488,14 @@ def gibberish_reason(text):
     links_or_code = bool(re.search(
         r'https?://|www\.|(?:[a-z]\w*\.){2,}|[{}\[\]<>]|[/\\]|[_=]', raw))
     long_tokens = [word for word in ascii_tokens if len(word) >= 16]
+    # Include letter/digit keysmashes such as q3jhfgg..., but ignore tokens
+    # that are predominantly numeric IDs or code-looking expressions.
+    for candidate in re.findall(r'(?<![a-z0-9])[a-z0-9]{22,}(?![a-z0-9])', raw):
+        if candidate.isalpha() or candidate.isdigit():
+            continue
+        letters = re.sub(r'[^a-z]', '', candidate)
+        if len(letters) >= 18 and len(letters) / len(candidate) >= 0.72:
+            long_tokens.append(letters)
     vowels = set('aeiouy')
     common_pairs = {
         'th','he','in','er','an','re','on','at','en','nd','ti','es','or','te',
