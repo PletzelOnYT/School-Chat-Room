@@ -52,11 +52,11 @@ const state = {
     {id:'a', number:101, time:'12:00:01', user:'Alex', verified:true,
      text:'Hey!', reactions:{}, my_reactions:[], private:false},
     {id:'b', number:102, time:'12:00:02', user:'Emma', verified:false,
-     text:'Hello!', reactions:{}, my_reactions:[], private:false},
+     text:'Hello!', reply_to:'a', reactions:{}, my_reactions:[], private:false},
   ],
   threads: [
     {root:{id:'a'},replies:[{id:'b',number:102,time:'12:00:02',user:'Emma',
-      text:'Hello!',verified:false,reactions:{},private:false}],total_replies:1},
+      text:'Hello!',reply_to:'a',verified:false,reactions:{},private:false}],total_replies:1},
   ],
 };
 const google = {colab:{kernel:{invokeFunction: async(name,args) => {
@@ -81,9 +81,10 @@ setTimeout(() => {
     const original = area.textContent;
     assert(original.includes('[12:00:01] #101 ☑ Alex: Hey!'), original);
     assert(original.includes('[12:00:02] #102 Emma: Hello!'), original);
+    assert(original.indexOf('Alex: Hey!') < original.indexOf('Emma: Hello!'));
     assert(!original.includes('[React]'));
     assert(!original.includes('[Reply]'));
-    assert(!original.includes('↳'));
+    assert(original.includes('↳ [12:00:02] #102 Emma: Hello!'), original);
     assert(!original.includes('▸ Show'));
     assert(!original.includes('  +'));
     const row = area.nodes.find(n => n.tag==='span' &&
@@ -92,13 +93,14 @@ setTimeout(() => {
     row.events.click();
     assert(area.textContent.includes('[React]'));
     assert(area.textContent.includes('[Reply]'));
-    assert(area.textContent.includes('[View thread: 1]'));
+    assert(!area.textContent.includes('[View thread: 1]'));
+    assert(area.textContent.includes('↳ [12:00:02] #102 Emma: Hello!'));
     const close = area.nodes.find(n => n.tag==='span' &&
       n.textContent==='[Close]');
     assert(close);
     close.events.click({stopPropagation(){}});
     assert.strictEqual(area.textContent,original);
-    console.log('Terminal display and click-to-open message actions: PASS');
+    console.log('Terminal display and nested replies with click-to-open actions: PASS');
   } catch(error) {
     console.error(error);
     process.exitCode=1;
