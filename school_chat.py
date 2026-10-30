@@ -1326,6 +1326,7 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" class="school-chat-v18">
   let stopped = false, busy = false, sending = false, generation = 0;
   let pendingReplyNumber = null, lastPopupId = null, helpWindow = null, lastHelpURL = null;
   const expandedThreads = new Set(), activePickers = new Set();
+  const openImagePreviews = new Set();
   const previewCache = new Map(), emojiChoices = ['👍','❤️','😂','🔥','🎉','💀','👀'];
   const colored = (value, color, bold=false) => {
     const x = document.createElement('span');
@@ -1424,15 +1425,9 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" class="school-chat-v18">
       }
     }
     if (existing.mime.startsWith('image/')) {
-      const old = area.querySelector('[data-preview="' + msg.id + '"]');
-      if (old) {old.remove();return;}
-      const slot = area.querySelector('[data-file-id="' + msg.id + '"]');
-      if (slot) {
-        const img = document.createElement('img');
-        img.className = 'preview'; img.src = existing.url; img.alt = existing.name;
-        img.dataset.preview = msg.id; img.onclick = () => img.remove();
-        slot.appendChild(img);
-      }
+      if (openImagePreviews.has(msg.id)) openImagePreviews.delete(msg.id);
+      else openImagePreviews.add(msg.id);
+      render(lastState);
     } else {
       const a = document.createElement('a');
       a.href = existing.url; a.download = existing.name; a.rel = 'noopener';
@@ -1476,6 +1471,14 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" class="school-chat-v18">
         () => openAttachment(msg), 'Read attachment from shared Drive'));
     }
     area.appendChild(actions);
+    if (openImagePreviews.has(msg.id) && previewCache.has(msg.id)) {
+      const current = previewCache.get(msg.id);
+      const image = document.createElement('img');
+      image.className = 'preview'; image.src = current.url; image.alt = current.name;
+      image.title = 'Click to close preview';
+      image.onclick = () => {openImagePreviews.delete(msg.id);render(lastState);};
+      area.appendChild(image);
+    }
     if (activePickers.has(msg.id)) {
       const picker = document.createElement('div');picker.className = 'picker';
       picker.style.marginLeft = '16px';
