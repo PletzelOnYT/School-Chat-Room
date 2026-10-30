@@ -5,7 +5,7 @@ The owner runs a **separate Python program** (`owner_guardian.py`) in their own 
 ## What it monitors
 
 - Every 5 seconds, checks the **original** shared `chat.json`.
-- Checks all **new** events against an allowlist: signed `message`, `profile`, `reaction` and the blue checkmark's `role` events (` /vf ` and ` /uvf `), with valid digital signatures, fields, IDs, timestamps, sizes and referenced messages.
+- Checks **new four-field plain messages** for structure, length, spam and a valid display name. Other internal `profile`, `reaction` and `role` records still require signed identities and strict schemas. Four-field messages contain no ID/signature, so they **cannot be authenticated or attributed securely**.
 - Detects invalid event types, fake owner/mod grants, replayed IDs, suspicious repeats, and abnormal sending rates.
 - Saves every accepted event in SQLite, with backups at **`MyDrive/.messaging_guardian/guardian.sqlite3`** in the owner's **private** Drive folder. Incidents are logged in SQLite; suspect file bytes are preserved under `.messaging_guardian/incidents/`.
 - If messages disappear, are modified, or are reordered, repairs the existing shared file using the approved history.
