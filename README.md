@@ -16,6 +16,7 @@ A lightweight Google Colab messaging app. Your existing shared Google Drive **`c
 - Much stronger multi-signal keysmash/repetition filtering, plus duplicate and rate checks
 - Rapid sends queued in order instead of disabling the text box
 - Byte-minimal in-place JSON array tail writes and a private sender retry outbox
+- **New normal messages use exactly four JSON fields**: `kind`, `time`, `user`, and `text` (no message ID or signature stored)
 
 ## How to run
 
@@ -24,6 +25,23 @@ A lightweight Google Colab messaging app. Your existing shared Google Drive **`c
 3. Run your **existing launcher** as before. Its old GitHub URL `school_chat.py` is now a small compatibility wrapper that loads the renamed **`messaging_app.py`**.
 4. Only the original shared `chat.json` is read and written by this app. There is **no requirement to create or use SchoolChatEvents**.
 5. To get the new source directly, use `https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/messaging_app.py`.
+
+## v5.24 — simple message format
+
+New normal chat messages are stored exactly like this, with no ID:
+
+~~~json
+{
+  "kind": "message",
+  "time": "04:15:50",
+  "user": "Pletzel",
+  "text": "fdg"
+}
+~~~
+
+The existing 229 historical records and their existing signed reaction/profile/role events are **not rewritten**. Those metadata events remain structured to support click reactions, Verified checkmarks and old history. No additional shared files/folders are required. Reply messages also have four fields; a short parent-reference marker is stored **inside their text** and removed from the displayed text by the app.
+
+**Trade-offs:** A record without a sender key, signature or ID can be inserted by any editor and **cannot cryptographically prove who sent it**. New plain messages therefore do not receive an authenticated per-message Verified badge. Reactions use a computed in-memory reference and may lose their target if earlier history is deleted/reordered. Date-based search cannot determine the calendar date of new four-field messages, which store only an HH:MM:SS clock time. The owner guardian recognizes these records but cannot authenticate their author.
 
 ## Search examples
 
