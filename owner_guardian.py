@@ -115,6 +115,23 @@ def invalid_text(text):
     return None
 
 
+def verified_by_history(sender, approved):
+    """Replay only the v2 signed blue-check claims and revocations."""
+    checked=set()
+    for e in approved.values():
+        if not isinstance(e,dict) or e.get("kind")!="role" or (
+                e.get("role")!="verified" or e.get("verification_version")!=2 or
+                not signature_ok(e)):
+            continue
+        target=e.get("target_key")
+        if e.get("active") is True and e.get("self_verified") is True and (
+                target==e.get("sender_key")):
+            checked.add(target)
+        elif e.get("active") is False and e.get("unverify_anyone") is True:
+            checked.discard(target)
+    return sender in checked
+
+
 def check_new_event(event, accepted, rate_log, now=None):
     """Verify one NEW event against the v5.23 format and earlier accepted IDs.
 
@@ -175,8 +192,11 @@ def check_new_event(event, accepted, rate_log, now=None):
             return "duplicate-message flood"
         history.append((stamp,body))
     elif kind=="profile":
-        if "renamed" in event and event["renamed"] is not True:
-            return "unsupported profile operation"
+        if "renamed" in event:
+            if event["renamed"] is not True:
+                return "unsupported profile operation"
+            if not verified_by_history(sender,accepted):
+                return "nickname change without current verified status"
     elif kind=="reaction":
         if not isinstance(event.get("message_id"),str) or (
                 event["message_id"] not in accepted or
@@ -347,6 +367,8 @@ def restore_trash_by_id(file_id, timeout=8):
     """
     if not file_id:
         return "No Drive file ID configured; cannot untrash original file"
+    if not re.fullmatch(r"[A-Za-z0-9_-]{10,128}",file_id):
+        return "Invalid original Drive file ID format"
     try:
         import google.auth
         credentials,_=google.auth.default()
@@ -369,7 +391,9 @@ def restore_trash_by_id(file_id, timeout=8):
         if updated.get("id")==file_id and updated.get("trashed") is False:
             return "Original Drive file restored from trash; wait for Drive mount sync"
         return "Drive restore attempt did not confirm untrash"
-    except (OSError,ValueError,urllib.error.HTTPError) as exc:
+    except Exception as exc:
+        # Includes missing Google libraries and blocked Workspace API scopes.
+        # Do not request another Google login or invent a replacement file.
         return "Drive API unavailable or denied: "+type(exc).__name__
 
 
