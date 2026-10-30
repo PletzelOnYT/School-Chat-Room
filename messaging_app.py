@@ -755,6 +755,7 @@ def analyze(events):
             'time': str(e.get('time', '')),
             'sender_key': sender,
             'signed': signed,
+            'plain': plain,
             'reply_to': parent_id,
             'issued_at': e.get('issued_at') if signed else None,
         }
@@ -835,7 +836,7 @@ def analyze(events):
             msg['name_conflict'] = False
         else:
             original = msg['user']
-            if original.casefold() in name_owners:
+            if original.casefold() in name_owners and not msg.get('plain'):
                 msg['user'] = original + ' (legacy)'
             msg['name_conflict'] = False
 
