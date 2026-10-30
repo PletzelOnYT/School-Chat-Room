@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import tempfile
 import threading
 import time
@@ -26,11 +27,13 @@ FUNCTIONS = [
 
 def methods(overrides=None):
     env = dict(
-        os=os, re=re, json=json, time=time, uuid=uuid,
+        os=os, re=re, shlex=shlex, json=json, time=time, uuid=uuid,
         hashlib=hashlib, threading=threading, datetime=datetime,
         b64decode=lambda s: base64.b64decode(s, validate=True),
         b64=lambda x: base64.b64encode(x).decode("ascii"),
         valid_signature=lambda e: e.get("sig") == "valid",
+        short_id=lambda key: str(key)[:12],
+        event_cache={}, last_event_scan=0.0,
         ChatFileError=type("ChatFileError", (Exception,), {}),
         MESSAGE_LIMIT=1000,
         MAX_ATTACHMENT_BYTES=2*1024*1024,
@@ -124,6 +127,7 @@ class DriveJournalTests(unittest.TestCase):
                 "kind": kind, "id": str(uuid.uuid4()), **fields},
             "write_event": lambda e: saved.append(e) or True,
         })
+        env["write_event"] = lambda e: saved.append(e) or True
         result = env["upload_attachment"]({
             "mime": "application/pdf", "name": "algebra.pdf",
             "base64": base64.b64encode(payload).decode(),
