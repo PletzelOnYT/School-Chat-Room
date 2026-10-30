@@ -1,4 +1,4 @@
-# @title School ChatRoom v5.11 — School terminal chat with Vercel owner login
+# @title School ChatRoom v5.12 — School terminal chat with Vercel owner login
 """Google Colab school chat — the same shared Google Drive chat.json.
 
 The ONLY hosted API is for checking the owner's key and signing role grants.
@@ -29,7 +29,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey, Ed25519PublicKey
 )
 from cryptography.hazmat.primitives import serialization
-from google.colab import drive, output
+from google.colab import auth, drive, output
 from IPython.display import HTML, JSON, display
 
 # Original terminal look and chat behavior
@@ -188,6 +188,56 @@ except ChatFileError as exc:
 identity_private, identity_public = load_identity()
 
 
+def google_account_username():
+    """Read this Colab session's Google identity; never publish full email.
+
+    Google can ask students to authorize Drive metadata access. We only use
+    the local part before @, and never save OAuth tokens in chat.json.
+    This is a display-name hint, NOT server-verifiable Google authentication.
+    """
+    try:
+        import google.auth
+        from google.auth.transport.requests import AuthorizedSession
+        auth.authenticate_user()
+        credentials, _ = google.auth.default()
+        session = AuthorizedSession(credentials)
+        # Drive's about endpoint identifies the authenticated Drive API user.
+        # If the ADC token does not have a Drive scope, try OAuth userinfo.
+        endpoints = (
+            ('https://www.googleapis.com/drive/v3/about',
+             {'fields': 'user(emailAddress)'}, 'drive'),
+            ('https://openidconnect.googleapis.com/v1/userinfo',
+             None, 'userinfo'),
+        )
+        email = ''
+        for url, params, kind in endpoints:
+            try:
+                response = session.get(url, params=params, timeout=12)
+                if response.status_code != 200:
+                    continue
+                info = response.json()
+                email = ((info.get('user') or {}).get('emailAddress', '')
+                         if kind == 'drive' else info.get('email', ''))
+                if isinstance(email, str) and '@' in email:
+                    break
+            except (ValueError, OSError):
+                continue
+        if not email or '@' not in email:
+            raise ValueError('Google did not return an email address for this account')
+        local_part = email.rsplit('@', 1)[0]
+        # Display only letters, digits, dots, underscores and hyphens.
+        candidate = re.sub(r'[^A-Za-z0-9._-]', '', local_part)[:32]
+        if not candidate:
+            raise ValueError('No usable Google account username')
+        return candidate
+    except Exception as exc:
+        raise ChatFileError(
+            'Unable to read your Google account name. Authorize your account '
+            'in Colab, then run the launcher again. Your full email is not '
+            'sent to chat.json. Details: ' + type(exc).__name__
+        ) from exc
+
+
 def short_id(pub):
     try:
         return hashlib.sha256(b64decode(pub)).hexdigest()[:12]
@@ -246,9 +296,13 @@ def fallback_username(sender):
     return 'Guest-' + str(100 + int(digest[:8], 16) % 900) if digest else 'Guest-000'
 
 
-# Use ONE effective nickname for the chat header and outgoing messages.
-# A new identity always begins with a random-looking unique Guest fingerprint.
-username = fallback_username(identity_public)
+# Google account local part is the default nickname, not a random Guest ID.
+# Ask for Google authorization instead of silently assigning ColabUser/Guest.
+GOOGLE_ACCOUNT_USERNAME = google_account_username()
+if not valid_username(GOOGLE_ACCOUNT_USERNAME):
+    raise ChatFileError('Your Google account username is reserved or not allowed. '
+                        'Choose a supported account or contact the chat owner.')
+username = GOOGLE_ACCOUNT_USERNAME
 
 
 def canonical(event):
@@ -366,6 +420,9 @@ def write_event(event):
 
 
 def event_now(kind, **fields):
+    if kind in ('message', 'profile'):
+        # Account prefix only; no full email, OAuth token, or Google ID.
+        fields.setdefault('account_username', GOOGLE_ACCOUNT_USERNAME)
     return sign_event(dict(id=str(uuid.uuid4()), kind=kind,
                            issued_at=int(time.time()),
                            time=time.strftime('%H:%M:%S', time.localtime()),
@@ -428,6 +485,8 @@ def analyze(events):
     seen_any_signed_event = False
     claim_order = {}  # (identity, normalized name) -> first signed appearance
     seen_aliases = {}  # Signed aliases owned by a stable identity (for diagnostics)
+    account_names = {}  # Google-derived account prefixes (locally asserted)
+    custom_names = {}   # Signed privileged /rename profile events
     now = time.time()
 
     for index, e in enumerate(events):
@@ -443,18 +502,32 @@ def analyze(events):
             seen_any_signed_event = True
         sender = str(e.get('sender_key', '')) if signed else None
         from_server = bool(SERVER_PUBLIC_KEY) and sender == SERVER_PUBLIC_KEY and signed
-        # Signed people are identified by keys, not Colab usernames.
-        # Only someone who is VERIFIED at this point in the signed event
-        # history may claim/update a custom nickname. Checking here as well
-        # as in /rename prevents modified clients from bypassing the rule
-        # by writing a forged nickname to a signed message or profile event.
+        # Google account names are the default, independent of chat roles.
+        # Custom /rename names require Owner, Moderator, or Verified status,
+        # checked both here and when the local command is submitted.
+        # CAUTION: the account_username field is asserted by the sending
+        # Colab client; this shared JSON is NOT independent Google verification.
         clean_name = valid_username(e.get('user'))
+        account_name = valid_username(e.get('account_username'))
         if signed and not from_server and kind in ('message', 'reaction', 'profile'):
             identities.setdefault(sender, fallback_username(sender))
-            if kind in ('message', 'profile') and sender in verified and sender not in banned and clean_name:
-                identities[sender] = clean_name
-                seen_aliases.setdefault(sender, set()).add(clean_name)
-                claim_order.setdefault((sender, clean_name.casefold()), index)
+            if account_name:
+                account_names[sender] = account_name
+                seen_aliases.setdefault(sender, set()).add(account_name)
+                claim_order.setdefault((sender, account_name.casefold()), index)
+            can_rename = (sender in verified or sender in moderators or
+                          sender in owners) and sender not in banned
+            if can_rename and kind in ('message', 'profile') and clean_name:
+                # Support older signed profile records and new explicit
+                # rename records. New plain messages cannot silently rename.
+                if ((kind == 'profile' and
+                     (e.get('renamed') is True or not account_name)) or
+                    (not account_name and kind == 'message')):
+                    custom_names[sender] = clean_name
+                    seen_aliases.setdefault(sender, set()).add(clean_name)
+                    claim_order.setdefault((sender, clean_name.casefold()), index)
+            identities[sender] = custom_names.get(
+                sender, account_names.get(sender, fallback_username(sender)))
 
         if kind == 'role':
             if not signed:
@@ -773,6 +846,7 @@ HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /owner                     Owner login (asks for private key)
 /exit                      Close the chat
 
+Owner, Moderator and Verified users may use /rename <name> for unique nicknames.
 Commands and role tags cannot be nicknames.
 @mention a username in a normal message to highlight it for that person.
 Numbers (#) appear next to chat messages. Moderator role changes are saved
@@ -810,6 +884,10 @@ def latest_analysis():
     # future messages use this identity's unique Guest ID instead.
     username = result['display_names'].get(identity_public)
     if not username:
+        # Before the first signed profile reaches the shared file, use the
+        # account-derived name locally rather than a random Guest number.
+        username = GOOGLE_ACCOUNT_USERNAME
+    if False:
         # A first-time student has not sent a signed event yet; choose a
         # Guest number absent from the current shared history as well.
         reserved = {name.casefold() for name in result['display_names'].values()}
@@ -865,6 +943,23 @@ def resolve_target(arg, a):
         return None, 'Several signed students match that name. Use the ID from /users.'
     return None, ('No signed student found for that name/ID. Ask them to open '
                   'the chat, send one message, and copy their ID from /whoami.')
+
+
+def ensure_account_profile():
+    """Publish the Google account prefix once per identity/account pair."""
+    records = read_messages()
+    for record in reversed(records):
+        if (isinstance(record, dict) and record.get('sender_key') == identity_public
+                and record.get('account_username') == GOOGLE_ACCOUNT_USERNAME
+                and record.get('kind') in ('profile', 'message')
+                and valid_signature(record)):
+            return
+    if not write_event(event_now('profile')):
+        raise ChatFileError('Could not save your Google account display name '
+                            'to the shared chat.json. Try launching again.')
+
+
+ensure_account_profile()
 
 
 def is_mentioned(text, name):
@@ -961,10 +1056,12 @@ def submit_message(raw):
             try:
                 current = latest_analysis()
             except ChatFileError as exc:
-                note('Cannot check verification status right now: ' + str(exc))
+                note('Cannot check role status right now: ' + str(exc))
                 return snapshot()
-            if identity_public not in current['verified']:
-                note('Only verified users can change their nickname. Ask a moderator to verify your ID.')
+            if identity_public not in (
+                current['verified'] | current['moderators'] | current['owners']
+            ):
+                note('Only Owner, Moderator, or Verified users can use /rename.')
                 return snapshot()
             new_name = valid_username(rename.group(1))
             if not new_name:
@@ -981,7 +1078,7 @@ def submit_message(raw):
             # fresh Colab sessions see the same username without a public post.
             previous_name = username
             username = new_name
-            if not write_event(event_now('profile')):
+            if not write_event(event_now('profile', renamed=True)):
                 username = previous_name
                 note('Could not save your new name. Please try again.')
             return snapshot()
