@@ -16,7 +16,8 @@ from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1].joinpath("messaging_app.py").read_text()
 TREE = ast.parse(SOURCE)
-NAMES = {"read_messages", "write_event", "search_messages", "build_threads"}
+NAMES = {"read_messages", "write_event", "append_event_in_place",
+         "search_messages", "build_threads"}
 NODES = [n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name in NAMES]
 
 
@@ -28,6 +29,7 @@ def methods(overrides=None):
         ChatFileError=type("ChatFileError", (Exception,), {}),
         file_lock=threading.RLock(),
         short_id=lambda key: (key or "")[:12],
+        remember_outgoing=lambda event: None,
     )
     if overrides:
         env.update(overrides)
@@ -65,6 +67,8 @@ class SingleDriveFileTests(unittest.TestCase):
         self.assertEqual(records[0], self.original)
         self.assertEqual(len(list(self.folder.iterdir())), 1)
         self.assertEqual(self.file.name, "chat.json")
+        self.assertNotIn("with open(CHAT_FILE_PATH, 'w'", SOURCE)
+        self.assertIn("with open(CHAT_FILE_PATH, 'r+b')", SOURCE)
 
     def test_invalid_signature_cannot_be_saved(self):
         invalid = self.event("spoofed")
