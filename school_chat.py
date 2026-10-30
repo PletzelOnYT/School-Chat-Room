@@ -1,4 +1,4 @@
-# @title School ChatRoom v5.15 — School terminal chat with Vercel owner login
+# @title School ChatRoom v5.16 — School terminal chat with Vercel owner login
 """Google Colab school chat — the same shared Google Drive chat.json.
 
 The ONLY hosted API is for checking the owner's key and signing role grants.
@@ -39,6 +39,8 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 1.5
 MESSAGE_LIMIT = 1000
+CLIENT_VERSION = '5.16'
+REMOTE_ROLE_REFRESH_SECONDS = 2.0
 # Only PUBLIC configuration goes in the distributed notebook.
 # Never put CHAT_OWNER_KEY or CHAT_SIGNING_SEED here!
 OWNER_AUTH_URL = 'https://chat-room-owner-api-xi.vercel.app/api/owner'
@@ -86,6 +88,12 @@ visible_count = VISIBLE_MESSAGES
 muted_names = set()
 clear_through = 0
 last_recovery_check = 0.0
+remote_role_events = []
+remote_role_status = 'unavailable'
+last_remote_role_check = 0.0
+minimum_client_version = ''
+update_required = False
+update_notice_shown = False
 
 
 class ChatFileError(Exception):
@@ -330,7 +338,8 @@ def call_owner_server(action, key, **data):
         raise ChatFileError(SERVER_KEY_ERROR or 'Owner public key is unavailable. Restart this Colab cell.')
     if not OWNER_AUTH_URL.startswith('https://'):
         raise ChatFileError('Owner authorization must use an HTTPS URL.')
-    payload = json.dumps(dict(action=action, key=key, **data)).encode('utf-8')
+    payload = json.dumps(dict(action=action, key=key,
+                              client_version=CLIENT_VERSION, **data)).encode('utf-8')
     req = urllib.request.Request(OWNER_AUTH_URL, payload,
                                  headers={'Content-Type': 'application/json'},
                                  method='POST')
@@ -340,6 +349,9 @@ def call_owner_server(action, key, **data):
     except urllib.error.HTTPError as exc:
         if exc.code == 403:
             raise ChatFileError('Access DENIED: incorrect owner key.') from exc
+        if exc.code == 426:
+            raise ChatFileError('This chat version is outdated. Stop the cell '
+                                'and rerun the GitHub launcher.') from exc
         raise ChatFileError(f'Owner server returned HTTP {exc.code}.') from exc
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
         raise ChatFileError('Could not contact the owner server securely: ' + str(exc)) from exc
@@ -358,7 +370,7 @@ def call_owner_server(action, key, **data):
     else:
         if event.get('role') != data.get('role') or event.get('active') != data.get('active'):
             raise ChatFileError('Owner server grant does not match the role action.')
-    return event
+    return (event, obj.get('role_persisted') is True) if action == 'role' else event
 
 
 def read_messages():
@@ -893,9 +905,63 @@ RULES = '''SCHOOL CHAT RULES
    erased by anybody who has Editor access; moderation isn't tamper-proof.'''
 
 
+def read_remote_role_events(force=False):
+    """Get the canonical server-signed role ledger, independent of chat.json.
+
+    Cached reads avoid a Vercel request for every UI refresh. If the server has
+    not been configured with durable Redis storage, chat remains compatible
+    with the original Google Drive role events, but writes can still race.
+    """
+    global last_remote_role_check, remote_role_events, remote_role_status
+    global minimum_client_version, update_required
+    now = time.monotonic()
+    if not force and now - last_remote_role_check < REMOTE_ROLE_REFRESH_SECONDS:
+        return list(remote_role_events)
+    last_remote_role_check = now
+    try:
+        req = urllib.request.Request(
+            OWNER_AUTH_URL + '?roles=1',
+            headers={'Accept': 'application/json', 'Cache-Control': 'no-cache'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.load(response)
+        if not isinstance(data, dict) or data.get('status') != 'online':
+            raise ValueError('Owner API role status unavailable')
+        minimum_client_version = str(data.get('min_client_version', ''))
+        try:
+            required_parts = tuple(int(x) for x in minimum_client_version.split('.'))
+            current_parts = tuple(int(x) for x in CLIENT_VERSION.split('.'))
+            if len(required_parts) == 2 and current_parts < required_parts:
+                update_required = True
+        except ValueError:
+            pass
+        remote_role_status = data.get('role_storage', 'not_configured')
+        if remote_role_status == 'durable':
+            events = data.get('role_events')
+            if not isinstance(events, list) or len(events) > 20000:
+                raise ValueError('Invalid server role ledger')
+            # Only trust events signed with the trusted public Owner API key.
+            remote_role_events = [
+                e for e in events if trusted_server_event(e)
+                and e.get('kind') == 'role'
+                and e.get('role') in ('moderator', 'verified', 'banned')
+            ]
+        elif remote_role_status == 'not_configured':
+            remote_role_events = []
+        else:
+            remote_role_status = 'unavailable'
+    except (OSError, ValueError, urllib.error.URLError):
+        remote_role_status = 'unavailable'
+        # Retain last known signed grants while the service is temporarily
+        # inaccessible. They are still cryptographically authenticated.
+    return list(remote_role_events)
+
+
 def latest_analysis():
     global username
-    result = analyze(read_messages())
+    local_events = read_messages()
+    # Persisted role events are appended last so signed Owner decisions
+    # survive another student's stale Google Drive file overwrite.
+    result = analyze(local_events + read_remote_role_events())
     # The header and outgoing messages use the same effective shared name.
     username = result['display_names'].get(identity_public, GOOGLE_ACCOUNT_USERNAME)
     return result
@@ -997,12 +1063,25 @@ def is_mentioned(text, name):
 
 
 def snapshot():
-    global next_popup
+    global next_popup, running, update_notice_shown
     try:
         # Reconcile queued signed grants that another Drive writer may have
         # overwritten. No secret owner password is saved to disk.
         reconcile_role_recovery()
         a = latest_analysis()
+        if update_required:
+            running = False
+            if not update_notice_shown:
+                update_notice_shown = True
+                local_messages.append({
+                    'id': 'local-update-required', 'number': None,
+                    'anchor': len(a['messages']),
+                    'time': time.strftime('%H:%M:%S', time.localtime()),
+                    'user': 'System',
+                    'text': 'New chat version required: v' + minimum_client_version
+                            + '. Stop this cell and rerun the GitHub launcher.',
+                    'private': True, 'reactions': {},
+                })
         error = ''
     except ChatFileError as exc:
         a = {'messages': [], 'moderators': set(), 'owners': set(), 'verified': set(), 'banned': set()}
