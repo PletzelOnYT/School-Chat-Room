@@ -566,7 +566,7 @@ def popup(title, content):
 
 
 HELP_TEXT = '''CHAT COMMANDS (only shown to you)
-/help or /hellp            Open the command popup
+/help or /hellp            Open commands in a separate window
 /rules                     Chat rules
 /whoami                    Your name, identity ID and roles
 /users                     Students seen posting signed messages
@@ -908,12 +908,9 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;fo
              font-family:monospace;font-size:13px;outline:auto;outline-width:0;" />
   </form>
   <div id="school-closed-SESSION_ID" style="display:none;white-space:pre-wrap;">--- Chat closed ---</div>
-  <div id="school-help-overlay-SESSION_ID" style="display:none;position:absolute;top:0;left:0;z-index:20;margin:0;width:min(620px,96%);box-sizing:border-box;background:#151515;color:#eaeaea;border:1px solid #18a058;padding:12px;box-shadow:0 4px 12px #0005;">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-      <strong id="school-help-heading-SESSION_ID" style="font-size:13px;color:#00FFFF;">COMMANDS</strong>
-      <button type="button" id="school-help-close-SESSION_ID" aria-label="Close help" style="font:inherit;font-weight:bold;color:white;background:transparent;border:1px solid #666;padding:1px 8px;cursor:pointer;">X</button>
-    </div>
-    <pre id="school-help-text-SESSION_ID" style="font:inherit;line-height:1.5;max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;"></pre>
+  <div id="school-help-fallback-SESSION_ID" style="display:none;margin-top:4px;">
+    <a id="school-help-link-SESSION_ID" href="#" target="_blank" rel="noopener" style="color:#00BFFF;text-decoration:underline;">Open help in new window</a>
+    <span style="font-size:11px;color:gray;"> (Click if Chrome blocked the popup.)</span>
   </div>
 </div>
 <script>
@@ -923,10 +920,8 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;fo
   const form = document.getElementById('school-form-SESSION_ID');
   const input = document.getElementById('school-input-SESSION_ID');
   const closed = document.getElementById('school-closed-SESSION_ID');
-  const help = document.getElementById('school-help-overlay-SESSION_ID');
-  const helpHeading = document.getElementById('school-help-heading-SESSION_ID');
-  const helpText = document.getElementById('school-help-text-SESSION_ID');
-  const helpClose = document.getElementById('school-help-close-SESSION_ID');
+  const helpFallback = document.getElementById('school-help-fallback-SESSION_ID');
+  const helpLink = document.getElementById('school-help-link-SESSION_ID');
   const stateCallback = STATE_CALLBACK_JSON;
   const sendCallback = SEND_CALLBACK_JSON;
   let busy = false;
@@ -935,6 +930,61 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;fo
   let sending = false;
   let awaitingOwnerKey = false;
   let lastPopupId = null;
+  let pendingHelpWindow = null;
+  let lastHelpURL = null;
+
+  function helpDocument(title, body) {
+    // The text is displayed as textContent, never interpreted as HTML.
+    return '<!doctype html><html><head><meta charset="utf-8"><title>School Chat Commands</title>' +
+      '<style>body{background:#151515;color:#eaeaea;font:13px monospace;margin:24px;}' +
+      'h2{color:#00ffff;font-size:17px;}pre{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;}' +
+      'button{background:#242424;color:#fff;border:1px solid #777;padding:6px 12px;cursor:pointer;}' +
+      '</style></head><body><h2 id="heading"></h2><pre id="commands"></pre>' +
+      '<button onclick="window.close()">Close</button></body></html>';
+  }
+  function openHelpWindow() {
+    // Must run synchronously in the user submit event, before any await.
+    try {
+      const win = window.open('', '_blank', 'width=710,height=650,resizable=yes,scrollbars=yes');
+      if (win) {
+        pendingHelpWindow = win;
+        win.document.open();
+        win.document.write(helpDocument());
+        win.document.close();
+        win.document.getElementById('heading').textContent = 'Loading commands...';
+        helpFallback.style.display = 'none';
+        return;
+      }
+    } catch (error) { console.debug('Separate help window blocked:', error); }
+    pendingHelpWindow = null;
+  }
+  function showHelpPopup(popup) {
+    if (!popup) return;
+    const title = String(popup.title || 'CHAT COMMANDS');
+    const body = String(popup.text || '');
+    if (pendingHelpWindow && !pendingHelpWindow.closed) {
+      try {
+        const doc = pendingHelpWindow.document;
+        doc.getElementById('heading').textContent = title;
+        doc.getElementById('commands').textContent = body;
+        pendingHelpWindow.focus();
+        pendingHelpWindow = null;
+        helpFallback.style.display = 'none';
+        return;
+      } catch (error) { console.debug('Help window could not be updated:', error); }
+    }
+    // Sandbox/popup-blocker fallback: a REAL clickable link that opens a new tab.
+    // No in-chat modal is created.
+    const escapeHTML = text => text.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    const page = '<!doctype html><html><head><meta charset="utf-8"><title>School Chat Help</title>'+
+      '<style>body{background:#151515;color:#eee;font:13px monospace;padding:22px}h2{color:cyan}pre{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}</style></head>'+
+      '<body><h2>'+escapeHTML(title)+'</h2><pre>'+escapeHTML(body)+'</pre></body></html>';
+    if (lastHelpURL) URL.revokeObjectURL(lastHelpURL);
+    lastHelpURL = URL.createObjectURL(new Blob([page], {type:'text/html'}));
+    helpLink.href = lastHelpURL;
+    helpFallback.style.display = 'block';
+    pendingHelpWindow = null;
+  }
 
   function colored(text, color, bold = false) {
     const span = document.createElement('span');
@@ -994,11 +1044,7 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;fo
     }
     if (state.popup && state.popup.id !== lastPopupId) {
       lastPopupId = state.popup.id;
-      helpHeading.textContent = state.popup.title || 'COMMANDS';
-      helpText.textContent = state.popup.text || '';
-      help.style.display = 'block';
-      helpClose.focus();
-      try { google.colab.output.setIframeHeight(Math.max(450, document.documentElement.scrollHeight), true); } catch (_) {}
+      showHelpPopup(state.popup);
     }
     if (!state.running) {
       stopped = true;
@@ -1034,6 +1080,8 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;fo
       input.focus();
       return;
     }
+    const isHelp = !awaitingOwnerKey && /^\/(help|hellp|modhelp)$/i.test(value.trim());
+    if (isHelp) openHelpWindow();
     const wasOwnerPassword = awaitingOwnerKey;
     if (awaitingOwnerKey) {
       value = '/owner ' + value;
@@ -1051,19 +1099,15 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" style="font-family:monospace;fo
     } catch (error) {
       // Never put an owner secret back into a visible text field.
       input.value = wasOwnerPassword ? '' : value;
+      if (pendingHelpWindow && !pendingHelpWindow.closed) {
+        pendingHelpWindow.document.getElementById('heading').textContent = 'Unable to load commands';
+        pendingHelpWindow = null;
+      }
       console.error('Could not send message:', error);
     } finally {
       sending = false;
       input.disabled = false;
       if (!stopped) input.focus();
-    }
-  });
-
-  helpClose.addEventListener('click', () => { help.style.display = 'none'; input.focus(); });
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && help.style.display !== 'none') {
-      help.style.display = 'none';
-      input.focus();
     }
   });
 
