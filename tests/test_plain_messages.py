@@ -66,7 +66,7 @@ class PlainMessagesTests(unittest.TestCase):
     def test_simple_message_appears_after_signed_history(self):
         env=setup()
         signed={"id":"old","kind":"message","time":"04:01:00","user":"Alice",
-                "text":"signed", "sender_key":"sender","sig":"test-valid"}
+                "text":"signed", "sender_key":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","sig":"test-valid"}
         simple={"kind":"message","time":"04:15:50","user":"Pletzel","text":"fdg"}
         state=env["analyze"]([signed,simple])
         self.assertEqual(len(state["messages"]),2)
@@ -89,7 +89,7 @@ class PlainMessagesTests(unittest.TestCase):
         env=setup()
         pub=legacy_env["b64decode"] if False else None
         old={"id":"old","kind":"message","time":"04:01:00","user":"Alice",
-             "text":"saved", "sender_key":"sender","sig":"test-valid"}
+             "text":"saved", "sender_key":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","sig":"test-valid"}
         simple={"kind":"message","time":"04:15:50","user":"Pletzel","text":"fdg"}
         state=env["analyze"]([old,simple])
         self.assertEqual(len(state["messages"]),2)
