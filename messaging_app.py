@@ -1,4 +1,4 @@
-# @title Messaging App v5.24 — Google Drive Messenger
+# @title Messaging App v5.25 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -37,7 +37,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.24'
+CLIENT_VERSION = '5.25'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -271,14 +271,16 @@ REPLY_TEXT_RE = re.compile(r'^↳ \[reply:#(\d+)\] (.+)$', re.DOTALL)
 
 
 def is_plain_message(event):
-    """Exactly four fields; no message IDs or private keys on disk."""
-    return (isinstance(event,dict) and set(event)==PLAIN_MESSAGE_FIELDS
-            and event.get('kind')=='message'
-            and isinstance(event.get('time'),str)
-            and re.fullmatch(r'\d{2}:\d{2}:\d{2}',event['time']) is not None
-            and valid_username(event.get('user')) is not None
-            and isinstance(event.get('text'),str)
-            and valid_incoming_message(event['text']))
+    """Four simple JSON fields, including converted historical messages."""
+    return (isinstance(event, dict)
+            and set(event) == PLAIN_MESSAGE_FIELDS
+            and event.get('kind') == 'message'
+            and isinstance(event.get('time'), str)
+            and re.fullmatch(r'\\d{2}:\\d{2}:\\d{2}', event['time']) is not None
+            and isinstance(event.get('user'), str)
+            and 0 < len(event['user']) <= 128
+            and isinstance(event.get('text'), str)
+            and len(event['text']) <= 5000)
 
 
 def plain_message(text):
@@ -317,7 +319,7 @@ def write_plain_message(event):
 
 
 def read_messages():
-    """Read the ORIGINAL shared Google Drive chat.json; do not create a folder."""
+    """Read only the simplified, prettified Google Drive chat.json."""
     with file_lock:
         for attempt in range(4):
             try:
@@ -326,13 +328,13 @@ def read_messages():
                 break
             except (OSError, ValueError) as exc:
                 if attempt == 3:
-                    raise ChatFileError('Cannot read shared chat.json: ' + str(exc)) from exc
-                time.sleep(0.1 * (attempt + 1))
+                    raise ChatFileError('Cannot read chat.json: '+str(exc)) from exc
+                time.sleep(0.1*(attempt+1))
         if not isinstance(events, list):
-            raise ChatFileError('The shared chat.json must contain a JSON array.')
-        if not any(isinstance(e, dict) and e.get('id') == ORIGINAL_HISTORY_ANCHOR
-                   for e in events):
-            raise ChatFileError('Wrong chat.json. Use the original shared file shortcut.')
+            raise ChatFileError('chat.json must be a JSON array.')
+        if any(not is_plain_message(e) for e in events):
+            raise ChatFileError('chat.json contains old or invalid records. '
+                                'Run the owner four-field migration and restart clients.')
         return events
 
 
@@ -340,43 +342,33 @@ read_messages()  # Verify the correct shared history before showing the chat.
 
 
 def append_event_in_place(event):
-    """Extend the existing JSON array by modifying ONLY its closing tail.
+    """Append a fully indented object to the existing pretty JSON array.
 
-    The original historical content before the final ']' is never serialized
-    again, and Google Drive shortcut paths are never replaced. This is NOT an
-    atomic multi-client append; a Drive mount provides no shared transaction.
+    Only the final tail changes; concurrent Drive edits are still NOT atomic.
     """
-    plain = is_plain_message(event)
-    encoded = json.dumps(event, ensure_ascii=False,
-                         indent=2 if plain else None,
-                         separators=None if plain else (',', ':')).encode('utf-8')
+    if not is_plain_message(event):
+        raise ChatFileError('Only four-field message records are supported.')
+    body = json.dumps(event, indent=2, ensure_ascii=False).replace('\\n', '\\n  ')
+    rendered = ('  '+body).encode('utf-8')
     with open(CHAT_FILE_PATH, 'r+b') as fh:
         fh.seek(0, os.SEEK_END)
-        size = fh.tell()
-        if size < 2:
-            raise ChatFileError('chat.json is too short to append safely.')
-        scan = min(size, 8192)
-        fh.seek(size - scan)
-        tail = fh.read(scan)
-        close = len(tail.rstrip()) - 1
+        size=fh.tell()
+        scan=min(size,8192)
+        fh.seek(size-scan)
+        tail=fh.read(scan)
+        close=len(tail.rstrip())-1
         if close < 0 or tail[close:close+1] != b']':
-            raise ChatFileError('chat.json is not a closed JSON array. Refusing to edit it.')
-        # The last visible character before ] must end a valid JSON item or
-        # be [ for an empty array. We already parsed the whole array above.
-        preceding = tail[:close].rstrip()
-        if not preceding or preceding[-1:] not in (b'}', b']', b'"', b'0', b'1',
-                                                   b'2', b'3', b'4', b'5',
-                                                   b'6', b'7', b'8', b'9'):
-            raise ChatFileError('chat.json closing array cannot be safely extended.')
-        empty_array = preceding[-1:] == b'['
-        # Preserve trailing whitespace. Never append after the final ]: that
-        # would break json.load() for the older and current chat clients.
-        trailer = tail[close+1:]
-        position = size - scan + close
-        fh.seek(position)
-        fh.write((b'' if empty_array else b',') + b'\n' + encoded + b'\n]' + trailer)
+            raise ChatFileError('chat.json is not a closed JSON array.')
+        before=tail[:close].rstrip()
+        if not before or before[-1:] not in (b'}', b'['):
+            raise ChatFileError('chat.json has an invalid closing element.')
+        empty=before[-1:] == b'['
+        trailer=tail[close+1:]
+        fh.seek(size-scan+len(before))
+        fh.write((b'' if empty else b',')+b'\\n'+rendered+b'\\n]'+trailer)
         fh.truncate()
         fh.flush()
+
 
 
 def load_outbox():
@@ -418,6 +410,9 @@ def write_event(event, remember=True):
     """
     if is_plain_message(event):
         return write_plain_message(event)
+    # Do not allow hidden role/reaction/profile metadata to pollute the
+    # intentionally simplified public chat.json.
+    return False
     if not valid_signature(event):
         raise ChatFileError('Cannot save unsigned internal metadata.')
     if remember:
@@ -649,7 +644,7 @@ def analyze(events):
             seen_any_signed_event = True
         sender = str(e.get('sender_key', '')) if signed else None
         # A nickname cannot confer a Verified title.
-        clean_name = valid_username(e.get('user'))
+        clean_name = (e.get('user') if plain else valid_username(e.get('user')))
         account_name = valid_username(e.get('account_username'))
         if signed and sender and kind in ('message', 'reaction', 'profile'):
             identities.setdefault(sender, fallback_username(sender))
@@ -724,7 +719,7 @@ def analyze(events):
         if not signed and not plain and seen_any_signed_event:
             continue
         message_text = e.get('text')
-        if (signed or plain) and not valid_incoming_message(message_text):
+        if signed and not valid_incoming_message(message_text):
             continue
         if signed and sender:
             # Receiver-side limits: ordinary clients filter obvious bot
@@ -989,7 +984,7 @@ def ensure_account_profile():
                             'chat.json. Check Google Drive access and try again.')
 
 
-ensure_account_profile()
+ # No automatic profile record: chat.json contains messages ONLY.
 
 
 def resolve_verified_target(query, state):
@@ -1194,8 +1189,7 @@ def send_message(body, reply_to=None):
     if sum(1 for _, value in recent_sent_messages if value == normalized_body) >= 4:
         note('Repeated-message flood blocked. You can send a different message.')
         return False
-    # Refresh before signing: outgoing messages and the header always use
-    # exactly the same effective nickname derived from the signed history.
+    # Refresh the current chat before sending a simple JSON record.
     latest_analysis()
     # Replies encode the target in text, so even reply records have 4 fields.
     if reply_to:
