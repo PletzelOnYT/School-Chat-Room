@@ -346,7 +346,10 @@ def append_event_in_place(event):
     again, and Google Drive shortcut paths are never replaced. This is NOT an
     atomic multi-client append; a Drive mount provides no shared transaction.
     """
-    encoded = json.dumps(event, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+    plain = is_plain_message(event)
+    encoded = json.dumps(event, ensure_ascii=False,
+                         indent=2 if plain else None,
+                         separators=None if plain else (',', ':')).encode('utf-8')
     with open(CHAT_FILE_PATH, 'r+b') as fh:
         fh.seek(0, os.SEEK_END)
         size = fh.tell()
