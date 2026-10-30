@@ -89,6 +89,47 @@ class SecurityTests(unittest.TestCase):
         data = env["analyze"](arr)
         self.assertLessEqual(len(data["messages"]), 7)
 
+    def test_google_account_name_without_badge(self):
+        name = "student123"
+        events = [
+            self.evt("profile", kind="profile", sender_key=self.a, user=name,
+                     account_username=name),
+        ]
+        state = env["analyze"](events)
+        self.assertEqual(state["display_names"][self.a], name)
+        self.assertNotIn(self.a, state["verified"])
+
+    def test_unverified_cannot_force_rename_but_owner_can(self):
+        events = [
+            self.evt("profile", kind="profile", sender_key=self.a,
+                     user="student123", account_username="student123"),
+            self.evt("bad", kind="profile", sender_key=self.a, user="FakeName",
+                     account_username="student123", renamed=True),
+        ]
+        state = env["analyze"](events)
+        self.assertEqual(state["display_names"][self.a], "student123")
+        events.extend([
+            self.evt("owner", kind="role", sender_key="server", role="owner",
+                     target_key=self.a, active=True,
+                     expires_at=self.now + 3600),
+            self.evt("good", kind="profile", sender_key=self.a, user="CoolName",
+                     account_username="student123", renamed=True),
+        ])
+        self.assertEqual(env["analyze"](events)["display_names"][self.a],
+                         "CoolName")
+
+    def test_mod_can_rename_without_verified(self):
+        events = [
+            self.evt("mod", kind="role", sender_key="server", role="moderator",
+                     target_key=self.a, active=True),
+            self.evt("profile", kind="profile", sender_key=self.a,
+                     user="MyNick", account_username="student123",
+                     renamed=True),
+        ]
+        state = env["analyze"](events)
+        self.assertEqual(state["display_names"][self.a], "MyNick")
+        self.assertNotIn(self.a, state["verified"])
+
     def test_unique_guest_name_assignment(self):
         arr = [self.evt("msg1", sender_key=self.a, user="Guest-111", text="hi"),
                self.evt("msg2", sender_key=self.b, user="Guest-222", text="hi")]
