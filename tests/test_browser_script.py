@@ -26,8 +26,14 @@ class BrowserTests(unittest.TestCase):
     def test_one_title_no_owner_password_prompt(self):
         self.assertIn("appendVerifiedTitle(state.my_verified)", script)
         self.assertIn("if (!msg.private) appendVerifiedTitle(msg.verified)", script)
-        self.assertIn("expandedThreads", script)
+        self.assertIn("showSelectedThread", script)
+        self.assertIn("selectedMessageId", script)
         self.assertIn("emojiChoices", script)
+        # No inline + or reply arrow after every ordinary chat message.
+        self.assertNotIn("area.appendChild(textControl('  +'", script)
+        self.assertNotIn("area.appendChild(textControl('  ↳'", script)
+        self.assertIn("for (const msg of Array.isArray(state.messages)", script)
+        self.assertIn("if (!msg.private && interactive && selectedMessageId === msg.id)", script)
         self.assertIn("requestFullscreen", script)
         self.assertNotIn("upload_attachment", script)
         self.assertNotIn("attachCallback", script)
