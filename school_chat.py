@@ -965,7 +965,7 @@ def check_upstream_version(force=False):
                      'Cache-Control': 'no-cache', 'Range': 'bytes=0-255'})
         with urllib.request.urlopen(request, timeout=5) as response:
             heading = response.read(256).decode('utf-8', errors='replace')
-        match = re.search(r'^# @title School ChatRoom v(\\d+\\.\\d+)', heading)
+        match = re.search(r'^# @title School ChatRoom v(\d+\.\d+)', heading)
         if not match:
             return
         latest_version = match.group(1)
