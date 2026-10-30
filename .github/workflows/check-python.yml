@@ -1,15 +1,18 @@
-name: Validate school chat Python
+name: Validate Messaging App
 on:
   push:
     paths:
+      - 'messaging_app.py'
       - 'school_chat.py'
       - 'tests/**'
       - '.github/workflows/check-python.yml'
   pull_request:
     paths:
+      - 'messaging_app.py'
       - 'school_chat.py'
+      - 'tests/**'
 jobs:
-  syntax:
+  messaging-app-tests:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -18,7 +21,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Check chat syntax without running Colab
-        run: python -m py_compile school_chat.py
-      - name: Test roles, bans, and spam checks
+      - name: Check Messaging App and compatibility launcher syntax
+        run: python -m py_compile messaging_app.py school_chat.py
+      - name: Run messaging, security and browser regression tests
         run: python -m unittest discover -s tests -v
