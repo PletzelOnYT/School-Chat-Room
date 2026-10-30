@@ -1,4 +1,4 @@
-# @title School ChatRoom v5.9 — School terminal chat with Vercel owner login
+# @title School ChatRoom v5.10 — School terminal chat with Vercel owner login
 """Google Colab school chat — the same shared Google Drive chat.json.
 
 The ONLY hosted API is for checking the owner's key and signing role grants.
@@ -36,7 +36,7 @@ from IPython.display import HTML, JSON, display
 VISIBLE_MESSAGES = 15
 INPUT_WIDTH_PX = 540
 WRAP_WIDTH_CH = 80
-REFRESH_INTERVAL_MS = 1500
+REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 1.5
 MESSAGE_LIMIT = 1000
 # Only PUBLIC configuration goes in the distributed notebook.
@@ -66,6 +66,7 @@ if not os.path.isfile(CHAT_FILE_PATH):
 
 PRIVATE_FOLDER = os.path.join(DRIVE_ROOT, '.schoolchat')
 PRIVATE_IDENTITY_PATH = os.path.join(PRIVATE_FOLDER, 'identity.json')
+ROLE_RECOVERY_PATH = os.path.join(PRIVATE_FOLDER, 'role_recovery.json')
 
 # Google Colab uses the same system username for many students. Do not use
 # ColabUser or getpass as a chat nickname, not even momentarily.
@@ -84,6 +85,7 @@ next_popup = None  # One-shot private /help or /modhelp popup
 visible_count = VISIBLE_MESSAGES
 muted_names = set()
 clear_through = 0
+last_recovery_check = 0.0
 
 
 class ChatFileError(Exception):
@@ -316,13 +318,17 @@ def call_owner_server(action, key, **data):
 
 
 def read_messages():
-    """Never auto-replace an unreadable shared chat with a blank history."""
+    """Retry transient partial reads; NEVER replace an unreadable shared file."""
     with file_lock:
-        try:
-            with open(CHAT_FILE_PATH, encoding='utf-8') as f:
-                events = json.load(f)
-        except (OSError, ValueError) as exc:
-            raise ChatFileError('Cannot read shared chat.json: ' + str(exc)) from exc
+        for attempt in range(3):
+            try:
+                with open(CHAT_FILE_PATH, encoding='utf-8') as f:
+                    events = json.load(f)
+                break
+            except (OSError, ValueError) as exc:
+                if attempt == 2:
+                    raise ChatFileError('Cannot read shared chat.json: ' + str(exc)) from exc
+                time.sleep(0.06 * (attempt + 1))
         if not isinstance(events, list):
             raise ChatFileError('Shared chat.json must contain a JSON array.')
         if not any(isinstance(e, dict) and e.get('id') == ORIGINAL_HISTORY_ANCHOR
@@ -361,8 +367,21 @@ def write_event(event):
 
 def event_now(kind, **fields):
     return sign_event(dict(id=str(uuid.uuid4()), kind=kind,
+                           issued_at=int(time.time()),
                            time=time.strftime('%H:%M:%S', time.localtime()),
                            user=username, **fields))
+
+
+def valid_incoming_message(text):
+    """Read-side protection: modified senders cannot bypass basic spam rules."""
+    if not isinstance(text, str) or not text.strip() or len(text) > MESSAGE_LIMIT:
+        return False
+    if any((ord(ch) < 32 and ch not in ('\n', '\t')) or ord(ch) == 127
+           for ch in text):
+        return False
+    if re.search(r'[\u202a-\u202e\u2066-\u2069]', text):
+        return False
+    return not is_gibberish(text)
 
 
 def is_gibberish(text):
@@ -404,6 +423,8 @@ def analyze(events):
     seen_ids = set()
     post_number = 0
     reaction_state = {}
+    rate_history = {}
+    seen_any_signed_event = False
     claim_order = {}  # (identity, normalized name) -> first signed appearance
     seen_aliases = {}  # Signed aliases owned by a stable identity (for diagnostics)
     now = time.time()
@@ -417,6 +438,8 @@ def analyze(events):
         seen_ids.add(event_id)
         kind = str(e.get('kind', 'message'))
         signed = valid_signature(e)
+        if signed:
+            seen_any_signed_event = True
         sender = str(e.get('sender_key', '')) if signed else None
         from_server = bool(SERVER_PUBLIC_KEY) and sender == SERVER_PUBLIC_KEY and signed
         # Signed people are identified by keys, not Colab usernames.
@@ -485,6 +508,29 @@ def analyze(events):
             continue
         if kind != 'message':
             continue
+        # The original pre-identity history is retained. Once signed records
+        # begin, new unsigned/invalid messages are ignored, rather than
+        # allowing edits to chat.json to impersonate students.
+        if not signed and seen_any_signed_event:
+            continue
+        message_text = e.get('text')
+        if signed and not valid_incoming_message(message_text):
+            continue
+        if signed and sender:
+            # Receiver-side limits: ordinary clients filter obvious bot
+            # floods even when a modified Colab client skips its own cooldown.
+            # Timestamps are client supplied, so this is mitigation, not proof
+            # of a human sender or a server-enforced global rate limit.
+            stamp = e.get('issued_at')
+            if type(stamp) is int and abs(stamp - now) <= 86400:
+                history = rate_history.setdefault(sender, [])
+                history[:] = [(ts, body) for ts, body in history if stamp - ts <= 60]
+                if (sum(1 for ts, _ in history if 0 <= stamp - ts <= 10) >= 7 or
+                        sum(1 for ts, _ in history if 0 <= stamp - ts <= 60) >= 30 or
+                        sum(1 for ts, body in history if 0 <= stamp - ts <= 30 and
+                            body == message_text.casefold().strip()) >= 4):
+                    continue
+                history.append((stamp, message_text.casefold().strip()))
         post_number += 1
         item = {
             'number': post_number, 'id': event_id,
@@ -586,6 +632,85 @@ def is_valid_emoji(emoji):
     if not 1 <= len(emoji) <= 8 or re.search(r'[\x00-\x1f\x7f]', emoji):
         return False
     return any(ord(c) >= 0x2600 for c in emoji)
+
+
+def load_role_recovery():
+    try:
+        with open(ROLE_RECOVERY_PATH, encoding='utf-8') as fh:
+            entries = json.load(fh)
+        if isinstance(entries, list):
+            return [item for item in entries if isinstance(item, dict) and
+                    isinstance(item.get('event'), dict)]
+    except (OSError, ValueError):
+        pass
+    return []
+
+
+def persist_role_recovery(entries):
+    """Atomic replacement is safe inside OWN private Drive, not chat.json."""
+    os.makedirs(PRIVATE_FOLDER, exist_ok=True)
+    temporary = ROLE_RECOVERY_PATH + '.tmp'
+    with open(temporary, 'w', encoding='utf-8') as fh:
+        json.dump(entries[-30:], fh, ensure_ascii=False, indent=2)
+    os.replace(temporary, ROLE_RECOVERY_PATH)
+
+
+def queue_role_recovery(grant):
+    if not isinstance(grant, dict) or grant.get('kind') != 'role' or not valid_signature(grant):
+        raise ChatFileError('Cannot save an unsigned role grant.')
+    with file_lock:
+        existing = load_role_recovery()
+        existing = [x for x in existing if (x.get('event', {}).get('role'),
+                                             x.get('event', {}).get('target_key')) !=
+                                            (grant.get('role'), grant.get('target_key'))]
+        existing.append({'event': grant, 'saved_at': time.time()})
+        persist_role_recovery(existing)
+
+
+def reconcile_role_recovery(force=False):
+    """Best-effort self-healing for role events lost to other Colab writers.
+
+    While this issuer's Colab runs, the latest signed grant is repaired if it
+    disappears. A newer role decision prevents replaying an older grant.
+    The queue expires after 24h, and never contains an Owner password.
+    """
+    global last_recovery_check
+    now_mono = time.monotonic()
+    if not force and now_mono - last_recovery_check < 4:
+        return
+    last_recovery_check = now_mono
+    with file_lock:
+        queue = load_role_recovery()
+        if not queue:
+            return
+        events = read_messages()
+        present = {str(e.get('id')) for e in events if isinstance(e, dict)}
+        keep = []
+        for item in queue[-30:]:
+            event = item['event']
+            age = time.time() - float(item.get('saved_at', 0))
+            if age < 0 or age > 86400 or not valid_signature(event):
+                continue
+            if event.get('kind') != 'role' or event.get('role') not in ('moderator', 'verified'):
+                continue
+            # A later signed event for this role and target supersedes the
+            # grant. Never resurrect an old grant after someone revoked it.
+            competing = [e for e in events if isinstance(e, dict) and
+                         e.get('kind') == 'role' and
+                         e.get('target_key') == event.get('target_key') and
+                         e.get('role') == event.get('role') and
+                         e.get('id') != event.get('id') and valid_signature(e)]
+            if any(int(e.get('issued_at', 0)) > int(event.get('issued_at', 0))
+                   for e in competing):
+                continue
+            keep.append(item)
+            if str(event.get('id')) not in present:
+                # Only restore exactly the existing cryptographically signed
+                # event. Never issue new authority or forge a badge.
+                if write_event(event):
+                    present.add(str(event.get('id')))
+        if len(keep) != len(queue):
+            persist_role_recovery(keep)
 
 
 def note(value):
@@ -739,6 +864,9 @@ def is_mentioned(text, name):
 def snapshot():
     global next_popup
     try:
+        # Reconcile queued signed grants that another Drive writer may have
+        # overwritten. No secret owner password is saved to disk.
+        reconcile_role_recovery()
         a = latest_analysis()
         error = ''
     except ChatFileError as exc:
@@ -930,6 +1058,10 @@ def submit_message(raw):
                                               target_key=target, role=role, active=active)
                 else:
                     grant = event_now('role', role=role, target_key=target, active=active)
+                # Keep the signed grant in the issuer's PRIVATE Drive as
+                # recovery data, not as an owner password. Background refresh
+                # will restore the grant if a concurrent save removes it.
+                queue_role_recovery(grant)
                 # Google Drive mount updates are not atomic across students.
                 # Another student's save can overwrite our role grant almost
                 # immediately. Reinsert the SAME signed grant if it disappears,
