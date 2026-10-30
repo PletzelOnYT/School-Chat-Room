@@ -4,12 +4,14 @@ on:
     paths:
       - 'messaging_app.py'
       - 'school_chat.py'
+      - 'owner_guardian.py'
       - 'tests/**'
       - '.github/workflows/check-python.yml'
   pull_request:
     paths:
       - 'messaging_app.py'
       - 'school_chat.py'
+      - 'owner_guardian.py'
       - 'tests/**'
 jobs:
   messaging-app-tests:
