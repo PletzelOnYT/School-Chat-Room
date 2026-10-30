@@ -967,34 +967,43 @@ def search_messages(query, messages):
 
 
 def build_threads(messages, count, muted, cleared):
-    """Group signed reply events under the parent, keeping recent threads first."""
+    """Group the latest N posts beneath their original parent messages.
+
+    Include older ancestors for context, without dumping 40 stale replies
+    into the display. A reply to a reply remains nested beneath that reply.
+    """
+    visible = [m for m in messages if m['number'] > cleared and
+               m['user'].casefold() not in muted]
+    selected = visible[-count:]
     by_id = {m['id']: m for m in messages}
-    roots = {}
     groups = {}
-    for msg in messages:
+    for msg in selected:
+        chain = []
         current = msg
         seen = set()
-        while (current.get('reply_to') in by_id and
-               current.get('reply_to') not in seen):
+        while current and current['id'] not in seen:
             seen.add(current['id'])
-            current = by_id[current['reply_to']]
-        root_id = current['id']
-        roots[msg['id']] = root_id
-        groups.setdefault(root_id, []).append(msg)
-    candidates = []
-    for root_id, nodes in groups.items():
-        parent = by_id[root_id]
-        available = [m for m in nodes if m['number'] > cleared and
-                     m['user'].casefold() not in muted]
-        if not available:
+            chain.append(current)
+            parent_id = current.get('reply_to')
+            current = by_id.get(parent_id) if parent_id else None
+        if not chain:
             continue
-        replies = [m for m in available if m['id'] != root_id]
-        candidates.append((max(m['number'] for m in available), {
-            'root': parent, 'replies': replies[-40:],
+        root = chain[-1]
+        group = groups.setdefault(root['id'], {
+            'root': root, 'replies': {}, 'newest': 0,
+        })
+        group['newest'] = max(group['newest'], msg['number'])
+        for part in chain[:-1]:
+            group['replies'][part['id']] = part
+
+    result = []
+    for group in sorted(groups.values(), key=lambda g: g['newest']):
+        replies = sorted(group['replies'].values(), key=lambda m: m['number'])
+        result.append({
+            'root': group['root'], 'replies': replies,
             'total_replies': len(replies),
-        }))
-    candidates.sort(key=lambda item: item[0])
-    return [group for _, group in candidates[-count:]]
+        })
+    return result
 
 
 def snapshot():
@@ -1427,7 +1436,8 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     // The normal view prints exactly one row per message. Action controls
     // only appear when that message is selected; none are appended per row.
     const line = document.createElement('span');
-    if (nested) line.appendChild(document.createTextNode('  ↳ '));
+    if (nested) line.appendChild(document.createTextNode(
+      '  '.repeat(Math.min(4, Number(nested) || 1)) + '↳ '));
     line.appendChild(colored('[' + (msg.time || '') + ']', '#00FFFF'));
     if (!msg.private) line.appendChild(colored(' #' + msg.number, '#999999'));
     line.appendChild(document.createTextNode(' '));
@@ -1470,13 +1480,6 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         input.focus();
         input.setSelectionRange(input.value.length, input.value.length);
       }, '#3498FF'));
-      if (group && group.total_replies > 0) {
-        area.appendChild(document.createTextNode('  '));
-        area.appendChild(textControl(
-          showSelectedThread ? '[Hide thread]' : '[View thread: ' + group.total_replies + ']',
-          () => {showSelectedThread = !showSelectedThread; render(latestState);},
-          '#3498FF'));
-      }
       area.appendChild(document.createTextNode('  '));
       area.appendChild(textControl('[Close]', () => {
         selectedMessageId = null; selectedEmojiPicker = false;
@@ -1493,10 +1496,6 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
           }, mine ? '#3498FF' : '#999999'));
         }
         newline();
-      }
-      if (showSelectedThread && group) {
-        if (group.root.id !== msg.id) renderLine(group.root, currentUsername, false, false);
-        for (const reply of group.replies || []) renderLine(reply, currentUsername, true, false);
       }
     }
   }
@@ -1529,9 +1528,39 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       "--- Type your message and press Enter. Type '/exit' to quit. ---"));
     newline(); newline();
 
-    // Restore original v5.17 behavior: every recent post in chronological
-    // order, including replies and private notes. Never auto-open threads.
-    for (const msg of Array.isArray(state.messages) ? state.messages : []) {
+    // Threaded view: replies are ALWAYS immediately below their parent,
+    // including nested replies. No "View thread" action is necessary.
+    const groups = Array.isArray(state.threads) ? state.threads : [];
+    if (groups.length) {
+      const printed = new Set();
+      for (const group of groups) {
+        if (!group?.root?.id) continue;
+        const children = new Map();
+        for (const reply of group.replies || []) {
+          const parent = reply.reply_to || group.root.id;
+          if (!children.has(parent)) children.set(parent, []);
+          children.get(parent).push(reply);
+        }
+        for (const childList of children.values()) {
+          childList.sort((x,y) => (x.number||0)-(y.number||0));
+        }
+        function renderDescendant(node, depth) {
+          if (!node?.id || printed.has(node.id)) return;
+          printed.add(node.id);
+          renderLine(node, state.username || '', depth);
+          for (const child of children.get(node.id) || []) {
+            renderDescendant(child, Math.min(depth+1,4));
+          }
+        }
+        renderDescendant(group.root, 0);
+      }
+    } else {
+      for (const msg of (state.messages || []).filter(m => !m.private)) {
+        renderLine(msg, state.username || '');
+      }
+    }
+    // Private system notices remain local and are never written to Drive.
+    for (const msg of (state.messages || []).filter(m => m.private)) {
       renderLine(msg, state.username || '');
     }
     if (state.popup && state.popup.id !== lastPopupId) {
