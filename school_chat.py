@@ -979,9 +979,11 @@ def claim_self_verified():
     return identity_public in latest_analysis()['verified']
 
 
-# An already-available Google account prefix counts as a local sign-in
-# signal. Do NOT ask for new Google permissions (school age restrictions).
-if GOOGLE_ACCOUNT_NAME_AVAILABLE:
+# An existing, successfully mounted Google Drive is the sign-in signal.
+# This never starts another Google OAuth flow, important for restricted school
+# accounts. All chat participants with mounted Drive can self-claim the badge;
+# it is NOT independent Google identity verification.
+if os.path.ismount('/content/drive'):
     try:
         claim_self_verified()
     except (ChatFileError, OSError):
