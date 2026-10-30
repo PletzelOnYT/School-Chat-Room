@@ -931,11 +931,11 @@ def search_messages(query, messages):
         if words and not all(term.casefold() in message['text'].casefold()
                              for term in words):
             continue
-        if filters.get('has') == 'attachment' and not message.get('attachment'):
+        if filters.get('has', '').casefold() == 'attachment' and not message.get('attachment'):
             continue
-        if filters.get('has') == 'reaction' and not message.get('reactions'):
+        if filters.get('has', '').casefold() == 'reaction' and not message.get('reactions'):
             continue
-        if filters.get('in') == 'replies' and not message.get('reply_to'):
+        if filters.get('in', '').casefold() == 'replies' and not message.get('reply_to'):
             continue
         if 'after' in filters or 'before' in filters:
             stamp = message.get('issued_at')
