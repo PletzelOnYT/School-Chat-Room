@@ -66,6 +66,9 @@ const google = {colab:{kernel:{invokeFunction: async(name,args) => {
 }}}};
 const sandbox = {
   document, google, console, setInterval:()=>0, clearInterval:()=>{},
+  STATE_CALLBACK_JSON:'messaging_app.test.state',
+  SEND_CALLBACK_JSON:'messaging_app.test.send',
+  REFRESHMS:1000,
   window:{open:()=>null},
   URL:{createObjectURL:()=>'',revokeObjectURL:()=>{}},
   Blob: class {},
