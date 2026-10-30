@@ -1,4 +1,4 @@
-# @title School ChatRoom v5.17 — Google Drive chat, blue Verified checkmark
+# @title School ChatRoom v5.18 — Google Drive chat, blue Verified checkmark
 """School chat on the original shared Google Drive chat.json.
 
 Only the blue self-claimed Verified title exists. No privileged roles or
@@ -17,6 +17,8 @@ import threading
 import time
 import uuid
 import unicodedata
+import mimetypes
+import shlex
 from datetime import datetime
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -33,7 +35,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 1.5
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.17'
+CLIENT_VERSION = '5.18'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -59,6 +61,44 @@ if not os.path.isfile(CHAT_FILE_PATH):
 PRIVATE_FOLDER = os.path.join(DRIVE_ROOT, '.schoolchat')
 PRIVATE_IDENTITY_PATH = os.path.join(PRIVATE_FOLDER, 'identity.json')
 
+# Everyone must add a SHORTCUT to the SAME shared folder in their My Drive.
+# Unlike a shared JSON array, independent event files never replace each
+# other's contents. Original chat.json is kept read-only for older history.
+EVENT_ROOT = os.path.join(DRIVE_ROOT, 'SchoolChatEvents')
+EVENT_FOLDER = os.path.join(EVENT_ROOT, 'events')
+ATTACHMENT_FOLDER = os.path.join(EVENT_ROOT, 'attachments')
+ROOM_MARKER = os.path.join(EVENT_ROOT, 'room.json')
+MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
+ALLOWED_ATTACHMENTS = {
+    'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp',
+    'image/gif': '.gif', 'application/pdf': '.pdf',
+    'text/plain': '.txt', 'text/markdown': '.md',
+}
+if not os.path.isdir(EVENT_ROOT):
+    raise ChatFileError if False else FileNotFoundError(
+        'A shared Drive folder is required for non-overwriting chat updates. '
+        'Create one folder named SchoolChatEvents, share it with everyone as Editor, '
+        'and have each student add a SHORTCUT to it in My Drive root. '
+        'Do not create a separate folder for each student.'
+    )
+os.makedirs(EVENT_FOLDER, exist_ok=True)
+os.makedirs(ATTACHMENT_FOLDER, exist_ok=True)
+if not os.path.isfile(ROOM_MARKER):
+    try:
+        with open(ROOM_MARKER, 'x', encoding='utf-8') as marker:
+            json.dump({'type': 'school-chat-event-room-v1',
+                       'history_anchor': ORIGINAL_HISTORY_ANCHOR}, marker)
+    except FileExistsError:
+        pass
+try:
+    with open(ROOM_MARKER, encoding='utf-8') as marker:
+        marker_data = json.load(marker)
+    if marker_data.get('history_anchor') != ORIGINAL_HISTORY_ANCHOR:
+        raise ValueError('Wrong event-room marker')
+except (ValueError, OSError) as exc:
+    raise RuntimeError('SchoolChatEvents is not the correct shared room. '
+                       'Check the shared folder shortcut.') from exc
+
 # Google Colab uses the same system username for many students. Do not use
 # ColabUser or getpass as a chat nickname, not even momentarily.
 # The value is assigned only after loading this person's private identity.
@@ -79,6 +119,9 @@ minimum_client_version = ''
 update_required = False
 update_notice_shown = False
 last_upstream_version_check = 0.0
+legacy_cache = None
+event_cache = {}
+last_event_scan = 0.0
 
 class ChatFileError(Exception):
     pass
@@ -260,51 +303,84 @@ def valid_signature(event):
 
 
 def read_messages():
-    """Retry transient partial reads; NEVER replace an unreadable shared file."""
+    """Read original JSON history plus independent, append-only event files.
+
+    No code in this client opens chat.json in write mode. Listing the shared
+    event folder is cached briefly to keep Colab's Drive mount responsive.
+    Files that are only partially synchronized are retried on the next poll.
+    """
+    global legacy_cache, last_event_scan
     with file_lock:
-        for attempt in range(3):
+        if legacy_cache is None:
             try:
-                with open(CHAT_FILE_PATH, encoding='utf-8') as f:
-                    events = json.load(f)
-                break
+                with open(CHAT_FILE_PATH, encoding='utf-8') as fh:
+                    legacy = json.load(fh)
             except (OSError, ValueError) as exc:
-                if attempt == 2:
-                    raise ChatFileError('Cannot read shared chat.json: ' + str(exc)) from exc
-                time.sleep(0.06 * (attempt + 1))
-        if not isinstance(events, list):
-            raise ChatFileError('Shared chat.json must contain a JSON array.')
-        if not any(isinstance(e, dict) and e.get('id') == ORIGINAL_HISTORY_ANCHOR
-                   for e in events):
-            raise ChatFileError('Wrong chat.json. Use a shortcut to the ORIGINAL shared file.')
-        return events
+                raise ChatFileError('Original chat.json could not be read: ' + str(exc)) from exc
+            if not isinstance(legacy, list) or not any(
+                    isinstance(e, dict) and e.get('id') == ORIGINAL_HISTORY_ANCHOR
+                    for e in legacy):
+                raise ChatFileError('Wrong original chat.json shortcut.')
+            legacy_cache = legacy
+
+        if time.monotonic() - last_event_scan >= 1.5:
+            try:
+                names = sorted(n for n in os.listdir(EVENT_FOLDER)
+                               if re.fullmatch(r'[0-9]{10}-[0-9a-f]{32}\\.json', n))
+            except OSError as exc:
+                raise ChatFileError('Shared event folder is unavailable: ' + str(exc)) from exc
+            for name in names:
+                if name in event_cache:
+                    continue
+                try:
+                    full_path = os.path.join(EVENT_FOLDER, name)
+                    if os.path.getsize(full_path) > 16384:
+                        continue
+                    with open(full_path, encoding='utf-8') as fh:
+                        event = json.load(fh)
+                    if isinstance(event, dict) and valid_signature(event):
+                        event_cache[name] = event
+                except (OSError, ValueError):
+                    # A different student's file may still be syncing.
+                    continue
+            last_event_scan = time.monotonic()
+        return list(legacy_cache) + [event_cache[name] for name in sorted(event_cache)]
 
 
-read_messages()  # Fail before opening the chat if the wrong file is selected.
+read_messages()  # Validate original history and event folder before starting.
 
 
 def write_event(event):
-    """Best-effort append; other Colab runtimes can still race on Google Drive."""
+    """Create an immutable, uniquely named Drive file; NEVER rewrite history."""
+    if not valid_signature(event):
+        raise ChatFileError('Refusing to save an unsigned/invalid chat event.')
+    event_id = str(event.get('id', ''))
+    try:
+        suffix = uuid.UUID(event_id).hex
+    except (ValueError, AttributeError):
+        raise ChatFileError('Invalid signed event ID.')
+    name = f'{int(event.get("issued_at", time.time())):010d}-{suffix}.json'
+    full_path = os.path.join(EVENT_FOLDER, name)
     with file_lock:
-        for attempt in range(3):
-            entries = read_messages()
-            if not any(isinstance(e, dict) and e.get('id') == event['id'] for e in entries):
-                entries.append(event)
-                try:
-                    # Never os.replace(): it could replace a Drive shortcut itself.
-                    with open(CHAT_FILE_PATH, 'w', encoding='utf-8') as f:
-                        json.dump(entries, f, indent=2, ensure_ascii=False)
-                        f.flush()
-                except OSError as exc:
-                    raise ChatFileError('Shared file write failed: ' + str(exc)) from exc
+        try:
+            with open(full_path, 'x', encoding='utf-8') as fh:
+                json.dump(event, fh, ensure_ascii=False, separators=(',', ':'))
+                fh.flush()
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise ChatFileError('Cannot create event in shared Drive folder: ' + str(exc)) from exc
+        for attempt in range(4):
             try:
-                if any(isinstance(e, dict) and e.get('id') == event['id']
-                       for e in read_messages()):
+                with open(full_path, encoding='utf-8') as fh:
+                    saved = json.load(fh)
+                if saved == event:
+                    event_cache[name] = event
                     return True
-            except ChatFileError:
-                if attempt == 2:
-                    raise
-            time.sleep(0.15 * (attempt + 1))
-        return False
+            except (OSError, ValueError):
+                pass
+            time.sleep(0.2 * (attempt + 1))
+    return False
 
 
 def event_now(kind, **fields):
