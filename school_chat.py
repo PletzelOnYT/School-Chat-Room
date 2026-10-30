@@ -1,4 +1,4 @@
-# @title School ChatRoom v5.14 — School terminal chat with Vercel owner login
+# @title School ChatRoom v5.15 — School terminal chat with Vercel owner login
 """Google Colab school chat — the same shared Google Drive chat.json.
 
 The ONLY hosted API is for checking the owner's key and signing role grants.
@@ -465,6 +465,7 @@ def analyze(events):
     moderators = set()
     verified = set()
     banned = set()
+    self_verification_denied = set()
     identities = {}
     messages = []
     by_number = {}
@@ -547,19 +548,31 @@ def analyze(events):
                         moderators.discard(target)
                 elif role == 'verified':
                     if active:
+                        self_verification_denied.discard(target)
                         verified.add(target)
                     else:
                         verified.discard(target)
+                        self_verification_denied.add(target)
                 elif role == 'banned':
                     if active:
                         banned.add(target)
                     else:
                         banned.discard(target)
             elif role == 'verified' and sender in moderators:
+                # Moderators retain authority to revoke self-service badges.
                 if active:
+                    self_verification_denied.discard(target)
                     verified.add(target)
                 else:
                     verified.discard(target)
+                    self_verification_denied.add(target)
+            elif (role == 'verified' and active is True and
+                  sender == target and e.get('self_verified') is True and
+                  sender not in banned and sender not in self_verification_denied):
+                # Deliberately SELF-CLAIMED badge, not Google identity proof.
+                # Never accept these events for another identity or for any
+                # elevated role, and never override a moderator revocation.
+                verified.add(sender)
             continue
 
         if kind == 'reaction':
@@ -708,7 +721,8 @@ def analyze(events):
     return dict(messages=messages, by_number=by_number,
                 identities=identities, seen_aliases=seen_aliases, display_names=display_names,
                 name_owners=name_owners, owners=owners,
-                moderators=moderators, verified=verified, banned=banned)
+                moderators=moderators, verified=verified, banned=banned,
+                self_verification_denied=self_verification_denied)
 
 
 def is_valid_emoji(emoji):
@@ -943,6 +957,37 @@ def ensure_account_profile():
 ensure_account_profile()
 
 
+def claim_self_verified():
+    """Self-service signed checkmark for THIS chat identity, not Google attestation.
+
+    When optional Google account metadata was accessible, call this at login.
+    The same operation is available via the private, undocumented chat action.
+    It never triggers OAuth, sends a full email, or signs a grant for others.
+    Signed administrator revocations and account bans take precedence.
+    """
+    state = latest_analysis()
+    if identity_public in state['banned']:
+        return False
+    if identity_public in state['self_verification_denied']:
+        return False
+    if identity_public in state['verified']:
+        return True
+    event = event_now('role', role='verified', target_key=identity_public,
+                      active=True, self_verified=True)
+    if not write_event(event):
+        return False
+    return identity_public in latest_analysis()['verified']
+
+
+# An already-available Google account prefix counts as a local sign-in
+# signal. Do NOT ask for new Google permissions (school age restrictions).
+if GOOGLE_ACCOUNT_NAME_AVAILABLE:
+    try:
+        claim_self_verified()
+    except (ChatFileError, OSError):
+        pass
+
+
 def is_mentioned(text, name):
     if not name or not isinstance(text, str):
         return False
@@ -1067,6 +1112,13 @@ def submit_message(raw):
         command, arg = command.casefold(), arg.strip()
 
         try:
+            if command == '/vf':
+                # Hidden from all command/help menus. Only the issuer's own
+                # signed identity is eligible; no chat message is broadcast.
+                if not claim_self_verified():
+                    note('Self-service checkmark unavailable. An administrator '
+                         'may have revoked it, or the shared Drive write failed.')
+                return snapshot()
             if command == '/owner':
                 if not arg:
                     note('Type /owner then enter your key in the password field (it will not be sent to chat).')
