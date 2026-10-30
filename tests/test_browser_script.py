@@ -32,7 +32,8 @@ class BrowserTests(unittest.TestCase):
         # No inline + or reply arrow after every ordinary chat message.
         self.assertNotIn("area.appendChild(textControl('  +'", script)
         self.assertNotIn("area.appendChild(textControl('  ↳'", script)
-        self.assertIn("for (const msg of Array.isArray(state.messages)", script)
+        self.assertIn("for (const group of groups)", script)
+        self.assertIn("renderDescendant(group.root, 0)", script)
         self.assertIn("if (!msg.private && interactive && selectedMessageId === msg.id)", script)
         self.assertIn("requestFullscreen", script)
         self.assertNotIn("upload_attachment", script)
