@@ -373,6 +373,42 @@ def call_owner_server(action, key, **data):
     return (event, obj.get('role_persisted') is True) if action == 'role' else event
 
 
+def call_moderator_server(signed_request):
+    """Sign moderator identity locally; Vercel checks its durable role state.
+
+    The request includes no Google password, email, or Owner secret. Vercel
+    only signs a verified-role change if the submitting key currently owns
+    an active owner-signed Moderator grant in the durable role ledger.
+    """
+    payload = json.dumps({
+        'action': 'moderator_role', 'client_version': CLIENT_VERSION,
+        'event': signed_request,
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        OWNER_AUTH_URL, data=payload, method='POST',
+        headers={'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            answer = json.load(response)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            raise ChatFileError('Vercel denied moderator permission. '
+                                'Ask the Owner to confirm /addmod.') from exc
+        if exc.code == 426:
+            raise ChatFileError('Update required. Restart the GitHub launcher.') from exc
+        raise ChatFileError(f'Moderator server returned HTTP {exc.code}.') from exc
+    except (OSError, ValueError, urllib.error.URLError) as exc:
+        raise ChatFileError('Moderator verification server unavailable.') from exc
+    event = answer.get('event') if isinstance(answer, dict) else None
+    if (not trusted_server_event(event) or answer.get('status') != 'granted'
+            or event.get('role') != 'verified'
+            or event.get('target_key') != signed_request.get('target_key')
+            or event.get('active') != signed_request.get('active')
+            or event.get('issued_by') != identity_public):
+        raise ChatFileError('Invalid signed moderator response from Vercel.')
+    return event, answer.get('role_persisted') is True
+
+
 def read_messages():
     """Retry transient partial reads; NEVER replace an unreadable shared file."""
     with file_lock:
@@ -1301,9 +1337,14 @@ def submit_message(raw):
                         'role', owner_access_key,
                         target_key=target, role=role, active=active)
                 else:
-                    grant = event_now('role', role=role,
-                                      target_key=target, active=active)
-                    persisted = False
+                    local_grant = event_now('role', role=role,
+                                            target_key=target, active=active)
+                    if remote_role_status == 'durable' and role == 'verified':
+                        # Durable moderator changes are server-authorized
+                        # against the CURRENT signed Moderator registry.
+                        grant, persisted = call_moderator_server(local_grant)
+                    else:
+                        grant, persisted = local_grant, False
 
                 role_field = {'moderator': 'moderators',
                               'verified': 'verified', 'banned': 'banned'}[role]
