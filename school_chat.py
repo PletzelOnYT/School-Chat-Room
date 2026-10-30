@@ -353,17 +353,11 @@ def is_gibberish(text):
 
 
 def analyze(events):
-    """Verify identities and signed permission records, and render regular chat.
+    """Read signed chat identities, messages and self-claimed Verified titles.
 
-    The owner role can be claimed by knowing the server-side secret, but only
-    the SERVER can sign owner/mod role records. Mods can sign verified records.
-    Old poll records remain ignored; signed reactions are supported.
+    All legacy privileged role records are ignored.
     """
-    owners = set()
-    moderators = set()
     verified = set()
-    banned = set()
-    self_verification_denied = set()
     identities = {}
     messages = []
     by_number = {}
@@ -390,22 +384,16 @@ def analyze(events):
         if signed:
             seen_any_signed_event = True
         sender = str(e.get('sender_key', '')) if signed else None
-        from_server = bool(SERVER_PUBLIC_KEY) and sender == SERVER_PUBLIC_KEY and signed
-        # Google account names are the default, independent of chat roles.
-        # Custom /rename names require Owner, Moderator, or Verified status,
-        # checked both here and when the local command is submitted.
-        # CAUTION: the account_username field is asserted by the sending
-        # Colab client; this shared JSON is NOT independent Google verification.
+        # A nickname cannot confer a Verified title.
         clean_name = valid_username(e.get('user'))
         account_name = valid_username(e.get('account_username'))
-        if signed and not from_server and kind in ('message', 'reaction', 'profile'):
+        if signed and sender and kind in ('message', 'reaction', 'profile'):
             identities.setdefault(sender, fallback_username(sender))
             if account_name:
                 account_names[sender] = account_name
                 seen_aliases.setdefault(sender, set()).add(account_name)
                 claim_order.setdefault((sender, account_name.casefold()), index)
-            can_rename = (sender in verified or sender in moderators or
-                          sender in owners) and sender not in banned
+            can_rename = sender in verified
             if can_rename and kind in ('message', 'profile') and clean_name:
                 # Support older signed profile records and new explicit
                 # rename records. New plain messages cannot silently rename.
@@ -419,64 +407,24 @@ def analyze(events):
                 sender, account_names.get(sender, fallback_username(sender)))
 
         if kind == 'role':
-            if not signed:
-                continue
-            target = e.get('target_key')
-            role = e.get('role')
-            active = e.get('active')
-            if not isinstance(target, str) or type(active) is not bool:
-                continue
-            try:
-                if len(b64decode(target)) != 32:
-                    continue
-            except Exception:
-                continue
-            if from_server:
-                if role == 'owner':
-                    # Owner badge expires, so rotating the key can end access.
-                    issued, expiry = e.get('issued_at'), e.get('expires_at')
-                    if (active and isinstance(issued, int) and
-                            isinstance(expiry, int) and issued <= now + 300 and
-                            expiry > now and expiry - issued <= 9*3600):
-                        owners.add(target)
-                elif role == 'moderator':
-                    if active:
-                        moderators.add(target)
-                    else:
-                        moderators.discard(target)
-                elif role == 'verified':
-                    if active:
-                        self_verification_denied.discard(target)
-                        verified.add(target)
-                    else:
-                        verified.discard(target)
-                        self_verification_denied.add(target)
-                elif role == 'banned':
-                    if active:
-                        banned.add(target)
-                    else:
-                        banned.discard(target)
-            elif role == 'verified' and sender in moderators:
-                # Moderators retain authority to revoke self-service badges.
-                if active:
-                    self_verification_denied.discard(target)
-                    verified.add(target)
-                else:
-                    verified.discard(target)
-                    self_verification_denied.add(target)
-            elif (role == 'verified' and active is True and
-                  sender == target and e.get('self_verified') is True and
-                  sender not in banned and sender not in self_verification_denied):
-                # Deliberately SELF-CLAIMED badge, not Google identity proof.
-                # Never accept these events for another identity or for any
-                # elevated role, and never override a moderator revocation.
-                verified.add(sender)
+            # Only the holder of the signed identity can issue its blue check.
+            # All legacy Owner/Moderator/banned/server grants are inert.
+            if (signed and sender and e.get('role') == 'verified'
+                    and e.get('self_verified') is True
+                    and e.get('active') is True
+                    and e.get('target_key') == sender):
+                try:
+                    if len(b64decode(sender)) == 32:
+                        verified.add(sender)
+                        identities.setdefault(sender, fallback_username(sender))
+                except (TypeError, ValueError):
+                    pass
             continue
 
         if kind == 'reaction':
             # Only a user with the actual identity private key can change
             # their own reactions. Replays are idempotent by event ID.
-            if signed and sender and not from_server:
+            if signed and sender:
                 target_id, emoji, active = e.get('message_id'), e.get('emoji'), e.get('active')
                 if (isinstance(target_id, str) and isinstance(emoji, str) and
                         1 <= len(emoji) <= 8 and type(active) is bool and
@@ -493,8 +441,6 @@ def analyze(events):
         # allowing edits to chat.json to impersonate students.
         if not signed and seen_any_signed_event:
             continue
-        if signed and sender in banned:
-            continue  # Globally hide posts sent while banned
         message_text = e.get('text')
         if signed and not valid_incoming_message(message_text):
             continue
@@ -519,7 +465,7 @@ def analyze(events):
             'user': clean_name or fallback_username(sender),
             'text': str(e.get('text', '')),
             'time': str(e.get('time', '')),
-            'sender_key': sender if not from_server else None,
+            'sender_key': sender,
             'signed': signed,
             'reply_to': e.get('reply_to') if signed else None
         }
@@ -614,13 +560,9 @@ def analyze(events):
         msg['reactions'] = reaction_totals.get(msg['id'], {})
         sender = msg['sender_key']
         msg['verified'] = bool(sender and sender in verified)
-        msg['owner'] = bool(sender and sender in owners)
-        msg['moderator'] = bool(sender and sender in moderators)
     return dict(messages=messages, by_number=by_number,
                 identities=identities, seen_aliases=seen_aliases, display_names=display_names,
-                name_owners=name_owners, owners=owners,
-                moderators=moderators, verified=verified, banned=banned,
-                self_verification_denied=self_verification_denied)
+                name_owners=name_owners, verified=verified)
 
 
 def is_valid_emoji(emoji):
