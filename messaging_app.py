@@ -1,4 +1,4 @@
-# @title Messaging App v5.20 — Google Drive Messenger
+# @title Messaging App v5.21 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -36,7 +36,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 1.5
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.20'
+CLIENT_VERSION = '5.21'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1183,28 +1183,31 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   const newline = () => area.appendChild(document.createTextNode('\n'));
   function replyData(reply) { return reply?.data?.['application/json'] ?? null; }
 
-  function renderTextWithMentions(text, currentUsername) {
+  function renderTextWithMentions(text, currentUsername, target=area) {
     const s = String(text ?? '');
     const escaped = currentUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = currentUsername ? new RegExp('(^|[^\\w@])(@' + escaped + ')(?!\\w)', 'gi') : null;
-    if (!regex) { area.appendChild(document.createTextNode(s)); return; }
+    if (!regex) { target.appendChild(document.createTextNode(s)); return; }
     let last = 0, m;
     while ((m = regex.exec(s)) !== null) {
-      area.appendChild(document.createTextNode(s.slice(last, m.index) + m[1]));
-      area.appendChild(colored(m[2], '#FFB900', true));
+      target.appendChild(document.createTextNode(s.slice(last, m.index) + m[1]));
+      target.appendChild(colored(m[2], '#FFB900', true));
       last = m.index + m[0].length;
     }
-    area.appendChild(document.createTextNode(s.slice(last)));
+    target.appendChild(document.createTextNode(s.slice(last)));
   }
 
-  function appendVerifiedTitle(isVerified) {
-    if (isVerified) area.appendChild(colored('☑ ', '#3498FF', true));
+  function appendVerifiedTitle(isVerified, target=area) {
+    if (isVerified) target.appendChild(colored('☑ ', '#3498FF', true));
   }
 
   // All extra controls are tiny inline text, not panels or large buttons.
   const expandedThreads = new Set();
   const activePickers = new Set();
   let latestState = null;
+  let selectedMessageId = null;
+  let showSelectedThread = false;
+  let selectedEmojiPicker = false;
   const emojiChoices = ['👍','❤️','😂','🔥','🎉','💀','👀'];
   function textControl(text, action, color = '#999999') {
     const span = colored(text, color);
@@ -1233,97 +1236,113 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       if (!stopped) input.focus();
     }
   }
-  function renderLine(msg, currentUsername, nested=false) {
-    if (nested) area.appendChild(document.createTextNode('  ↳ '));
-    area.appendChild(colored('[' + (msg.time || '') + ']', '#00FFFF'));
-    if (!msg.private) area.appendChild(colored(' #' + msg.number, '#999999'));
-    area.appendChild(document.createTextNode(' '));
-    if (!msg.private) appendVerifiedTitle(msg.verified);
-    area.appendChild(colored(msg.user || '', msg.private ? '#FF5555' : 'green', true));
-    area.appendChild(document.createTextNode(': '));
+  function threadFor(messageId) {
+    return (latestState?.threads || []).find(group =>
+      group.root?.id === messageId ||
+      (group.replies || []).some(reply => reply.id === messageId)
+    ) || null;
+  }
+
+  function renderLine(msg, currentUsername, nested=false, interactive=true) {
+    // The normal view prints exactly one row per message. Action controls
+    // only appear when that message is selected; none are appended per row.
+    const line = document.createElement('span');
+    if (nested) line.appendChild(document.createTextNode('  ↳ '));
+    line.appendChild(colored('[' + (msg.time || '') + ']', '#00FFFF'));
+    if (!msg.private) line.appendChild(colored(' #' + msg.number, '#999999'));
+    line.appendChild(document.createTextNode(' '));
+    if (!msg.private) appendVerifiedTitle(msg.verified, line);
+    line.appendChild(colored(msg.user || '', msg.private ? '#FF5555' : 'green', true));
+    line.appendChild(document.createTextNode(': '));
     if (msg.private) {
-      area.appendChild(colored(msg.text || '', '#FF5555'));
-      newline();
-      return;
-    }
-    renderTextWithMentions(msg.text || '', currentUsername);
-    const active = Object.entries(msg.reactions || {}).filter(pair=>pair[1] > 0);
-    for (const [emoji, count] of active) {
-      const mine = (msg.my_reactions || []).includes(emoji);
-      area.appendChild(textControl('  ' + emoji + ' ' + count,
-        ()=>sendInline((mine ? '/unreact ' : '/react ') + msg.number + ' ' + emoji),
-        mine ? '#3498FF' : '#bbbbbb'));
-    }
-    area.appendChild(textControl('  +', ()=>{
-      if (activePickers.has(msg.id)) activePickers.delete(msg.id);
-      else activePickers.add(msg.id);
-      render(latestState);
-    }));
-    area.appendChild(textControl('  ↳', ()=>{
-      input.value = '/reply ' + msg.number + ' ';
-      input.focus();
-      input.setSelectionRange(input.value.length,input.value.length);
-    }));
-    newline();
-    if (activePickers.has(msg.id)) {
-      area.appendChild(document.createTextNode('    '));
-      for (const emoji of emojiChoices) {
-        const mine = (msg.my_reactions || []).includes(emoji);
-        area.appendChild(textControl(emoji + ' ', ()=>{
-          activePickers.delete(msg.id);
-          sendInline((mine ? '/unreact ' : '/react ') + msg.number + ' ' + emoji);
-        }, '#3498FF'));
+      line.appendChild(colored(msg.text || '', '#FF5555'));
+    } else {
+      renderTextWithMentions(msg.text || '', currentUsername, line);
+      const active = Object.entries(msg.reactions || {}).filter(pair => pair[1] > 0);
+      if (active.length) {
+        line.appendChild(colored('  [' +
+          active.map(pair => pair[0] + ' ' + pair[1]).join('  ') + ']', '#bbbbbb'));
       }
+    }
+    if (!msg.private && interactive) {
+      line.style.cursor = 'pointer';
+      line.title = 'Click for reactions, reply and thread';
+      line.addEventListener('click', () => {
+        selectedMessageId = selectedMessageId === msg.id ? null : msg.id;
+        selectedEmojiPicker = false;
+        showSelectedThread = false;
+        render(latestState);
+      });
+    }
+    area.appendChild(line);
+    newline();
+
+    if (!msg.private && interactive && selectedMessageId === msg.id) {
+      const group = threadFor(msg.id);
+      area.appendChild(document.createTextNode('   '));
+      area.appendChild(textControl('[React]', () => {
+        selectedEmojiPicker = !selectedEmojiPicker;
+        render(latestState);
+      }, '#3498FF'));
+      area.appendChild(document.createTextNode('  '));
+      area.appendChild(textControl('[Reply]', () => {
+        input.value = '/reply ' + msg.number + ' ';
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      }, '#3498FF'));
+      if (group && group.total_replies > 0) {
+        area.appendChild(document.createTextNode('  '));
+        area.appendChild(textControl(
+          showSelectedThread ? '[Hide thread]' : '[View thread: ' + group.total_replies + ']',
+          () => {showSelectedThread = !showSelectedThread; render(latestState);},
+          '#3498FF'));
+      }
+      area.appendChild(document.createTextNode('  '));
+      area.appendChild(textControl('[Close]', () => {
+        selectedMessageId = null; selectedEmojiPicker = false;
+        showSelectedThread = false; render(latestState);
+      }));
       newline();
+      if (selectedEmojiPicker) {
+        area.appendChild(document.createTextNode('   '));
+        for (const emoji of emojiChoices) {
+          const mine = (msg.my_reactions || []).includes(emoji);
+          area.appendChild(textControl(emoji + ' ', () => {
+            selectedEmojiPicker = false;
+            sendInline((mine ? '/unreact ' : '/react ') + msg.number + ' ' + emoji);
+          }, mine ? '#3498FF' : '#999999'));
+        }
+        newline();
+      }
+      if (showSelectedThread && group) {
+        if (group.root.id !== msg.id) renderLine(group.root, currentUsername, false, false);
+        for (const reply of group.replies || []) renderLine(reply, currentUsername, true, false);
+      }
     }
   }
 
   function render(state) {
     if (!state || !root.isConnected) return;
     latestState = state;
+    if (selectedMessageId && !(state.messages || []).some(m => m.id === selectedMessageId)) {
+      selectedMessageId = null;
+      selectedEmojiPicker = false;
+      showSelectedThread = false;
+    }
     area.replaceChildren();
     area.appendChild(document.createTextNode('--- Connected as: '));
     appendVerifiedTitle(state.my_verified);
     area.appendChild(colored(state.username, 'green', true));
     area.appendChild(document.createTextNode(' ---'));
-    area.appendChild(textControl(' ⛶', ()=>{
-      try {
-        if (document.fullscreenElement === root) document.exitFullscreen();
-        else if (root.requestFullscreen) root.requestFullscreen();
-      } catch(error) {console.debug('Full screen unavailable:',error);}
-    }, '#999999'));
     newline();
     area.appendChild(document.createTextNode(
       "--- Type your message and press Enter. Type '/exit' to quit. ---"));
     newline(); newline();
 
-    const threads = Array.isArray(state.threads) ? state.threads : null;
-    if (threads) {
-      for (const thread of threads) {
-        renderLine(thread.root, state.username || '');
-        const count = thread.total_replies || 0;
-        if (count > 0) {
-          const open = expandedThreads.has(thread.root.id);
-          area.appendChild(textControl(
-            '  ' + (open ? '▾ Hide ' : '▸ Show ') + count + ' repl' +
-            (count === 1 ? 'y' : 'ies'),
-            ()=>{
-              if (open) expandedThreads.delete(thread.root.id);
-              else expandedThreads.add(thread.root.id);
-              render(latestState);
-            }, '#3498FF'
-          ));
-          newline();
-          if (open) for (const reply of (thread.replies || [])) {
-            renderLine(reply,state.username || '',true);
-          }
-        }
-      }
-      for (const message of (state.messages || []).filter(m => m.private)) {
-        renderLine(message, state.username || '');
-      }
-    } else for (const message of (state.messages || [])) {
-      renderLine(message, state.username || '');
+    // Restore original v5.17 behavior: every recent post in chronological
+    // order, including replies and private notes. Never auto-open threads.
+    for (const msg of Array.isArray(state.messages) ? state.messages : []) {
+      renderLine(msg, state.username || '');
     }
     if (state.popup && state.popup.id !== lastPopupId) {
       lastPopupId = state.popup.id;
