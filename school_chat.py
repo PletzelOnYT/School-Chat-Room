@@ -1220,7 +1220,10 @@ def submit_message(raw):
             if command == '/ping':
                 t = time.monotonic()
                 read_messages()
-                note(f'Shared Drive file readable. Read: {(time.monotonic() - t) * 1000:.0f} ms.')
+                note(f'Shared Drive file readable. Read: {(time.monotonic() - t) * 1000:.0f} ms. '
+                     f'Role storage: {remote_role_status}. '
+                     f'Chat version: {CLIENT_VERSION}. '
+                     'Permanent roles require Vercel Upstash configuration.')
                 return snapshot()
             if command == '/exit':
                 running = False
@@ -1290,56 +1293,73 @@ def submit_message(raw):
                 if command == '/ban' and (target == identity_public or target in a['owners']):
                     note('You cannot ban yourself or an active Owner.')
                     return snapshot()
-                # An OWNER authorization is signed by Vercel; regular moderators
-                # can sign verified grants themselves with persistent identities.
+                # Owner-issued permissions can be stored in a durable Redis
+                # ledger by Vercel. This avoids writing the shared chat.json
+                # at all, so an older Colab save cannot erase the grant.
                 if me_owner and owner_access_key:
-                    grant = call_owner_server('role', owner_access_key,
-                                              target_key=target, role=role, active=active)
+                    grant, persisted = call_owner_server(
+                        'role', owner_access_key,
+                        target_key=target, role=role, active=active)
                 else:
-                    grant = event_now('role', role=role, target_key=target, active=active)
-                # Keep the signed grant in the issuer's PRIVATE Drive as
-                # recovery data, not as an owner password. Background refresh
-                # will restore the grant if a concurrent save removes it.
+                    grant = event_now('role', role=role,
+                                      target_key=target, active=active)
+                    persisted = False
+
+                role_field = {'moderator': 'moderators',
+                              'verified': 'verified', 'banned': 'banned'}[role]
+                if persisted:
+                    read_remote_role_events(force=True)
+                    updated = latest_analysis()
+                    effective = (target in updated[role_field]) == active
+                    if effective:
+                        note(f'{role.title()} {"assigned" if active else "revoked"} '
+                             f'for {target_name} (ID {short_id(target)}). '
+                             'Saved in the permanent server role ledger; '
+                             'other updated clients will receive it automatically.')
+                    else:
+                        note('Vercel saved the signed grant, but this client could not '
+                             'confirm the new role from the server. '
+                             'Use /rolecheck and /ping; do not retry repeatedly.')
+                    return snapshot()
+
+                # Fallback if no durable store is configured. An owner
+                # should configure Upstash in Vercel to permanently fix this.
+                # Store the same signed record privately for later repair.
                 queue_role_recovery(grant)
-                # Google Drive mount updates are not atomic across students.
-                # Another student's save can overwrite our role grant almost
-                # immediately. Reinsert the SAME signed grant if it disappears,
-                # and verify the effective role before declaring success.
                 effective = False
+                last_reason = 'grant missing after Google Drive synchronization'
                 for attempt in range(6):
                     if not write_event(grant):
                         continue
                     updated = latest_analysis()
-                    current_role_set = updated[{'moderator': 'moderators',
-                                            'verified': 'verified', 'banned': 'banned'}[role]]
-                    effective = (target in current_role_set) == active
+                    effective = (target in updated[role_field]) == active
                     if effective:
-                        # Confirm once more after a short pause to catch an
-                        # overlapping write before showing success.
                         time.sleep(0.3)
-                        check = latest_analysis()
-                        actual = check[{'moderator': 'moderators',
-                                        'verified': 'verified', 'banned': 'banned'}[role]]
-                        effective = (target in actual) == active
+                        effective = ((target in latest_analysis()[role_field]) == active)
                     if effective:
                         break
                     current_entries = read_messages()
-                    if any(isinstance(e, dict) and e.get('id') == grant['id']
-                           for e in current_entries):
-                        # The event is present but ineffective: don't claim a
-                        # successful grant or repeatedly append a bad record.
+                    matching = [e for e in current_entries
+                                if isinstance(e, dict) and e.get('id') == grant['id']]
+                    if matching:
+                        last_reason = (
+                            'grant exists but its effective state differs. '
+                            'Check for a newer revocation or outdated recipient client.'
+                        )
                         break
                     time.sleep(min(0.4 * (attempt + 1), 1.5))
-                if not effective:
-                    note('Role grant could not be retained/verified in shared chat.json. '
-                         'Concurrent Google Drive writes may be overwriting it. '
-                         f'Target: {target_name} (ID {short_id(target)}). '
-                         'Try again when fewer users are writing.')
-                else:
+
+                if effective:
                     note(f'{role.title()} {"assigned" if active else "revoked"} '
                          f'for {target_name} (ID {short_id(target)}). '
-                         'The recipient must run the latest GitHub chat code '
-                         'on THEIR own Google Drive identity.')
+                         'The signed grant is in chat.json, but remains at risk '
+                         'until durable Vercel role storage is configured.')
+                else:
+                    note('Role change queued for retry in this account private '
+                         'recovery file. ' + last_reason + '. '
+                         f'Target: {target_name} (ID {short_id(target)}). '
+                         'To prevent lost grants, configure Upstash Redis '
+                         'credentials on the Owner API.')
                 return snapshot()
             if command == '/rolecheck':
                 target, error = resolve_target(arg, a)
