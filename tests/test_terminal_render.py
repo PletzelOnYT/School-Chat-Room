@@ -55,7 +55,9 @@ const state = {
      text:'Hello!', reply_to:'a', reactions:{}, my_reactions:[], private:false},
   ],
   threads: [
-    {root:{id:'a'},replies:[{id:'b',number:102,time:'12:00:02',user:'Emma',
+    {root:{id:'a',number:101,time:'12:00:01',user:'Alex',verified:true,
+      text:'Hey!',reactions:{},my_reactions:[],private:false},
+      replies:[{id:'b',number:102,time:'12:00:02',user:'Emma',
       text:'Hello!',reply_to:'a',verified:false,reactions:{},private:false}],total_replies:1},
   ],
 };
