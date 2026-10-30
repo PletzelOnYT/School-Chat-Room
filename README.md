@@ -47,3 +47,14 @@ Do not use this app to exchange confidential information. Anyone who has Editor 
 The previous v5.18 folder-based event system is disabled. Nothing in `SchoolChatEvents` is accessed, changed or deleted by this app. If you used that version, messages saved **only** to its event folder are **not automatically merged** into `chat.json`. Keep a backup of that folder before deleting it.
 
 The GitHub repository's original name and the `school_chat.py` compatibility filename remain solely to avoid breaking existing notebook launchers. The actual application is **Messaging App**, in **`messaging_app.py`**.
+
+## Optional owner guardian
+
+The owner can separately run [owner_guardian.py](owner_guardian.py) to monitor
+new chat events, validate their Ed25519 signatures and allowed formats,
+keep a **private SQLite backup**, and repair erased or corrupted history.
+It does **not** alter the Messaging App UI or require any new shared folder.
+
+See [Owner Guardian setup](OWNER_GUARDIAN_SETUP.md). This is a best-effort
+watchdog while members have direct Editor access, not a preventive write gate.
+
