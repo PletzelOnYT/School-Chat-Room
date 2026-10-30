@@ -1,6 +1,7 @@
 """Regression tests for the single self-claimed Verified title."""
 import ast
 import base64
+from collections import Counter
 import hashlib
 import re
 import time
@@ -12,12 +13,14 @@ source = Path(__file__).resolve().parents[1].joinpath("messaging_app.py").read_t
 tree = ast.parse(source)
 names = {
     "analyze", "valid_username", "valid_incoming_message", "is_gibberish",
+    "gibberish_reason",
     "guest_digest", "fallback_username", "short_id",
 }
 functions = [node for node in tree.body
              if isinstance(node, ast.FunctionDef) and node.name in names]
 env = {
     "re": re, "time": time, "hashlib": hashlib, "unicodedata": unicodedata,
+    "Counter": Counter,
     "MESSAGE_LIMIT": 1000,
     "GENERIC_USERNAMES": {"colabuser", "guest", "user"},
     "RESERVED_USERNAMES": {
