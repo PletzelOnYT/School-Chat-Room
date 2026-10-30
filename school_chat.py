@@ -1,16 +1,10 @@
-# @title School ChatRoom v5.16 — School terminal chat with Vercel owner login
-"""Google Colab school chat — the same shared Google Drive chat.json.
+# @title School ChatRoom v5.17 — Google Drive chat, blue Verified checkmark
+"""School chat on the original shared Google Drive chat.json.
 
-The ONLY hosted API is for checking the owner's key and signing role grants.
-Ordinary chat messages, mentions, replies and reads never go to Vercel.
-
-Owner setup: deploy the included updated Vercel function with two PRIVATE environment
-variables. The client securely fetches the PUBLIC verification key automatically. Run chat.
-Type /owner, enter your key in the password-style input. No file uploads needed.
-
-The shared Drive file must still be a SHORTCUT to the same original chat.json.
-Everyone needs this v5 client for the updated server-backed badges/roles.
-Shared Drive Editor access remains a security limitation for history integrity.
+Only the blue self-claimed Verified title exists. No privileged roles or
+external authorization APIs. Student identities remain signed Ed25519 keys.
+Anyone with Editor access to chat.json can still modify or overwrite history.
+The checkmark does not prove Google account ownership.
 """
 import base64
 import hashlib
@@ -39,19 +33,11 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 1.5
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.16'
-REMOTE_ROLE_REFRESH_SECONDS = 2.0
+CLIENT_VERSION = '5.17'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
     'School-Chat-Room/main/school_chat.py')
-# Only PUBLIC configuration goes in the distributed notebook.
-# Never put CHAT_OWNER_KEY or CHAT_SIGNING_SEED here!
-OWNER_AUTH_URL = 'https://chat-room-owner-api-xi.vercel.app/api/owner'
-# Optional public key pin. Leave blank to fetch it from your Vercel server.
-# All students can use the same notebook with no manual public-key setup.
-OWNER_SERVER_PUBLIC_KEY = ''
-
 # Anchor from the original school chat. Prevent accidentally splitting the room.
 ORIGINAL_HISTORY_ANCHOR = '081cad07-8430-4c0e-8000-f3a4a379536a'
 
@@ -72,7 +58,6 @@ if not os.path.isfile(CHAT_FILE_PATH):
 
 PRIVATE_FOLDER = os.path.join(DRIVE_ROOT, '.schoolchat')
 PRIVATE_IDENTITY_PATH = os.path.join(PRIVATE_FOLDER, 'identity.json')
-ROLE_RECOVERY_PATH = os.path.join(PRIVATE_FOLDER, 'role_recovery.json')
 
 # Google Colab uses the same system username for many students. Do not use
 # ColabUser or getpass as a chat nickname, not even momentarily.
@@ -85,21 +70,15 @@ started_at = time.monotonic()
 last_message_time = 0.0
 recent_sent_messages = []  # Only local: (timestamp, normalized text)
 running = True
-owner_access_key = None  # Only in memory; never written to chat.json or private Drive.
 local_messages = []  # Private, inline System messages, NEVER sent to Drive.
-next_popup = None  # One-shot private /help or /modhelp popup
+next_popup = None  # One-shot private /help popup
 visible_count = VISIBLE_MESSAGES
 muted_names = set()
 clear_through = 0
-last_recovery_check = 0.0
-remote_role_events = []
-remote_role_status = 'unavailable'
-last_remote_role_check = 0.0
 minimum_client_version = ''
 update_required = False
 update_notice_shown = False
 last_upstream_version_check = 0.0
-
 
 class ChatFileError(Exception):
     pass
@@ -146,56 +125,6 @@ def load_identity():
     public = b64(key.public_key().public_bytes(serialization.Encoding.Raw,
                                                serialization.PublicFormat.Raw))
     return key, public
-
-
-def load_server_public_key():
-    """Download the public verification key from our HTTPS Owner API.
-
-    Only authentication/role verification uses Vercel; chat messages remain
-    exclusively in the shared Google Drive chat.json file. An optional pinned
-    public key is honored and checked against the server's advertised key.
-    """
-    pinned = OWNER_SERVER_PUBLIC_KEY.strip()
-    if pinned.startswith('PASTE_PUBLIC_KEY'):
-        pinned = ''
-    if pinned:
-        try:
-            if len(base64.b64decode(pinned, validate=True)) != 32:
-                raise ValueError('must be 32 bytes')
-        except (ValueError, TypeError) as exc:
-            raise ChatFileError('Invalid configured Owner public key.') from exc
-    if not OWNER_AUTH_URL.startswith('https://'):
-        raise ChatFileError('Owner API must use HTTPS.')
-    try:
-        request = urllib.request.Request(OWNER_AUTH_URL, headers={'Accept': 'application/json'})
-        with urllib.request.urlopen(request, timeout=10) as response:
-            details = json.load(response)
-        if not isinstance(details, dict) or details.get('status') != 'online':
-            raise ChatFileError('Owner API health check did not return online.')
-        remote = details.get('public_key', '')
-        if remote:
-            if not isinstance(remote, str) or len(b64decode(remote)) != 32:
-                raise ChatFileError('Owner API returned an invalid public key.')
-            if pinned and remote != pinned:
-                raise ChatFileError('Configured Owner public key does not match the Vercel server.')
-            return remote
-        # Compatibility with the original API until it is redeployed.
-        if pinned:
-            return pinned
-        raise ChatFileError('Owner API needs the v5.2 update to publish its PUBLIC verification key.')
-    except (OSError, ValueError, urllib.error.URLError) as exc:
-        if pinned:
-            return pinned
-        raise ChatFileError('Could not fetch Owner verification key from Vercel: ' + str(exc)) from exc
-
-
-# Fail closed for roles if the API is offline; ordinary chat still works.
-SERVER_PUBLIC_KEY = ''
-SERVER_KEY_ERROR = ''
-try:
-    SERVER_PUBLIC_KEY = load_server_public_key()
-except ChatFileError as exc:
-    SERVER_KEY_ERROR = str(exc)
 
 
 identity_private, identity_public = load_identity()
@@ -328,90 +257,6 @@ def valid_signature(event):
         return True
     except Exception:
         return False
-
-
-def trusted_server_event(event):
-    """A server response alone is not enough: verify its Ed25519 signature."""
-    return (isinstance(event, dict) and
-            bool(SERVER_PUBLIC_KEY) and event.get('sender_key') == SERVER_PUBLIC_KEY and
-            valid_signature(event))
-
-
-def call_owner_server(action, key, **data):
-    """Only moderator/owner commands use Vercel. Chat itself stays Drive-only."""
-    if not SERVER_PUBLIC_KEY:
-        raise ChatFileError(SERVER_KEY_ERROR or 'Owner public key is unavailable. Restart this Colab cell.')
-    if not OWNER_AUTH_URL.startswith('https://'):
-        raise ChatFileError('Owner authorization must use an HTTPS URL.')
-    payload = json.dumps(dict(action=action, key=key,
-                              client_version=CLIENT_VERSION, **data)).encode('utf-8')
-    req = urllib.request.Request(OWNER_AUTH_URL, payload,
-                                 headers={'Content-Type': 'application/json'},
-                                 method='POST')
-    try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            obj = json.load(response)
-    except urllib.error.HTTPError as exc:
-        if exc.code == 403:
-            raise ChatFileError('Access DENIED: incorrect owner key.') from exc
-        if exc.code == 426:
-            raise ChatFileError('This chat version is outdated. Stop the cell '
-                                'and rerun the GitHub launcher.') from exc
-        raise ChatFileError(f'Owner server returned HTTP {exc.code}.') from exc
-    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
-        raise ChatFileError('Could not contact the owner server securely: ' + str(exc)) from exc
-    event = obj.get('event') if isinstance(obj, dict) else None
-    if not isinstance(obj, dict) or obj.get('status') != 'granted' or not trusted_server_event(event):
-        raise ChatFileError('Owner server did not return a valid signed grant.')
-    if event.get('kind') != 'role' or event.get('target_key') != data.get('target_key'):
-        raise ChatFileError('Owner server grant does not match requested identity.')
-    if action == 'login':
-        issued, expiry = event.get('issued_at'), event.get('expires_at')
-        now = time.time()
-        if (event.get('role') != 'owner' or event.get('active') is not True or
-                not isinstance(issued, int) or not isinstance(expiry, int) or
-                abs(now - issued) > 300 or expiry <= now or expiry > now + 9*3600):
-            raise ChatFileError('Invalid owner session grant.')
-    else:
-        if event.get('role') != data.get('role') or event.get('active') != data.get('active'):
-            raise ChatFileError('Owner server grant does not match the role action.')
-    return (event, obj.get('role_persisted') is True) if action == 'role' else event
-
-
-def call_moderator_server(signed_request):
-    """Sign moderator identity locally; Vercel checks its durable role state.
-
-    The request includes no Google password, email, or Owner secret. Vercel
-    only signs a verified-role change if the submitting key currently owns
-    an active owner-signed Moderator grant in the durable role ledger.
-    """
-    payload = json.dumps({
-        'action': 'moderator_role', 'client_version': CLIENT_VERSION,
-        'event': signed_request,
-    }).encode('utf-8')
-    req = urllib.request.Request(
-        OWNER_AUTH_URL, data=payload, method='POST',
-        headers={'Content-Type': 'application/json'})
-    try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            answer = json.load(response)
-    except urllib.error.HTTPError as exc:
-        if exc.code == 403:
-            raise ChatFileError('Vercel denied moderator permission. '
-                                'Ask the Owner to confirm /addmod.') from exc
-        if exc.code == 426:
-            raise ChatFileError('Update required. Restart the GitHub launcher.') from exc
-        raise ChatFileError(f'Moderator server returned HTTP {exc.code}.') from exc
-    except (OSError, ValueError, urllib.error.URLError) as exc:
-        raise ChatFileError('Moderator verification server unavailable.') from exc
-    event = answer.get('event') if isinstance(answer, dict) else None
-    if (not trusted_server_event(event) or answer.get('status') != 'granted'
-            or event.get('role') != 'verified'
-            or event.get('target_key') != signed_request.get('target_key')
-            or event.get('active') != signed_request.get('active')
-            or event.get('issued_by') != identity_public):
-        raise ChatFileError('Invalid signed moderator response from Vercel.')
-    return event, answer.get('role_persisted') is True
 
 
 def read_messages():
@@ -785,85 +630,6 @@ def is_valid_emoji(emoji):
     return any(ord(c) >= 0x2600 for c in emoji)
 
 
-def load_role_recovery():
-    try:
-        with open(ROLE_RECOVERY_PATH, encoding='utf-8') as fh:
-            entries = json.load(fh)
-        if isinstance(entries, list):
-            return [item for item in entries if isinstance(item, dict) and
-                    isinstance(item.get('event'), dict)]
-    except (OSError, ValueError):
-        pass
-    return []
-
-
-def persist_role_recovery(entries):
-    """Atomic replacement is safe inside OWN private Drive, not chat.json."""
-    os.makedirs(PRIVATE_FOLDER, exist_ok=True)
-    temporary = ROLE_RECOVERY_PATH + '.tmp'
-    with open(temporary, 'w', encoding='utf-8') as fh:
-        json.dump(entries[-30:], fh, ensure_ascii=False, indent=2)
-    os.replace(temporary, ROLE_RECOVERY_PATH)
-
-
-def queue_role_recovery(grant):
-    if not isinstance(grant, dict) or grant.get('kind') != 'role' or not valid_signature(grant):
-        raise ChatFileError('Cannot save an unsigned role grant.')
-    with file_lock:
-        existing = load_role_recovery()
-        existing = [x for x in existing if (x.get('event', {}).get('role'),
-                                             x.get('event', {}).get('target_key')) !=
-                                            (grant.get('role'), grant.get('target_key'))]
-        existing.append({'event': grant, 'saved_at': time.time()})
-        persist_role_recovery(existing)
-
-
-def reconcile_role_recovery(force=False):
-    """Best-effort self-healing for role events lost to other Colab writers.
-
-    While this issuer's Colab runs, the latest signed grant is repaired if it
-    disappears. A newer role decision prevents replaying an older grant.
-    The queue expires after 24h, and never contains an Owner password.
-    """
-    global last_recovery_check
-    now_mono = time.monotonic()
-    if not force and now_mono - last_recovery_check < 4:
-        return
-    last_recovery_check = now_mono
-    with file_lock:
-        queue = load_role_recovery()
-        if not queue:
-            return
-        events = read_messages()
-        present = {str(e.get('id')) for e in events if isinstance(e, dict)}
-        keep = []
-        for item in queue[-30:]:
-            event = item['event']
-            age = time.time() - float(item.get('saved_at', 0))
-            if age < 0 or age > 86400 or not valid_signature(event):
-                continue
-            if event.get('kind') != 'role' or event.get('role') not in ('moderator', 'verified', 'banned'):
-                continue
-            # A later signed event for this role and target supersedes the
-            # grant. Never resurrect an old grant after someone revoked it.
-            competing = [e for e in events if isinstance(e, dict) and
-                         e.get('kind') == 'role' and
-                         e.get('target_key') == event.get('target_key') and
-                         e.get('role') == event.get('role') and
-                         e.get('id') != event.get('id') and valid_signature(e)]
-            if any(int(e.get('issued_at', 0)) > int(event.get('issued_at', 0))
-                   for e in competing):
-                continue
-            keep.append(item)
-            if str(event.get('id')) not in present:
-                # Only restore exactly the existing cryptographically signed
-                # event. Never issue new authority or forge a badge.
-                if write_event(event):
-                    present.add(str(event.get('id')))
-        if len(keep) != len(queue):
-            persist_role_recovery(keep)
-
-
 def note(value):
     """Insert a PRIVATE system entry inside this person's chat timeline."""
     try:
@@ -881,10 +647,6 @@ def note(value):
         del local_messages[:-40]
 
 
-if SERVER_KEY_ERROR:
-    note('Owner tags unavailable: ' + SERVER_KEY_ERROR)
-
-
 def popup(title, content):
     """Queue one modal for this browser only; never broadcast."""
     global next_popup
@@ -895,10 +657,9 @@ def popup(title, content):
 HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /help or /hellp            Open commands in a separate window
 /rules                     Chat rules
-/whoami or /id             Your permanent signed identity ID and roles
-/users                     Unique student identities and display names
-/verified                  List verified identities
-/rolecheck <name or ID>    Check a student's effective shared roles
+/whoami or /id             Your signed identity and Verified status
+/users                     Unique signed identities and display names
+/verified                  List users with the blue checkmark
 /mentions                  Find your recent @mentions
 /search <text>             Search chat (/find also works)
 /reply <#> <message>        Reply to a numbered post
@@ -911,39 +672,19 @@ HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /me <action>               Post a chat action
 /stats                     Chat statistics
 /ping                      Check shared file
-/modhelp                   Moderator commands (mods only)
-/banlist                   View banned accounts
-/owner                     Owner login (asks for private key)
 /exit                      Close the chat
 
-Owner, Moderator and Verified users may use /rename <name> for unique nicknames.
-Commands and role tags cannot be nicknames.
-@mention a username in a normal message to highlight it for that person.
-Numbers (#) appear next to chat messages. Moderator role changes are saved
-into the SAME shared chat.json.'''
+Verified users may use /rename <name> to claim a unique nickname.
+The blue checkmark is self-claimed, not an independently verified identity.'''
 
-MOD_HELP = '''MODERATOR COMMANDS (signed changes, visible to everyone)
-/verify <name or ID>        Assign Verified badge to a signed identity
-/unverify <name or ID>      Revoke Verified badge
-/addmod <name or ID>        Owner only: assign Moderator role
-/removemod <name or ID>     Owner only: revoke Moderator role
-/rolecheck <name or ID>    Check the exact effective roles for an identity
-/ban <name or ID>          Owner only: block posts from a signed identity
-/unban <name or ID>        Owner only: remove a ban
-/banlist                   List blocked signed identities
-/owner                     Privately authenticate as Owner
-
-Use /whoami on the OTHER student's Colab to confirm their ID before you grant a role.
-Use the unique ID from /users to avoid verifying the wrong student. Roles are tied
-to a private identity key, never to a changeable display name.'''
 
 RULES = '''SCHOOL CHAT RULES
 1. No bullying, harassment, threats, or hateful content.
 2. Do not post passwords, private addresses, personal contact details or records.
-3. No impersonation. Reserved role-tag names are rejected; only signed roles get badges.
+3. No impersonation. Reserved names are rejected; only signed self-claims get checkmarks.
 4. Avoid spam and flooding.
-5. Report serious issues to school staff. The shared JSON can be edited or
-   erased by anybody who has Editor access; moderation isn't tamper-proof.'''
+5. Report serious issues to school staff. Any Editor can change or erase
+   the shared chat.json file, so this is not a fully secure service.'''
 
 
 def check_upstream_version(force=False):
@@ -979,98 +720,12 @@ def check_upstream_version(force=False):
         pass
 
 
-def read_remote_role_events(force=False):
-    """Get the canonical server-signed role ledger, independent of chat.json.
-
-    Cached reads avoid a Vercel request for every UI refresh. If the server has
-    not been configured with durable Redis storage, chat remains compatible
-    with the original Google Drive role events, but writes can still race.
-    """
-    global last_remote_role_check, remote_role_events, remote_role_status
-    global minimum_client_version, update_required
-    now = time.monotonic()
-    if not force and now - last_remote_role_check < REMOTE_ROLE_REFRESH_SECONDS:
-        return list(remote_role_events)
-    last_remote_role_check = now
-    try:
-        req = urllib.request.Request(
-            OWNER_AUTH_URL + '?roles=1',
-            headers={'Accept': 'application/json', 'Cache-Control': 'no-cache'})
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.load(response)
-        if not isinstance(data, dict) or data.get('status') != 'online':
-            raise ValueError('Owner API role status unavailable')
-        minimum_client_version = str(data.get('min_client_version', ''))
-        try:
-            required_parts = tuple(int(x) for x in minimum_client_version.split('.'))
-            current_parts = tuple(int(x) for x in CLIENT_VERSION.split('.'))
-            if len(required_parts) == 2 and current_parts < required_parts:
-                update_required = True
-        except ValueError:
-            pass
-        remote_role_status = data.get('role_storage', 'not_configured')
-        if remote_role_status == 'durable':
-            events = data.get('role_events')
-            if not isinstance(events, list) or len(events) > 20000:
-                raise ValueError('Invalid server role ledger')
-            # Only trust events signed with the trusted public Owner API key.
-            remote_role_events = [
-                e for e in events if trusted_server_event(e)
-                and e.get('kind') == 'role'
-                and e.get('role') in ('moderator', 'verified', 'banned')
-            ]
-        elif remote_role_status == 'not_configured':
-            remote_role_events = []
-        else:
-            remote_role_status = 'unavailable'
-    except (OSError, ValueError, urllib.error.URLError):
-        remote_role_status = 'unavailable'
-        # Retain last known signed grants while the service is temporarily
-        # inaccessible. They are still cryptographically authenticated.
-    return list(remote_role_events)
-
-
 def latest_analysis():
     global username
-    local_events = read_messages()
-    # Persisted role events are appended last so signed Owner decisions
-    # survive another student's stale Google Drive file overwrite.
-    result = analyze(local_events + read_remote_role_events())
+    result = analyze(read_messages())
     # The header and outgoing messages use the same effective shared name.
     username = result['display_names'].get(identity_public, GOOGLE_ACCOUNT_USERNAME)
     return result
-
-
-def resolve_target(arg, a):
-    """Resolve a stable identity, never infer moderator rights from a name.
-
-    Accept /users' 12-character hex ID (or a unique >=8-character prefix),
-    the current unique nickname, or a Guest-<ID>. Refuse ambiguous names and
-    require a signed identity; profile renames never change the target key.
-    """
-    needle = arg.strip()
-    if needle.startswith('@'):
-        needle = needle[1:]
-    needle_lower = needle.casefold()
-    if not needle_lower:
-        return None, 'Provide a username or ID. Use /users to find it.'
-    people = a['display_names']
-    # An ID is much safer than a nickname, and the name can later change.
-    id_needle = needle_lower.removeprefix('guest-')
-    if re.fullmatch(r'[0-9a-f]{8,12}', id_needle):
-        ids = [pub for pub in people if short_id(pub).startswith(id_needle)]
-        if len(ids) == 1:
-            return ids[0], None
-        if len(ids) > 1:
-            return None, 'That ID prefix matches multiple students. Use the full 12-character ID.'
-    matches = [pub for pub, name in people.items()
-               if name.casefold() == needle_lower]
-    if len(matches) == 1:
-        return matches[0], None
-    if len(matches) > 1:
-        return None, 'Several signed students match that name. Use the ID from /users.'
-    return None, ('No signed student found for that name/ID. Ask them to open '
-                  'the chat, send one message, and copy their ID from /whoami.')
 
 
 def ensure_account_profile():
