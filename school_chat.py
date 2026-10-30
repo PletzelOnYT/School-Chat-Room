@@ -1087,77 +1087,70 @@ output.register_callback(STATE_CALLBACK, snapshot)
 output.register_callback(SEND_CALLBACK, submit_message)
 
 # One permanent chat display + one short input. Neither is cleared on updates.
-CHAT_HTML = r'''<div id="school-chat-SESSION_ID" class="school-chat-v18">
+CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" class="messaging-app-v19">
 <style>
-.school-chat-v18 {font:13px/1.5 monospace; color:inherit; width:100%; max-width:100%; box-sizing:border-box}
-.school-chat-v18 .chat-toolbar {display:flex; gap:7px; align-items:center; flex-wrap:wrap; padding:4px 0 7px}
-.school-chat-v18 button,.school-chat-v18 .attach-label {font:12px monospace; padding:4px 9px; border:1px solid #64748b; border-radius:5px; color:inherit; background:transparent; cursor:pointer}
-.school-chat-v18 button:hover,.school-chat-v18 .attach-label:hover {background:rgba(125,125,125,.14)}
-.school-chat-v18 .chat-viewport {height:min(66vh,620px); min-height:220px; overflow:auto; overscroll-behavior:contain; padding:8px; border:1px solid #64748b55; border-radius:6px; white-space:pre-wrap; overflow-wrap:anywhere}
-.school-chat-v18 .chat-line {padding:2px 0; overflow-wrap:anywhere}
-.school-chat-v18 .chat-line.reply {border-left:2px solid #3b82f6; margin-left:12px; padding:3px 7px}
-.school-chat-v18 .chat-actions {display:flex; align-items:center; flex-wrap:wrap; gap:4px; margin:3px 0 5px 16px}
-.school-chat-v18 .chat-actions button {padding:1px 6px; font-size:11px; border-color:#64748b66}
-.school-chat-v18 .chat-actions button.mine {border-color:#3498ff; color:#60a5fa}
-.school-chat-v18 .thread-toggle {color:#60a5fa; border:none!important; font-weight:bold}
-.school-chat-v18 .picker {display:flex; flex-wrap:wrap; gap:4px; margin:3px 0}
-.school-chat-v18 .chat-compose {display:flex; align-items:stretch; width:min(720px,100%); gap:6px; margin-top:7px}
-.school-chat-v18 .chat-compose input {flex:1; min-width:0; box-sizing:border-box; color:#111; background:#fff; border:1px solid #94a3b8; border-radius:4px; font:13px monospace; padding:8px; height:36px}
-.school-chat-v18 .chat-compose button {min-height:36px; padding:5px 12px; background:#166534; color:#fff}
-.school-chat-v18 .reply-hint {display:none; font-size:12px; padding:5px 2px; color:#60a5fa}
-.school-chat-v18 .preview {display:block; max-width:min(320px,100%); max-height:220px; margin-top:5px; border-radius:5px; cursor:pointer}
-.school-chat-v18 .file-control {display:none}
-.school-chat-v18.is-expanded .chat-viewport {height:calc(90vh - 135px); max-height:none}
-.school-chat-v18:fullscreen {padding:12px; background:#101820; color:#e5e7eb; height:100vh; overflow:hidden}
-.school-chat-v18:fullscreen .chat-viewport {height:calc(100vh - 160px); max-height:none}
+.messaging-app-v19 {font:13px/1.5 monospace; color:inherit; width:100%; max-width:100%; box-sizing:border-box}
+.messaging-app-v19 .chat-toolbar {display:flex; gap:7px; align-items:center; flex-wrap:wrap; padding:4px 0 7px}
+.messaging-app-v19 button {font:12px monospace; padding:4px 9px; border:1px solid #64748b; border-radius:5px; color:inherit; background:transparent; cursor:pointer}
+.messaging-app-v19 button:hover,.messaging-app-v19 .attach-label:hover {background:rgba(125,125,125,.14)}
+.messaging-app-v19 .chat-viewport {height:min(66vh,620px); min-height:220px; overflow:auto; overscroll-behavior:contain; padding:8px; border:1px solid #64748b55; border-radius:6px; white-space:pre-wrap; overflow-wrap:anywhere}
+.messaging-app-v19 .chat-line {padding:2px 0; overflow-wrap:anywhere}
+.messaging-app-v19 .chat-line.reply {border-left:2px solid #3b82f6; margin-left:12px; padding:3px 7px}
+.messaging-app-v19 .chat-actions {display:flex; align-items:center; flex-wrap:wrap; gap:4px; margin:3px 0 5px 16px}
+.messaging-app-v19 .chat-actions button {padding:1px 6px; font-size:11px; border-color:#64748b66}
+.messaging-app-v19 .chat-actions button.mine {border-color:#3498ff; color:#60a5fa}
+.messaging-app-v19 .thread-toggle {color:#60a5fa; border:none!important; font-weight:bold}
+.messaging-app-v19 .picker {display:flex; flex-wrap:wrap; gap:4px; margin:3px 0}
+.messaging-app-v19 .chat-compose {display:flex; align-items:stretch; width:min(720px,100%); gap:6px; margin-top:7px}
+.messaging-app-v19 .chat-compose input {flex:1; min-width:0; box-sizing:border-box; color:#111; background:#fff; border:1px solid #94a3b8; border-radius:4px; font:13px monospace; padding:8px; height:36px}
+.messaging-app-v19 .chat-compose button {min-height:36px; padding:5px 12px; background:#166534; color:#fff}
+.messaging-app-v19 .reply-hint {display:none; font-size:12px; padding:5px 2px; color:#60a5fa}
+.messaging-app-v19.is-expanded .chat-viewport {height:calc(90vh - 135px); max-height:none}
+.messaging-app-v19:fullscreen {padding:12px; background:#101820; color:#e5e7eb; height:100vh; overflow:hidden}
+.messaging-app-v19:fullscreen .chat-viewport {height:calc(100vh - 160px); max-height:none}
 @media (max-width:600px) {
- .school-chat-v18 {font-size:12px}
- .school-chat-v18 .chat-viewport {height:60vh; padding:5px; min-height:240px}
- .school-chat-v18 .chat-toolbar {gap:5px}
- .school-chat-v18 button,.school-chat-v18 .attach-label {min-height:32px; padding:5px 7px}
- .school-chat-v18 .chat-compose input {font-size:16px; height:43px}
- .school-chat-v18 .chat-compose button {min-height:43px}
- .school-chat-v18 .chat-line.reply {margin-left:5px}
+ .messaging-app-v19 {font-size:12px}
+ .messaging-app-v19 .chat-viewport {height:60vh; padding:5px; min-height:240px}
+ .messaging-app-v19 .chat-toolbar {gap:5px}
+ .messaging-app-v19 button {min-height:32px; padding:5px 7px}
+ .messaging-app-v19 .chat-compose input {font-size:16px; height:43px}
+ .messaging-app-v19 .chat-compose button {min-height:43px}
+ .messaging-app-v19 .chat-line.reply {margin-left:5px}
 }
 </style>
 <div class="chat-toolbar">
   <button type="button" id="chat-expand-SESSION_ID" title="Toggle full-screen view">⛶ Full screen</button>
   <button type="button" id="chat-search-SESSION_ID" title="Advanced search">⌕ Search</button>
-  <label class="attach-label" for="chat-file-SESSION_ID" title="Upload image, PDF or text to shared Google Drive">📎 Attach</label>
-  <input class="file-control" id="chat-file-SESSION_ID" type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.md,image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain">
-  <span id="chat-status-SESSION_ID" style="font-size:11px;color:#94a3b8">Drive event journal</span>
+  <span id="chat-status-SESSION_ID" style="font-size:11px;color:#94a3b8">Google Drive chat.json</span>
 </div>
-<div id="school-display-SESSION_ID" class="chat-viewport" aria-live="polite"></div>
+<div id="messaging-display-SESSION_ID" class="chat-viewport" aria-live="polite"></div>
 <div id="chat-reply-hint-SESSION_ID" class="reply-hint"></div>
-<form class="chat-compose" id="school-form-SESSION_ID" autocomplete="off">
-  <input id="school-input-SESSION_ID" type="text" aria-label="Chat message" placeholder="Message or /command..." maxlength="1800" />
+<form class="chat-compose" id="messaging-form-SESSION_ID" autocomplete="off">
+  <input id="messaging-input-SESSION_ID" type="text" aria-label="Chat message" placeholder="Message or /command..." maxlength="1800" />
   <button type="submit">Send</button>
 </form>
-<div id="school-closed-SESSION_ID" style="display:none">Chat stopped — rerun the GitHub launcher to reconnect.</div>
-<div id="school-help-fallback-SESSION_ID" style="display:none;margin-top:6px">
-  <a id="school-help-link-SESSION_ID" href="#" target="_blank" rel="noopener" style="color:#38bdf8">Open chat help in a separate tab</a>
+<div id="messaging-closed-SESSION_ID" style="display:none">Chat stopped — rerun the GitHub launcher to reconnect.</div>
+<div id="messaging-help-fallback-SESSION_ID" style="display:none;margin-top:6px">
+  <a id="messaging-help-link-SESSION_ID" href="#" target="_blank" rel="noopener" style="color:#38bdf8">Open chat help in a separate tab</a>
 </div>
 </div>
 <script>
 (() => {
-  const root = document.getElementById('school-chat-SESSION_ID');
-  const area = document.getElementById('school-display-SESSION_ID');
-  const form = document.getElementById('school-form-SESSION_ID');
-  const input = document.getElementById('school-input-SESSION_ID');
-  const closed = document.getElementById('school-closed-SESSION_ID');
-  const helpFallback = document.getElementById('school-help-fallback-SESSION_ID');
-  const helpLink = document.getElementById('school-help-link-SESSION_ID');
+  const root = document.getElementById('messaging-app-SESSION_ID');
+  const area = document.getElementById('messaging-display-SESSION_ID');
+  const form = document.getElementById('messaging-form-SESSION_ID');
+  const input = document.getElementById('messaging-input-SESSION_ID');
+  const closed = document.getElementById('messaging-closed-SESSION_ID');
+  const helpFallback = document.getElementById('messaging-help-fallback-SESSION_ID');
+  const helpLink = document.getElementById('messaging-help-link-SESSION_ID');
   const replyHint = document.getElementById('chat-reply-hint-SESSION_ID');
-  const fileInput = document.getElementById('chat-file-SESSION_ID');
   const status = document.getElementById('chat-status-SESSION_ID');
   const stateCallback = STATE_CALLBACK_JSON;
   const sendCallback = SEND_CALLBACK_JSON;
-  const attachCallback = ATTACH_CALLBACK_JSON;
   let stopped = false, busy = false, sending = false, generation = 0;
   let pendingReplyNumber = null, lastPopupId = null, helpWindow = null, lastHelpURL = null;
   const expandedThreads = new Set(), activePickers = new Set();
-  const openImagePreviews = new Set();
-  const previewCache = new Map(), emojiChoices = ['👍','❤️','😂','🔥','🎉','💀','👀'];
+  const emojiChoices = ['👍','❤️','😂','🔥','🎉','💀','👀'];
   const colored = (value, color, bold=false) => {
     const x = document.createElement('span');
     x.textContent = String(value ?? '');
@@ -1235,35 +1228,6 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" class="school-chat-v18">
       console.error(error);
     } finally { sending = false; input.focus(); }
   }
-  async function openAttachment(msg) {
-    let existing = previewCache.get(msg.id);
-    if (!existing) {
-      status.textContent = 'Opening attachment from Drive...';
-      try {
-        const result = replyData(await google.colab.kernel.invokeFunction(attachCallback, [msg.id], {}));
-        if (!result || result.error) throw Error(result?.error || 'Attachment unavailable');
-        const binary = atob(result.base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i=0; i<binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        const blob = new Blob([bytes], {type: result.mime});
-        existing = {url:URL.createObjectURL(blob),name:result.name,mime:result.mime};
-        previewCache.set(msg.id, existing);
-        status.textContent = 'Attachment ready';
-      } catch (error) {
-        status.textContent = 'Attachment: ' + String(error.message || error);
-        return;
-      }
-    }
-    if (existing.mime.startsWith('image/')) {
-      if (openImagePreviews.has(msg.id)) openImagePreviews.delete(msg.id);
-      else openImagePreviews.add(msg.id);
-      render(lastState);
-    } else {
-      const a = document.createElement('a');
-      a.href = existing.url; a.download = existing.name; a.rel = 'noopener';
-      a.click();
-    }
-  }
   function renderMessage(msg, name, isReply=false) {
     const wrapper = document.createElement('div');
     wrapper.className = 'chat-line' + (isReply ? ' reply' : '');
@@ -1295,20 +1259,6 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" class="school-chat-v18">
       render(lastState);
     }));
     actions.appendChild(makeButton('↳ Reply', () => setReply(msg.number,msg.user)));
-    if (msg.attachment) {
-      actions.dataset.fileId = msg.id;
-      actions.appendChild(makeButton('📎 Open ' + String(msg.attachment.name||'file'),
-        () => openAttachment(msg), 'Read attachment from shared Drive'));
-    }
-    area.appendChild(actions);
-    if (openImagePreviews.has(msg.id) && previewCache.has(msg.id)) {
-      const current = previewCache.get(msg.id);
-      const image = document.createElement('img');
-      image.className = 'preview'; image.src = current.url; image.alt = current.name;
-      image.title = 'Click to close preview';
-      image.onclick = () => {openImagePreviews.delete(msg.id);render(lastState);};
-      area.appendChild(image);
-    }
     if (activePickers.has(msg.id)) {
       const picker = document.createElement('div');picker.className = 'picker';
       picker.style.marginLeft = '16px';
@@ -1333,7 +1283,7 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" class="school-chat-v18">
     if (data.my_verified) area.appendChild(colored('☑ ', '#3498FF', true));
     area.appendChild(colored(data.username||'', '#4ade80', true));
     area.appendChild(document.createTextNode(' ---'));
-    newline();area.appendChild(colored('Messages · reactions · threads · Drive attachments','#94a3b8'));
+    newline();area.appendChild(colored('Messaging App · reactions · threads · Drive sync','#94a3b8'));
     newline();newline();
     if (Array.isArray(data.threads)) {
       for (const thread of data.threads) {
@@ -1386,34 +1336,8 @@ CHAT_HTML = r'''<div id="school-chat-SESSION_ID" class="school-chat-v18">
   };
   document.getElementById('chat-search-SESSION_ID').onclick=()=>{
     input.value='/search ';input.focus();input.setSelectionRange(input.value.length,input.value.length);
-    status.textContent='Try from:Alex after:2026-10-01 has:attachment in:replies';
+    status.textContent='Try from:Alex after:2026-10-01 has:reaction in:replies';
   };
-  fileInput.addEventListener('change', async () => {
-    const file=fileInput.files?.[0];if(!file)return;
-    fileInput.value='';
-    if(file.size>2*1024*1024 || file.size<=0) {
-      status.textContent='File must be 1 byte to 2 MB';return;
-    }
-    const ext=(file.name.split('.').pop()||'').toLowerCase();
-    const types={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',
-                 webp:'image/webp',pdf:'application/pdf',txt:'text/plain',md:'text/markdown'};
-    const mime=types[ext];
-    if(!mime){status.textContent='Only PNG, JPG, WEBP, GIF, PDF, TXT or MD';return;}
-    status.textContent='Uploading ' + file.name + ' to Drive...';
-    try {
-      const base64 = await new Promise((resolve,reject)=>{
-        const reader=new FileReader();
-        reader.onerror=()=>reject(Error('Cannot read file'));
-        reader.onload=()=>resolve(String(reader.result).split(',')[1]||'');
-        reader.readAsDataURL(file);
-      });
-      const reply=replyData(await google.colab.kernel.invokeFunction(
-        sendCallback,[{action:'upload_attachment',name:file.name,mime,base64}],{}));
-      render(reply);status.textContent='Upload finished (check chat for any error)';
-    } catch(error) {
-      status.textContent='Upload failed: '+String(error.message||error);
-    }
-  });
   form.addEventListener('submit',async event=>{
     event.preventDefault();if(stopped||sending)return;
     const typed=input.value.trim();if(!typed)return;
