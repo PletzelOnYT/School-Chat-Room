@@ -33,6 +33,52 @@ shared Drive file, the private Guardian database, or any account permissions.
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
 
+## Guardian v3.0 — Overdrive integrity and reliability
+
+Owner Guardian v3.0 adds conservative protections without changing any
+existing chat event, nickname, title, reply, original Drive file ID, or
+approved-history database schema:
+
+- **Verified approved-history ledger:** Each private SQLite record must match
+  its stored SHA-256, canonical JSON, event ID/order and metadata before
+  it is used as repair authority. If an entry is damaged, Guardian **fails
+  closed** and does not overwrite chat. These checks detect ordinary database
+  corruption; they cannot authenticate against someone able to modify both
+  private records *and their checksums*.
+- **Verified private backups:** SQLite backups are copied using SQLite's
+  online backup API, checked with `PRAGMA quick_check` and ledger verification,
+  then published. A bad candidate never replaces the last good private backup.
+- **Concurrent-write guard:** A repair rereads the exact original shared bytes
+  immediately before writing. If other clients added messages, Guardian
+  returns `rescan` and does **not** rewind their newer chat. Because Colab's
+  Google Drive mount lacks transactional compare-and-swap, this greatly
+  *narrows*, but cannot completely eliminate, a simultaneous-write race.
+- **Owner-private health heartbeat:** `My Drive/.messaging_guardian/guardian_health.json`
+  reports the latest check time (UTC), status, scan count, consecutive
+  errors, record count, file size, and whether Guardian stopped cleanly.
+  It contains no chat message text. It is refreshed roughly every 30 seconds
+  while the Guardian monitor is running.
+- **Explicit repair safety:** Invalid append-only journals remain untouched
+  for a later scan/manual inspection; a failed ledger check prevents any
+  automated restoration from untrusted history. Incident evidence remains
+  in the owner's private `.messaging_guardian/incidents/` folder.
+
+**Activation:** Stop the **old Guardian Colab cell** and rerun your existing
+`guardian_launcher.py` launcher. It loads v3.0 from the `main` branch.
+Do not reset the baseline, delete `chat.json`, or start multiple competing
+Guardians. Your existing chat launcher requires no update for this change.
+To check health, open the private `guardian_health.json` and verify the
+`checked_at_utc` timestamp is advancing. A stale timestamp is a warning
+that the runtime may have stopped. **Google Colab does not guarantee
+uninterrupted 24/7 execution**; these checks do not turn Colab into a
+permanent server.
+
+**Important security limit:** Original shared-file Editors can still inject
+unsigned name, title or reaction events. No file-watching Guardian can
+prevent these before they are written or prove a user's Google identity.
+Preventive security requires authenticated writes and server-enforced
+permission checks, not faster polling or a claim of absolute protection.
+
 ## v5.36 / Guardian v2.7: Live timestamp ordering and monitoring
 
 **Confirmed in the original shared chat file:** two messages with absolute
