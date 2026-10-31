@@ -1,6 +1,10 @@
 """Regression coverage for the isolated modified-client Guardian stress lab."""
+import base64
 import importlib.util
 import json
+import os
+import sys
+from unittest.mock import patch
 from pathlib import Path
 import tempfile
 import unittest
@@ -79,6 +83,86 @@ class GuardianStressLabTests(unittest.TestCase):
             finally:
                 newlab.close()
             self.assertEqual(live.read_bytes(), original)
+
+    def test_colab_ignores_stale_local_guardian(self):
+        class Response:
+            def __init__(self, body):
+                self.body = body
+            def read(self):
+                return self.body
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "guardian_stress_lab.py"
+            script.write_text("# stress lab")
+            stale = Path(tmp) / "owner_guardian.py"
+            stale.write_text("GUARDIAN_VERSION = '2.5'\n")
+            fresh = b"GUARDIAN_VERSION = '2.7'\n"
+            urls = []
+            def fetch(request, timeout=25):
+                urls.append(request.full_url)
+                return Response(fresh)
+            with (
+                patch.object(lab_module, "__file__", str(script)),
+                patch.dict(os.environ, {"COLAB_RELEASE_TAG": "colab-test"}),
+                patch("urllib.request.urlopen", side_effect=fetch),
+            ):
+                current = lab_module.obtain_guardian()
+            self.assertEqual(current.GUARDIAN_VERSION, "2.7")
+            self.assertEqual(len(urls), 1)
+            self.assertIn("lab_fresh=", urls[0])
+            self.assertIn("raw.githubusercontent.com", urls[0])
+            self.assertEqual(stale.read_text(), "GUARDIAN_VERSION = '2.5'\n")
+
+    def test_remote_fallback_uses_github_contents_api_if_raw_is_stale(self):
+        class Response:
+            def __init__(self, body):
+                self.body = body
+            def read(self):
+                return self.body
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+
+        stale = b"GUARDIAN_VERSION = '2.5'\n"
+        fresh = b"GUARDIAN_VERSION = '2.7'\n"
+        content = json.dumps({
+            "encoding": "base64",
+            "content": base64.b64encode(fresh).decode(),
+        }).encode()
+        urls = []
+        def fetch(request, timeout=25):
+            urls.append(request.full_url)
+            return Response(stale if len(urls) == 1 else content)
+        with (
+            patch.object(lab_module, "__file__", "https://raw.example/stress_lab"),
+            patch("urllib.request.urlopen", side_effect=fetch),
+        ):
+            current = lab_module.obtain_guardian()
+        self.assertEqual(current.GUARDIAN_VERSION, "2.7")
+        self.assertEqual(len(urls), 2)
+        self.assertIn("raw.githubusercontent.com", urls[0])
+        self.assertIn("api.github.com", urls[1])
+
+    def test_local_repo_guardian_can_run_without_network(self):
+        with (
+            patch.object(lab_module, "__file__",
+                         str(ROOT / "guardian_stress_lab.py")),
+            patch.dict(os.environ, {"COLAB_RELEASE_TAG": "",
+                                    "COLAB_GPU": ""}),
+            patch.dict(sys.modules, {"google.colab": None}),
+            patch("urllib.request.urlopen",
+                  side_effect=AssertionError("should not fetch online")),
+        ):
+            current = lab_module.obtain_guardian()
+        self.assertGreaterEqual(
+            tuple(map(int, current.GUARDIAN_VERSION.split("."))),
+            (2, 7),
+        )
 
     def test_no_live_write_path_exists_in_modified_client(self):
         import inspect
