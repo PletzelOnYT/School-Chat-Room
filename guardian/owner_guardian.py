@@ -459,6 +459,12 @@ def decode_shared_stream(raw):
     try:
         history,pos=decoder.raw_decode(data,skip)
     except ValueError as exc:
+        # Preserve actionable parser diagnostics for the owner/audit logs.
+        # Otherwise ambiguous duplicate fields could look like random corruption.
+        detail=str(exc)
+        if (detail.startswith("duplicate JSON object key:") or
+                detail.startswith("non-finite JSON numeric constant:")):
+            raise
         raise ValueError("shared chat does not start with JSON history") from exc
     if not isinstance(history,list):
         raise ValueError("chat history must begin with a JSON array")
