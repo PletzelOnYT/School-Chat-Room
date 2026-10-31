@@ -578,6 +578,48 @@ def private_db_backup(conn, drive_directory):
                 pass
 
 
+def write_health_status(private_directory, status, *, started_at, scans,
+                        errors, last_success, approved, bytes_on_disk,
+                        running=True, mode="AUTO REPAIR"):
+    """Atomic, minimal owner-private health indicator for 24/7 monitoring.
+
+    No chat text, OAuth data, or user identifiers are written to the status
+    JSON. A stale timestamp means the Colab monitor is no longer checking.
+    """
+    directory=Path(private_directory)
+    directory.mkdir(parents=True,exist_ok=True)
+    status_doc={
+        "schema":1, "guardian_version":GUARDIAN_VERSION,
+        "checked_at_utc":dt.datetime.now(dt.timezone.utc).isoformat(),
+        "started_at_utc":started_at,
+        "last_success_utc":last_success,
+        "status":str(status)[:80],
+        "running":bool(running), "mode":mode,
+        "scans":int(scans), "consecutive_errors":int(errors),
+        "approved_records":approved,
+        "shared_bytes":bytes_on_disk,
+        "note":"A recent heartbeat confirms monitoring only, not preventive "
+               "access control. If the timestamp is stale, check Colab runtime."
+    }
+    pending=directory/"guardian_health.pending.json"
+    destination=directory/"guardian_health.json"
+    try:
+        with open(pending,"w",encoding="utf-8") as fh:
+            json.dump(status_doc,fh,indent=2)
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                pass
+        os.replace(pending,destination)
+    finally:
+        try:
+            pending.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return destination
+
+
 def preserve_forensics(path, private_directory):
     """Keep current tampered bytes before recovery without changing shared file."""
     try:
@@ -1314,27 +1356,59 @@ def main(argv=None):
         print("PRIVATE backups:",private,flush=True)
         print("Mode:","AUDIT ONLY" if args.audit_only else "AUTO REPAIR",flush=True)
         last_live_notice=0.0
+        started_at=dt.datetime.now(dt.timezone.utc).isoformat()
+        last_success=None
+        scan_count=0
+        consecutive_errors=0
+        latest_status="starting"
+        latest_approved=None
+        latest_bytes=None
+        mode="AUDIT ONLY" if args.audit_only else "AUTO REPAIR"
         while True:
             try:
                 scan_status=guardian.process()
-                current=time.monotonic()
-                if current-last_live_notice>=30.0:
-                    try:
-                        raw_live,events_live=read_shared(shared)
-                        guardian.log(
-                            "LIVE MONITOR: "+scan_status+"; shared file "+
-                            str(len(raw_live))+" bytes / "+
-                            str(len(events_live))+" records; "+
-                            str(count_events(guardian.db))+" approved in "+
-                            "private checkpoint. Scanning every "+
-                            str(max(2.0,args.interval))+" seconds.")
-                    except (OSError,ValueError) as exc:
-                        guardian.log("LIVE MONITOR: "+scan_status+
-                                     "; shared file unavailable: "+
-                                     type(exc).__name__)
-                    last_live_notice=current
+                scan_count+=1
+                latest_status=scan_status
+                consecutive_errors=0
+                last_success=dt.datetime.now(dt.timezone.utc).isoformat()
             except Exception as exc:
+                scan_count+=1
+                consecutive_errors+=1
+                latest_status="error:"+type(exc).__name__
                 guardian.log("ERROR: "+type(exc).__name__+": "+str(exc))
+                if isinstance(exc,GuardianLedgerError):
+                    guardian.log("CRITICAL: private approved-history ledger "
+                                 "integrity failed. AUTO REPAIR IS BLOCKED. "
+                                 "Do not reset the baseline.")
+            current=time.monotonic()
+            if current-last_live_notice>=30.0 or args.once:
+                try:
+                    raw_live,events_live=read_shared(shared)
+                    latest_bytes=len(raw_live)
+                    latest_approved=count_events(guardian.db)
+                    guardian.log(
+                        "LIVE MONITOR: "+latest_status+"; shared file "+
+                        str(latest_bytes)+" bytes / "+
+                        str(len(events_live))+" records; "+
+                        str(latest_approved)+" approved in private checkpoint. "+
+                        "Scanning every "+str(max(2.0,args.interval))+
+                        " seconds.")
+                except (OSError,ValueError,sqlite3.Error) as exc:
+                    latest_bytes=None
+                    guardian.log("LIVE MONITOR: "+latest_status+
+                                 "; shared file/ledger unavailable: "+
+                                 type(exc).__name__)
+                try:
+                    write_health_status(
+                        private,latest_status,started_at=started_at,
+                        scans=scan_count,errors=consecutive_errors,
+                        last_success=last_success,approved=latest_approved,
+                        bytes_on_disk=latest_bytes,running=not args.once,
+                        mode=mode)
+                except OSError as exc:
+                    guardian.log("Cannot persist private monitor health: "+
+                                 type(exc).__name__)
+                last_live_notice=current
             if args.once:
                 break
             time.sleep(max(2.0,args.interval))
