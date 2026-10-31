@@ -81,7 +81,7 @@ class PlainMessagesTests(unittest.TestCase):
             self.assertEqual(entries[-1],item)
             self.assertEqual(set(entries[-1]),{"kind","time","user","text"})
             self.assertEqual(len(list(Path(folder).glob("*.json"))),1)
-            self.assertTrue(path.read_text().startswith(json.dumps(original, indent=2)+"\\n"))
+            self.assertTrue(path.read_text().startswith(json.dumps(original, indent=2)+"\n"))
 
     def test_simple_message_appears_after_signed_history(self):
         env=setup()
