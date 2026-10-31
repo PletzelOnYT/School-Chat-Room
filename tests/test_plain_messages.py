@@ -16,6 +16,7 @@ SOURCE = Path(__file__).resolve().parents[1].joinpath("messaging_app.py").read_t
 TREE = ast.parse(SOURCE)
 NAMES = {"is_plain_message","plain_message","display_only_message_id",
          "read_messages","append_event_in_place","write_plain_message",
+         "is_title_event","is_simple_record","title_event",
          "analyze","write_event"}
 NODES = [n for n in TREE.body if isinstance(n,ast.FunctionDef) and n.name in NAMES]
 
@@ -25,6 +26,8 @@ def setup(extra=None):
         "os": os, "re": re, "hashlib": hashlib, "json": json, "time": time,
         "REPLY_TEXT_RE": re.compile(r'^↳ \[reply:#(\d+)\] (.+)$', re.DOTALL),
         "PLAIN_MESSAGE_FIELDS": frozenset(("kind","time","user","text")),
+        "TITLE_FIELDS": frozenset(("kind","time","user","title")),
+        "TITLE_VERIFIED": "Verified", "TITLE_NONE": "None",
         "username": "Pletzel",
         "file_lock": threading.RLock(),
         "ChatFileError": type("ChatFileError",(Exception,),{}),
