@@ -256,7 +256,8 @@ async function run(){
    String(n.textContent).includes('Thread')),'no thread buttons');
  assert(!find(transcript,n=>n.tag==='button' &&
    String(n.textContent).includes('View thread')),'no thread navigation links');
- assert.strictEqual(el['app-layout'].className,'app');
+ assert(!String(el['app-layout'].className).includes('thread-open'));
+ assert(!html.includes('thread-open'),'popup cannot open a separate thread view');
 
  // Ordinary Reply still sends the existing /reply backend command.
  clickButton(nested,'↳ Reply');
