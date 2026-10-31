@@ -2195,6 +2195,19 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       '#app-transcript{padding:8px 4px;border-radius:9px}' +
       '.chat-row{padding:3px 5px}.app-footer{padding:9px 10px 10px}' +
       '.app-tip{font-size:10px}}' +
+      '@media(prefers-color-scheme:dark){' +
+      'body{background:#0e1520;color:#dce6f3}' +
+      '#app-shell{background:#101824}' +
+      '.app-bar,.app-footer{background:#171f2c;border-color:#29384a}' +
+      '.app-name{color:#e5eef7}.app-status{color:#97a8bd}' +
+      '#app-transcript{background:#161f2b;border-color:#28384c;box-shadow:none}' +
+      '.chat-row:hover{background:#202f40}' +
+      '.input-shell{background:#111b29;color:#e8eef7;border-color:#3a4b60}' +
+      '.input-shell:focus-within{background:#172437;border-color:#579aeb}' +
+      '#app-input::placeholder{color:#8496ad}' +
+      '.app-tip{color:#95a6bc}.app-close{color:#a1afc1}' +
+      '.app-close:hover{background:#27384d;color:#fff}' +
+      '}' +
       '@media(prefers-reduced-motion:reduce){.input-shell{transition:none}}' +
       '</style></head><body><div id="app-shell">' +
       '<header class="app-bar"><div class="app-logo" aria-hidden="true">P</div>' +
@@ -2313,26 +2326,6 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       win.document.write(appDocument());
       win.document.close();
       const doc = win.document;
-      // Inherit the actual Colab output background/text colors, including
-      // dark mode, instead of imposing a new light or dark app theme.
-      try {
-        if (typeof window.getComputedStyle === 'function' && doc.body) {
-          const foreground = window.getComputedStyle(root).color;
-          if (foreground) doc.body.style.color = foreground;
-          let node = root;
-          while (node) {
-            const background = window.getComputedStyle(node).backgroundColor;
-            const alpha = background && background.startsWith('rgba(') ?
-              Number(background.slice(background.lastIndexOf(',')+1)
-                .replace(')', '').trim()) : 1;
-            if (background && background !== 'transparent' && alpha !== 0) {
-              doc.body.style.backgroundColor = background;
-              break;
-            }
-            node = node.parentElement;
-          }
-        }
-      } catch(error) { /* keep safe default if browser restricts styles */ }
       const elements = {
         messages:doc.getElementById('app-messages'),
         transcript:doc.getElementById('app-transcript'),
@@ -2545,9 +2538,12 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       });
     }
     targetArea.appendChild(line);
-    newline(targetArea);
+    // Each app message already has its own row; a terminal newline would
+    // double the row height and recreate the awkward giant scroll region.
+    if (targetArea === area) newline(targetArea);
 
     if (!msg.private && interactive && selectedMessageId === msg.id) {
+      if (targetArea !== area) newline(targetArea);
       const group = threadFor(msg.id);
       targetArea.appendChild(document.createTextNode('   '));
       targetArea.appendChild(textControl('[React]', () => {
