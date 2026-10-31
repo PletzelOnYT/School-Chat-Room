@@ -1,4 +1,4 @@
-# @title Messaging App v5.30 — Google Drive Messenger
+# @title Messaging App v5.31 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.30'
+CLIENT_VERSION = '5.31'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -316,7 +316,7 @@ def is_rename_event(event):
 def rename_event(new_name):
     # Keep a stable original key so multiple renames still work after restart.
     return {'kind': 'rename',
-            'time': time.strftime('%H:%M:%S', time.localtime()),
+            'time': time.strftime('%H:%M:%S', time.gmtime()),
             'user': GOOGLE_ACCOUNT_USERNAME,
             'name': new_name}
 
@@ -337,14 +337,14 @@ def is_simple_reaction(event):
 
 def simple_reaction_event(number, emoji, active):
     return {'kind':'reaction',
-            'time':time.strftime('%H:%M:%S',time.localtime()),
+            'time':time.strftime('%H:%M:%S',time.gmtime()),
             'user':username, 'target':number,
             'emoji':emoji, 'active':active}
 
 
 def title_event(target, enabled):
     return {'kind': 'title',
-            'time': time.strftime('%H:%M:%S', time.localtime()),
+            'time': time.strftime('%H:%M:%S', time.gmtime()),
             'user': target,
             'title': TITLE_VERIFIED if enabled else TITLE_NONE}
 
@@ -356,7 +356,7 @@ def is_simple_record(event):
 
 def plain_message(text):
     return {'kind':'message',
-            'time':time.strftime('%H:%M:%S',time.localtime()),
+            'time':time.strftime('%H:%M:%S',time.gmtime()),
             'user':username,'text':text}
 
 
@@ -552,7 +552,7 @@ def event_now(kind, **fields):
     return sign_event(dict(id=str(uuid.uuid4()), kind=kind,
                            issued_at=int(time.time()),
                            issued_at_ns=time.time_ns(),
-                           time=time.strftime('%H:%M:%S', time.localtime()),
+                           time=time.strftime('%H:%M:%S', time.gmtime()),
                            user=username, **fields))
 
 
@@ -1012,7 +1012,7 @@ def note(value):
         local_messages.append({
             'id': 'local-' + uuid.uuid4().hex,
             'number': None, 'anchor': anchor,
-            'time': time.strftime('%H:%M:%S', time.localtime()),
+            'time': time.strftime('%H:%M:%S', time.gmtime()),
             'user': 'System', 'text': str(value),
             'private': True, 'reactions': {},
         })
@@ -1268,7 +1268,7 @@ def snapshot():
                 local_messages.append({
                     'id': 'local-update-required', 'number': None,
                     'anchor': len(a['messages']),
-                    'time': time.strftime('%H:%M:%S', time.localtime()),
+                    'time': time.strftime('%H:%M:%S', time.gmtime()),
                     'user': 'System',
                     'text': 'New chat version required: v' + minimum_client_version
                             + '. Stop this cell and rerun the GitHub launcher.',
@@ -1292,7 +1292,7 @@ def snapshot():
         shown = [item[2] for item in mixed[-visible_count:]]
         if error:
             shown.append({'id': 'read-error', 'number': None, 'private': True,
-                          'time': time.strftime('%H:%M:%S'), 'user': 'System',
+                          'time': time.strftime('%H:%M:%S', time.gmtime()), 'user': 'System',
                           'text': error, 'reactions': {}})
         threads = build_threads(a['messages'], visible_count,
                                 muted_names, clear_through)
@@ -1745,13 +1745,41 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     ) || null;
   }
 
+  // Stored chat.json has only an HH:MM:SS UTC clock, not a date or timezone.
+  // Convert for each browser without changing any stored message or UI styling.
+  // Signed legacy messages with issued_at preserve their original DST date.
+  function displayedTime(msg) {
+    const raw = String(msg.time || '');
+    let moment = null;
+    const epoch = msg.issued_at;
+    if (typeof epoch === 'number' && Number.isFinite(epoch) &&
+        epoch >= 946684800 && epoch <= 4102444800) {
+      moment = new Date(epoch * 1000);
+    } else {
+      const parts = /^([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$/.exec(raw);
+      if (!parts) return raw;
+      const now = new Date();
+      moment = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(),
+        now.getUTCDate(), Number(parts[1]), Number(parts[2]), Number(parts[3])));
+      // The most recent occurrence of the UTC clock is assumed for entries
+      // that lack an absolute timestamp. Dates older than 24h cannot be
+      // reconstructed reliably from a time-only historical record.
+      if (moment.getTime() > now.getTime() + 5 * 60 * 1000)
+        moment.setUTCDate(moment.getUTCDate() - 1);
+    }
+    if (!Number.isFinite(moment.getTime())) return raw;
+    const two = n => String(n).padStart(2, '0');
+    return two(moment.getHours()) + ':' +
+      two(moment.getMinutes()) + ':' + two(moment.getSeconds());
+  }
+
   function renderLine(msg, currentUsername, nested=false, interactive=true) {
     // The normal view prints exactly one row per message. Action controls
     // only appear when that message is selected; none are appended per row.
     const line = document.createElement('span');
     if (nested) line.appendChild(document.createTextNode(
       '  '.repeat(Math.min(4, Number(nested) || 1)) + '↳ '));
-    line.appendChild(colored('[' + (msg.time || '') + ']', '#00FFFF'));
+    line.appendChild(colored('[' + displayedTime(msg) + ']', '#00FFFF'));
     if (!msg.private) line.appendChild(colored(' #' + msg.number, '#999999'));
     line.appendChild(document.createTextNode(' '));
     if (!msg.private) appendVerifiedTitle(msg.verified, line);
