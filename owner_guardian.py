@@ -1,4 +1,4 @@
-# @title Messaging App — Owner Guardian v2.2
+# @title Messaging App — Owner Guardian v2.3
 """Owner-side Google Drive watchdog. Does not run inside messaging_app.py.
 
 - Approves only allowlisted, signed NEW events and stores a durable event ledger.
@@ -33,7 +33,7 @@ import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-GUARDIAN_VERSION = "2.2"
+GUARDIAN_VERSION = "2.3"
 # Exact existing shared file; Guardian never copies the message archive.
 SHARED_CHAT_FILE_ID = '1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd'
 SHARED_CHAT_FILE_LINK = (
@@ -1025,6 +1025,13 @@ def drive_root():
 
 
 def main(argv=None):
+    # Notebook kernels add their connection-file arguments to sys.argv
+    # (for example: colab_kernel_launcher.py -f kernel.json).
+    # These are NOT Guardian options. Explicit caller-provided argv and
+    # normal terminal invocations are parsed without modification.
+    if argv is None and os.path.basename(sys.argv[0]).endswith(
+            "kernel_launcher.py"):
+        argv=[]
     parser=argparse.ArgumentParser(description="Messaging App owner-only guardian")
     parser.add_argument("--file",help="Original shared chat.json shortcut path")
     parser.add_argument("--private",help="PRIVATE owner-only backup directory")
