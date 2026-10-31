@@ -49,6 +49,33 @@ Rerun the original cache-busted one-cell lab launcher below; restarting or
 resetting the real Guardian database is **not** required. Only isolated
 temporary test copies are written.
 
+## Live-attached mod menu (safe mode)
+
+The Stress Lab now provides a **MOD MENU — attach to actual chat** checkbox.
+When enabled in the owner's Colab, it reads the currently mounted original
+`MyDrive/chat.json`, takes a private snapshot in the notebook's temporary
+directory, and shows the **real current messages** alongside a modded local
+view. The interface includes a selection of visual hacks (rainbow nickname,
+mock owner/verified badges, name replacement, local fake reaction, mock
+timestamp, ghost message, message highlighting, hiding, and order changes).
+**Apply to live view** modifies only what this notebook displays.
+**Refresh real chat** rereads recent actual messages without changing them.
+
+The red **REVERT ALL TEST CHANGES** button clears these local hacks,
+re-reads the current original file, and deletes the isolated stress-test
+attack copies. This protects new messages from other users; **it does not
+replace or rewind the original shared chat**. The snapshot is a private
+rollback reference for the local overlay. Disconnecting the live view
+destroys its temporary snapshot. No persistent room copy is uploaded.
+
+Why live destructive attacks aren't in this mode: full-file rollback on a
+shared Anyone-Editor Google Drive file would remove messages appended by
+other users after the backup, and may conflict with the owner's Guardian
+approval ledger. A reliable destructive live stress test requires an
+exclusive testing room/maintenance window and a transactional server-side
+authorization/restore scheme. Continue using the full isolated attack
+suite for malicious role/identity, spam, history corruption and flooding.
+
 ## Interactive stress lab: chat preview and 59 attack scenarios
 
 The owner-only `tools/guardian_stress_lab.py` panel now shows a three-column
