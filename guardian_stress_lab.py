@@ -64,36 +64,96 @@ LIVE_NOTE = (
 )
 
 
-def obtain_guardian():
-    """Load the current repository Guardian. Never load the chat client's code."""
-    here = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
-    local = here / "owner_guardian.py"
-    if local.is_file():
-        source_path = local
-    else:
-        # Public source only, and placed in Python's temporary directory.
-        url = GUARDIAN_URL + "?test_cache_bust=" + str(time.time_ns())
-        with urllib.request.urlopen(url, timeout=25) as response:
-            raw = response.read()
-        source_path = Path(tempfile.gettempdir()) / (
-            "owner_guardian_lab_" + uuid.uuid4().hex + ".py"
-        )
-        source_path.write_bytes(raw)
-    spec = importlib.util.spec_from_file_location(
-        "_school_chat_guardian_lab_" + uuid.uuid4().hex, str(source_path)
-    )
-    if spec is None or spec.loader is None:
-        raise RuntimeError("Could not load Guardian source")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+def _guardian_version(module):
     try:
-        version = tuple(int(x) for x in module.GUARDIAN_VERSION.split("."))
-    except (AttributeError, ValueError):
-        raise RuntimeError("Unsupported Guardian version") from None
-    if version < (2, 7):
-        raise RuntimeError("Guardian v2.7 or later is required for this lab")
+        return tuple(int(part) for part in str(module.GUARDIAN_VERSION).split("."))
+    except (AttributeError, ValueError, TypeError):
+        return ()
+
+
+def _load_guardian_source(raw, origin):
+    """Load only Guardian source; do not accidentally run the monitoring loop."""
+    import types
+    name = "_school_chat_guardian_lab_" + uuid.uuid4().hex
+    module = types.ModuleType(name)
+    module.__file__ = str(origin)
+    module.__package__ = ""
+    exec(compile(raw, str(origin), "exec"), module.__dict__)
     return module
 
+
+def obtain_guardian():
+    """Use a fresh v2.7+ Guardian; never silently use a stale Colab copy.
+
+    Executing a Python script via exec() in an IPython notebook preserves the
+    notebook's globals, including a possibly stale __file__ / current directory.
+    An older copy of owner_guardian.py there used to win over the updated GitHub
+    source. In Colab always fetch. For local repository runs, use a colocated
+    up-to-date Guardian; otherwise refresh from GitHub.
+    """
+    minimum = (2, 7)
+    source_label = globals().get("__file__", "")
+    script_path = (Path(str(source_label)).resolve()
+                   if not str(source_label).startswith("https://") else None)
+    colocated = (script_path is not None
+                 and script_path.name == "guardian_stress_lab.py"
+                 and script_path.is_file())
+    in_colab = ("google.colab" in sys.modules or
+                bool(os.environ.get("COLAB_RELEASE_TAG")) or
+                bool(os.environ.get("COLAB_GPU")))
+    local = script_path.parent / "owner_guardian.py" if colocated else None
+    if local is not None and local.is_file() and not in_colab:
+        module = _load_guardian_source(local.read_bytes(), str(local))
+        if _guardian_version(module) >= minimum:
+            print("Stress Lab: using local Guardian v" +
+                  module.GUARDIAN_VERSION + ".", flush=True)
+            return module
+        print("Stress Lab: local Guardian v" +
+              str(getattr(module, "GUARDIAN_VERSION", "unknown")) +
+              " is outdated; fetching current source from GitHub.",
+              flush=True)
+
+    # Cache-busting alone may not beat every Colab/proxy cache. The GitHub
+    # Contents API is the fallback if raw.githubusercontent.com serves an
+    # old version. Never make a second room or alter any live Drive file.
+    raw_url = GUARDIAN_URL + "?lab_fresh=" + str(time.time_ns())
+    api_url = (
+        "https://api.github.com/repos/PletzelOnYT/"
+        "School-Chat-Room/contents/owner_guardian.py"
+        "?ref=main&lab_fresh=" + str(time.time_ns())
+    )
+    attempts = []
+    for source_url, label in ((raw_url, "GitHub raw"),
+                              (api_url, "GitHub Contents API")):
+        try:
+            req = urllib.request.Request(
+                source_url,
+                headers={"User-Agent": "SchoolChat-GuardianStressLab",
+                         "Cache-Control": "no-cache"},
+            )
+            with urllib.request.urlopen(req, timeout=25) as response:
+                downloaded = response.read()
+            if label == "GitHub Contents API":
+                import base64
+                payload = json.loads(downloaded.decode("utf-8"))
+                if payload.get("encoding") != "base64":
+                    raise RuntimeError("Unexpected GitHub content encoding")
+                downloaded = base64.b64decode(payload["content"], validate=False)
+            module = _load_guardian_source(downloaded, source_url)
+            if _guardian_version(module) >= minimum:
+                print("Stress Lab: loaded Guardian v" +
+                      module.GUARDIAN_VERSION + " from " + label + ".",
+                      flush=True)
+                return module
+            attempts.append(label + " returned old version " +
+                            str(getattr(module, "GUARDIAN_VERSION", "unknown")))
+        except Exception as exc:
+            attempts.append(label + " unavailable: " + type(exc).__name__)
+    raise RuntimeError(
+        "Could not fetch Guardian v2.7+ (" + "; ".join(attempts) +
+        "). Check GitHub access, then rerun the cache-busted lab cell. "
+        "No chat files were changed."
+    )
 
 def seed_fixture(guardian):
     """Small *synthetic* history; no copying other people's messages by default."""
