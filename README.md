@@ -1,4 +1,4 @@
-# Messaging App v5.25
+# Messaging App v5.26
 
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
@@ -7,7 +7,7 @@ A Google Colab messaging app using **one shared Google Drive `chat.json`** file.
 On October 30, 2026, the original shared Google Drive file ID
 `1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd` was converted to **196 prettified message records**. All old messages were kept; 34 reaction, profile and role records were deliberately excluded. A complete 230-record backup was saved separately in Drive.
 
-Every chat entry now uses **exactly four fields**, in this order:
+Every **normal message** still uses exactly four fields, in this order:
 
 ```json
 {
@@ -20,6 +20,21 @@ Every chat entry now uses **exactly four fields**, in this order:
 
 New messages append in the same multi-line format, using an in-place modification of the JSON array's tail instead of rewriting its entire history.
 
+### New title events
+
+A user can claim the blue ☑ badge with the unlisted `/vf` command. This appends a *separate* simple record to the same JSON file:
+
+```json
+{
+  "kind": "title",
+  "time": "04:15:50",
+  "user": "Pletzel",
+  "title": "Verified"
+}
+```
+
+The unlisted `/uvf Pletzel` appends a similar record with `"title": "None"`. Normal messages remain untouched and retain their original four keys. The most recent title record for a display name wins.
+
 ## Starting the app
 
 1. Stop all older Colab chat cells; older versions can write incompatible records.
@@ -31,7 +46,8 @@ New messages append in the same multi-line format, using an in-place modificatio
 
 - Green usernames, cyan timestamps, chronological threads, text search, anti-gibberish checks, and queued sends remain in the terminal-style UI.
 - Replies store a compact parent marker inside their `text` field so each entry still has exactly four keys.
-- **The old verification, identity-backed rename, and persisted reactions are not compatible with this intentionally ID-free, signature-free file format.** Their saved role/reaction records were removed; sending those metadata events is disabled.
+- **Verified checkmarks are now self-claimed and tied to a display name, not a signed person.** `/vf` enables the blue badge, `/uvf <name>` revokes it, and `/verified` lists current badges. There is no Google identity attestation. A shared or impersonated username can display the same badge.
+- Identity-backed rename and persistent emoji reactions still need a more structured format; their old signed metadata cannot be stored in this simplified message/title format.
 - Four-field messages cannot prove who authored them. Editors of the shared Drive file can impersonate names or change content.
 - JSON tail append is **not an atomic multi-user transaction** on Google Drive. Simultaneous writers may still conflict.
 
