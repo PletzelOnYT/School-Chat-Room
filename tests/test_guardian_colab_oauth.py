@@ -23,13 +23,14 @@ class FakeCredentials:
 
 
 class GuardianColabOAuthTests(unittest.TestCase):
-    def connect(self, default, login, is_machine=lambda _: False):
+    def connect(self, default, login, is_machine=lambda _: False, **extras):
         return guardian.guardian_user_drive_session(
             get_default=default,
             login=login,
             make_request=lambda: object(),
             make_session=lambda c: {"authorized_as": c.name},
             is_machine=is_machine,
+            **extras,
         )
 
     def test_existing_valid_user_oauth_requires_no_prompt(self):
@@ -77,6 +78,76 @@ class GuardianColabOAuthTests(unittest.TestCase):
         self.assertEqual(result["authorized_as"], "approved owner")
         self.assertEqual(invalid.refresh_count, 1)
         self.assertTrue(state["authorized"])
+
+    def test_ephemeral_colab_user_token_can_use_gce_credentials_class(self):
+        class ColabEphemeralCredentials(FakeCredentials):
+            pass
+
+        ColabEphemeralCredentials.__module__ = (
+            "google.auth.compute_engine.credentials"
+        )
+        ephemeral = ColabEphemeralCredentials("authorized temporary user",
+                                             valid=False)
+        prompts = []
+        result = self.connect(
+            lambda: (ephemeral, None),
+            lambda: prompts.append("login"),
+            lambda _: True,
+            ephemeral_mode=True,
+        )
+        self.assertEqual(result["authorized_as"], "authorized temporary user")
+        self.assertEqual(prompts, [])
+        self.assertEqual(ephemeral.refresh_count, 1)
+
+    def test_colab_file_credentials_used_when_adc_stays_vm_after_login(self):
+        import os
+        vm = FakeCredentials("VM credentials")
+        actual_user = FakeCredentials("Colab authorized user", valid=False)
+        prompts = []
+        with tempfile.TemporaryDirectory() as folder:
+            adc = Path(folder) / "content/.adc/adc.json"
+            adc.parent.mkdir(parents=True)
+            adc.write_text('{"type":"authorized_user"}', encoding="utf-8")
+            adc_paths = []
+
+            def load(path):
+                adc_paths.append(path)
+                return actual_user
+
+            with patch.dict(os.environ, {"DATALAB_ROOT": folder,
+                                         "USE_AUTH_EPHEM": "0"}):
+                result = self.connect(
+                    lambda: (vm, None),
+                    lambda: prompts.append("login"),
+                    lambda cred: cred is vm,
+                    colab_adc_loader=load,
+                    ephemeral_mode=False,
+                )
+        self.assertEqual(result["authorized_as"], "Colab authorized user")
+        self.assertEqual(prompts, [])
+        self.assertEqual(adc_paths, [str(adc)])
+        self.assertEqual(vm.refresh_count, 0)
+        self.assertEqual(actual_user.refresh_count, 1)
+
+    def test_file_credential_is_rejected_if_it_is_a_machine_account(self):
+        import os
+        vm = FakeCredentials("VM credentials")
+        prompts = []
+        with tempfile.TemporaryDirectory() as folder:
+            adc = Path(folder) / "content/.adc/adc.json"
+            adc.parent.mkdir(parents=True)
+            adc.write_text('{"type":"service_account"}', encoding="utf-8")
+            with patch.dict(os.environ, {"DATALAB_ROOT": folder,
+                                         "USE_AUTH_EPHEM": "0"}):
+                with self.assertRaisesRegex(RuntimeError, "Workspace restrictions"):
+                    self.connect(
+                        lambda: (vm, None),
+                        lambda: prompts.append("login"),
+                        lambda _: True,
+                        colab_adc_loader=lambda _: vm,
+                        ephemeral_mode=False,
+                    )
+        self.assertEqual(prompts, ["login"])
 
     def test_colab_authorization_prompts_only_after_owner_approval(self):
         events = []
@@ -131,7 +202,7 @@ class GuardianColabOAuthTests(unittest.TestCase):
             prompts.append(1)
             raise PermissionError("Workspace policy blocks user authorization")
 
-        with self.assertRaisesRegex(RuntimeError, "School account permissions"):
+        with self.assertRaisesRegex(RuntimeError, "Workspace restrictions"):
             self.connect(lambda: (vm, None), deny, lambda c: c is vm)
         self.assertEqual(prompts, [1])
         self.assertEqual(vm.refresh_count, 0)
