@@ -1046,7 +1046,7 @@ def analyze(events):
             old['time_estimated'] = False
             continue
         raw_clock = old.get('time', '')
-        match = re.fullmatch(r'([01]\\d|2[0-3]):([0-5]\\d):([0-5]\\d)', raw_clock)
+        match = re.fullmatch(r'([01]\d|2[0-3]):([0-5]\d):([0-5]\d)', raw_clock)
         if match is None:
             continue
         seconds = sum(int(x)*mult for x,mult in zip(match.groups(), (3600,60,1)))
