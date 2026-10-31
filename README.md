@@ -3,6 +3,25 @@
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
 
+## Owner Guardian launcher: prevent GitHub raw cache staleness
+
+The Guardian launcher now adds a unique cache-busting query when it fetches
+`owner_guardian.py`, prints the fetched version, and refuses to execute
+outdated Guardian versions below v2.6. To ensure **the launcher itself** is
+fresh too, use this owner-only Colab cell:
+
+```python
+import time, urllib.request
+source = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/guardian_launcher.py"
+url = source + "?cache_bust=" + str(time.time_ns())
+exec(compile(urllib.request.urlopen(url).read().decode("utf-8"), source, "exec"))
+```
+
+This resolves cases where the notebook prints an old version such as v2.5
+even though GitHub has v2.6. It does **not** establish that the owner's
+actual Google Workspace account grants Drive REST API permissions; testing
+that requires the owner's live Colab authorization.
+
 ## Guardian v2.6: Correct handling of Colab user credentials
 
 In some Colab runtimes, Google's **ephemeral user authorization**
