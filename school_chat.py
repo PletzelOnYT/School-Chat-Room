@@ -1,4 +1,4 @@
-# @title Messaging App v5.35 — Compatibility Launcher
+# @title Messaging App v5.36 — Compatibility Launcher
 """Backwards-compatible entry point for existing Google Colab notebooks.
 
 The application was renamed to messaging_app.py. Keeping this lightweight
