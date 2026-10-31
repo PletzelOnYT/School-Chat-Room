@@ -246,6 +246,31 @@ class GuardianTests(unittest.TestCase):
         self.assertFalse(guardian.simple_rename(invalid))
         self.assertIn("unknown",guardian.check_new_event(invalid,{},{}))
 
+    def test_guardian_reads_framed_append_only_events(self):
+        self.mon.process()
+        original=self.shared.read_bytes()
+        first={"kind":"message","time":"04:15:50",
+               "user":"Pletzel","text":"append-only message"}
+        second={"kind":"title","time":"04:15:51",
+                "user":"Pletzel","title":"Verified"}
+        with open(self.shared,"ab") as fp:
+            for record in (first,second):
+                fp.write(b"\n\x1e"+json.dumps(record,indent=2).encode()+b"\n")
+        raw,records=guardian.read_shared(self.shared)
+        self.assertTrue(raw.startswith(original))
+        self.assertEqual(records[-2:],[first,second])
+        self.assertEqual(self.mon.process(),"healthy")
+        self.assertEqual(guardian.count_events(self.mon.db),3)
+        self.assertTrue(self.shared.read_bytes().startswith(original))
+
+    def test_guardian_does_not_overwrite_incomplete_journal_frame(self):
+        self.mon.process()
+        with open(self.shared,"ab") as fp:
+            fp.write(b"\n\x1e{\"kind\":")
+        broken=self.shared.read_bytes()
+        self.assertEqual(self.mon.process(),"corrupt")
+        self.assertEqual(self.shared.read_bytes(),broken)
+
     def test_tampered_approved_text_restored(self):
         self.mon.process()
         e=self.event("safely signed text")
