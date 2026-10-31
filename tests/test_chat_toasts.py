@@ -108,9 +108,13 @@ async function run(){
   assert(p.win.document.html.includes('Pletzel Chat'));
   assert(p.win.document.html.includes('@keyframes expire'));
   assert(p.win.document.html.includes('white-space:nowrap;overflow:hidden;text-overflow:ellipsis'));
-  assert(p.win.document.html.includes('height:2px'));
-  assert(p.win.document.html.includes('height:56px'));
-  assert(p.win.document.html.includes('height:53px'));
+  assert(p.win.document.html.includes('height:3px'));
+  assert(p.win.document.html.includes('height:100vh'),'body must fill enforced browser min height');
+  assert(p.win.document.html.includes('min-height:56px'));
+  assert(p.win.document.html.includes('display:flex;align-items:center;background:#fff'));
+  assert(p.win.document.html.includes('border-left:3px solid #1a73e8'));
+  assert(!p.win.document.html.includes('height:53px'),
+    'old fixed strip caused blank space in tall browser popups');
   assert(!p.win.document.html.includes('-webkit-line-clamp:2'));
   assert(p.fields.sender.textContent.includes('Preview'));
   assert.strictEqual(timers.size,1);
@@ -208,7 +212,7 @@ class DesktopPopupTests(unittest.TestCase):
         self.assertEqual(run.returncode,0,run.stdout+"\n"+run.stderr)
 
     def test_no_built_in_browser_notifications_or_embedded_toast(self):
-        self.assertIn("CLIENT_VERSION = '5.45'",SOURCE.read_text(encoding="utf-8"))
+        self.assertIn("CLIENT_VERSION = '5.46'",SOURCE.read_text(encoding="utf-8"))
         self.assertNotIn('messaging-toast-SESSION_ID',HTML)
         self.assertIn("popup=yes,width=",JAVASCRIPT)
         self.assertIn("window.open('', 'pletzel-desktop-SESSION_ID'",JAVASCRIPT)
