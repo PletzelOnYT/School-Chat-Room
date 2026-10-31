@@ -1,7 +1,7 @@
-# @title Owner Guardian v2.3 — Google Colab launcher
+# @title Owner Guardian v2.4 — Google Colab launcher
 """Owner-only one-cell launcher for the latest Drive Chat Guardian.
 
-Uses the owner-provided Colab runtime and existing Drive authorization. The
+Uses the owner-provided Colab runtime and Google user authorization. The
 Guardian itself mounts Drive and creates/reuses the original chat.json shortcut.
 Never run this in every student's chat notebook: only one owner-side monitor
 should repair the shared room at a time.
