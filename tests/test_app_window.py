@@ -61,6 +61,7 @@ const browser={
       open(){},close(){},write(s){this.html=s;},
       getElementById:id=>elems[id]||(elems[id]=new Element()),
       createElement:tag=>new Element(tag),
+      createTextNode:t=>new TextNode(t),
       createDocumentFragment:()=>new Element('fragment')
     };
     const win={
