@@ -1,4 +1,4 @@
-# @title Messaging App v5.26 — Google Drive Messenger
+# @title Messaging App v5.27 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -37,7 +37,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.26'
+CLIENT_VERSION = '5.27'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -268,6 +268,7 @@ def valid_signature(event):
 
 PLAIN_MESSAGE_FIELDS = frozenset(('kind','time','user','text'))
 TITLE_FIELDS = frozenset(('kind','time','user','title'))
+RENAME_FIELDS = frozenset(('kind','time','user','name'))
 TITLE_VERIFIED = 'Verified'
 TITLE_NONE = 'None'
 REPLY_TEXT_RE = re.compile(r'^↳ \[reply:#(\d+)\] (.+)$', re.DOTALL)
@@ -297,6 +298,25 @@ def is_title_event(event):
             and event.get('title') in (TITLE_VERIFIED, TITLE_NONE))
 
 
+def is_rename_event(event):
+    """Small four-field record linking original local account name to nickname."""
+    return (isinstance(event, dict) and set(event) == RENAME_FIELDS
+            and event.get('kind') == 'rename'
+            and isinstance(event.get('time'), str)
+            and re.fullmatch(r'\d{2}:\d{2}:\d{2}', event['time']) is not None
+            and isinstance(event.get('user'), str)
+            and 0 < len(event['user']) <= 128
+            and valid_username(event.get('name')) is not None)
+
+
+def rename_event(new_name):
+    # Keep a stable original key so multiple renames still work after restart.
+    return {'kind': 'rename',
+            'time': time.strftime('%H:%M:%S', time.localtime()),
+            'user': GOOGLE_ACCOUNT_USERNAME,
+            'name': new_name}
+
+
 def title_event(target, enabled):
     return {'kind': 'title',
             'time': time.strftime('%H:%M:%S', time.localtime()),
@@ -305,7 +325,8 @@ def title_event(target, enabled):
 
 
 def is_simple_record(event):
-    return is_plain_message(event) or is_title_event(event)
+    return (is_plain_message(event) or is_title_event(event) or
+            is_rename_event(event))
 
 
 def plain_message(text):
@@ -638,6 +659,8 @@ def analyze(events):
     """
     verified = set()
     verified_names = set()
+    renamed_users = {}
+    aliases_by_base = {}
     # Old auto-grants had no separate marker from /vf. They cannot establish
     # a badge in v5.23; people must explicitly claim with the new format.
     legacy_claimed = set()
@@ -671,6 +694,12 @@ def analyze(events):
                 verified_names.add(name_key)
             else:
                 verified_names.discard(name_key)
+            continue
+        if kind == 'rename' and is_rename_event(e):
+            base = e['user'].casefold()
+            aliases_by_base.setdefault(base, set()).update(
+                (base, e['name'].casefold()))
+            renamed_users[base] = e['name']
             continue
         signed = valid_signature(e)
         if signed:
@@ -871,6 +900,33 @@ def analyze(events):
                 msg['user'] = original + ' (legacy)'
             msg['name_conflict'] = False
 
+    # Apply nickname changes to past messages and to self-claimed titles.
+    # These are display-name mappings, NOT verified user identities.
+    aliases_to_base = {}
+    for base, aliases in aliases_by_base.items():
+        for alias in aliases:
+            aliases_to_base[alias] = base
+    effective_titles = set()
+    for name_key in verified_names:
+        base = aliases_to_base.get(name_key, name_key)
+        effective_titles.add(renamed_users.get(base, base).casefold())
+    # A later /uvf must override earlier /vf, including across a rename.
+    title_states = {}
+    for entry in events:
+        if is_title_event(entry):
+            original = entry['user'].casefold()
+            base = aliases_to_base.get(original, original)
+            title_states[base] = entry['title'] == TITLE_VERIFIED
+    verified_names = {
+        renamed_users.get(base, base).casefold()
+        for base, active in title_states.items() if active
+    }
+    for msg in messages:
+        key = msg['user'].casefold()
+        base = aliases_to_base.get(key, key)
+        if base in renamed_users:
+            msg['user'] = renamed_users[base]
+
     reaction_totals = {}
     valid_message_ids = {m['id'] for m in messages}
     for (target, reacting_pub, emoji), active in reaction_state.items():
@@ -888,7 +944,8 @@ def analyze(events):
                            bool(sender and sender in verified))
     if username.casefold() in verified_names:
         verified.add(identity_public)
-    return dict(verified_names=verified_names, messages=messages, by_number=by_number,
+    return dict(verified_names=verified_names, renamed_users=renamed_users,
+                messages=messages, by_number=by_number,
                 identities=identities, seen_aliases=seen_aliases, display_names=display_names,
                 name_owners=name_owners, verified=verified)
 
@@ -995,7 +1052,8 @@ def latest_analysis():
     global username
     result = analyze(read_messages())
     # The header and outgoing messages use the same effective shared name.
-    username = result['display_names'].get(identity_public, GOOGLE_ACCOUNT_USERNAME)
+    username = result['renamed_users'].get(
+        GOOGLE_ACCOUNT_USERNAME.casefold(), GOOGLE_ACCOUNT_USERNAME)
     return result
 
 
@@ -1256,25 +1314,26 @@ def submit_message(raw):
             except ChatFileError as exc:
                 note('Cannot check role status right now: ' + str(exc))
                 return snapshot()
-            if identity_public not in current['verified']:
-                note('Only Verified users can use /rename.')
+            if username.casefold() not in current['verified_names']:
+                note('Use /vf to claim the blue checkmark before /rename.')
                 return snapshot()
             new_name = valid_username(rename.group(1))
             if not new_name:
                 note('Nickname rejected: use 1–32 letters/numbers, spaces, _ - .; role tags, reserved names and invisible characters are not allowed.')
                 return snapshot()
-            other_names = {
-                pub: name for pub, name in current['display_names'].items()
-                if pub != identity_public and name.casefold() == new_name.casefold()
-            }
-            if other_names:
-                note('That username is already taken. Choose a different name.')
+            if any(base != GOOGLE_ACCOUNT_USERNAME.casefold()
+                   and value.casefold() == new_name.casefold()
+                   for base, value in current['renamed_users'].items()):
+                note('Another user has already claimed that nickname.')
                 return snapshot()
-            # Reserving the name via a signed event lets other clients and
-            # fresh Colab sessions see the same username without a public post.
+            if new_name.casefold() == username.casefold():
+                note('Your nickname is already ' + username + '.')
+                return snapshot()
             previous_name = username
-            username = new_name
-            if not write_event(event_now('profile', renamed=True)):
+            if write_event(rename_event(new_name)):
+                username = new_name
+                note('Nickname changed to ' + new_name + '.')
+            else:
                 username = previous_name
                 note('Could not save your new name. Please try again.')
             return snapshot()
