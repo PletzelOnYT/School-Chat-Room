@@ -43,7 +43,7 @@ const makeMsg=(number,user,text,extra={})=>({
 let state={
  username:'Alex',my_verified:false,running:true,popup:null,
  messages:[
-   makeMsg(1,'Emma','Hello <img src=x onerror=alert(1)>'),
+   makeMsg(1,'Emma','Hello <img src=x onerror=alert(1)>',{verified:true}),
    makeMsg(2,'Alex','Good morning',{reactions:{'👍':2},my_reactions:['👍']}),
  ],threads:[]
 };
@@ -145,6 +145,10 @@ async function run(){
  assert(find(message,n=>n.className==='avatar'),'message has avatar');
  assert(find(message,n=>n.className==='message-user'),'message has username');
  assert(find(message,n=>n.className==='message-time'),'message has timestamp');
+ const verified=find(message,n=>n.className==='verified');
+ assert(verified,'verified icon exists');
+ assert.strictEqual(verified.textContent,'✓','the badge must be checkmark only');
+ assert(!verified.textContent.includes('Verified'),'no redundant verified label');
  assert(find(transcript,n=>n.className==='react-pill mine'),'reactions retained');
  assert.strictEqual(opened.length,1);
  classicControl('[Open in App]').events.click();
@@ -163,6 +167,8 @@ async function run(){
  clickButton(transcript,'↳ Reply');
  assert.strictEqual(el['app-replybar'].style.display,'flex');
  assert(el['app-replyname'].textContent.includes('Emma'));
+ assert(el['app-replydetail'].textContent.includes('Hello <img src=x onerror=alert(1)>'),
+   'reply composer previews the original text without HTML interpretation');
  input.value='Reply from popup';
  form.events.submit({preventDefault(){}});
  await sleep(820);
@@ -228,6 +234,18 @@ async function run(){
  assert.strictEqual(el['app-layout'].className,'app thread-open');
  assert(el['app-thread-body'].textContent.includes('First thread reply'));
  assert(el['app-thread-meta'].textContent.includes('1 reply'));
+ const replyItem=find(transcript,n=>n.tag==='article'&&n._appMessageId==='m5');
+ assert(replyItem,'reply exists inline in channel');
+ const replyPreview=find(replyItem,n=>String(n.className||'').includes('reply-reference'));
+ assert(replyPreview && replyPreview.textContent.includes('Emma'),
+   'inline preview identifies the original author');
+ assert(replyPreview.textContent.includes('Hello <img src=x onerror=alert(1)>'),
+   'inline preview shows original message safely');
+ assert(!replyItem.textContent.includes('Thread reply'),'no generic reply label');
+ replyPreview.events.click();
+ const original=find(transcript,n=>n.tag==='article'&&n._appMessageId==='m1');
+ assert(original.className.includes('reply-focus'),
+   'clicking a reply preview highlights its original message');
  el['app-thread-input'].value='Answer in thread';
  el['app-thread-form'].events.submit({preventDefault(){}});
  await sleep(820);
@@ -240,6 +258,20 @@ async function run(){
  el['app-thread-form'].events.submit({preventDefault(){}});
  await sleep(820);
  assert(sent.includes('/reply 5 Nested answer'),sent);
+ // Nested replies show exactly which message was answered, not just a thread label.
+ state.threads[0].replies.push(makeMsg(6,'Alex','Nested message',{reply_to:'m5'}));
+ polling();
+ await sleep(35);
+ const nested=find(transcript,n=>n.tag==='article'&&n._appMessageId==='m6');
+ assert(nested,'nested reply visible in channel');
+ const nestedPreview=find(nested,n=>String(n.className||'').includes('reply-reference'));
+ assert(nestedPreview && nestedPreview.textContent.includes('Sasha'));
+ assert(nestedPreview.textContent.includes('First thread reply'),
+   'nested preview references the immediate parent instead of the thread root');
+ assert(el['app-thread-body'].textContent.includes('First thread reply'));
+ assert(el['app-thread-body'].textContent.includes('Nested message'));
+ assert(find(el['app-thread-body'],n=>String(n.className||'').includes('reply-reference')),
+   'thread panel also uses the reply reference preview');
  el['app-thread-close'].events.click();
  assert.strictEqual(el['app-layout'].className,'app');
 
@@ -265,7 +297,7 @@ run().catch(e=>{console.error(e);process.exitCode=1});
 class AppWindowTests(unittest.TestCase):
     def test_discord_style_only_affects_popup(self):
         source=SOURCE.read_text(encoding="utf-8")
-        self.assertIn("CLIENT_VERSION = '5.53'",source)
+        self.assertIn("CLIENT_VERSION = '5.54'",source)
         self.assertIn('font-family:monospace;font-size:13px',HTML)
         self.assertIn('height:19px',HTML)
         self.assertIn("textControl('[Open in App]',openAppWindow",SCRIPT)
@@ -274,6 +306,9 @@ class AppWindowTests(unittest.TestCase):
         self.assertIn("appTextWithPings(doc,body",SCRIPT)
         self.assertIn("function appRenderThread(state)",SCRIPT)
         self.assertIn("function appUpdateMentions()",SCRIPT)
+        self.assertIn("function appReplyPreview(",SCRIPT)
+        self.assertIn("function appJumpToMessage(",SCRIPT)
+        self.assertIn("badge.textContent='✓'",SCRIPT)
         self.assertIn("appHasMention(msg.text,state.username)",SCRIPT)
         self.assertNotIn("innerHTML = msg.text",SCRIPT)
 
