@@ -43,6 +43,10 @@ def setup(extra=None):
     })
     if extra:
         env.update(extra)
+    if "PRIVATE_OUTBOX_PATH" not in env:
+        directory=Path(env.get("CHAT_FILE_PATH", tempfile.gettempdir()+"/no-chat.json")).parent/".local_receipts"
+        env["PRIVATE_FOLDER"]=str(directory)
+        env["PRIVATE_OUTBOX_PATH"]=str(directory/"outbox.json")
     exec(compile(ast.Module(body=NODES,type_ignores=[]),"<plain-chat>", "exec"),env)
     return env
 
