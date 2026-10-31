@@ -1,4 +1,4 @@
-"""Colab-styled in-chat toast previews instead of browser permission popups."""
+"""A separate real browser popup window, not an iframe notification card."""
 import ast
 import shutil
 import subprocess
@@ -14,193 +14,203 @@ HTML = next(ast.literal_eval(n.value) for n in TREE.body
 JAVASCRIPT = HTML.split("<script>", 1)[1].split("</script>", 1)[0]
 
 NODE_TEST = r"""
-const assert = require('assert');
-const vm = require('vm');
-const fs = require('fs');
-
-class TextNode {
-  constructor(text) { this.textContent = String(text); }
-}
+const assert = require('assert'), vm = require('vm'), fs = require('fs');
+class TextNode {constructor(t) {this.textContent = String(t);}}
 class Element {
-  constructor(tag='div') {
-    this.tag = tag; this.nodes = []; this.events = {};
-    this.style = {}; this.isConnected = true; this.value = '';
+  constructor(tag='span') {
+    this.tag=tag;this.nodes=[];this.events={};this.style={};
+    this.isConnected=true;this.value='';
   }
-  appendChild(node) { this.nodes.push(node); return node; }
-  replaceChildren(...nodes) { this.nodes = nodes; }
-  get textContent() { return this.nodes.map(n=>n.textContent).join(''); }
-  set textContent(t) { this.nodes = [new TextNode(t)]; }
-  addEventListener(type, callback) { this.events[type] = callback; }
-  setAttribute(name,value) { this[name] = value; }
-  focus() {}
-  setSelectionRange() {}
+  appendChild(x) {this.nodes.push(x);return x;}
+  replaceChildren(...x) {this.nodes=x;}
+  get textContent() {return this.nodes.map(x=>x.textContent).join('');}
+  set textContent(s) {this.nodes=[new TextNode(s)];}
+  addEventListener(name,fn) {this.events[name]=fn;}
+  setAttribute(k,v) {this[k]=v;}
+  focus(){}
+  setSelectionRange(){}
 }
 const elements = {};
 const document = {
-  getElementById: id => elements[id] || (elements[id] = new Element()),
-  createElement: tag => new Element(tag),
-  createTextNode: t => new TextNode(t)
+  getElementById:id=>elements[id]||(elements[id]=new Element()),
+  createElement:tag=>new Element(tag),
+  createTextNode:t=>new TextNode(t)
 };
-const shared = (number,user,text) => ({
-  id:'m'+number,number,user,text,time:'12:34:56',
-  private:false,reactions:{},my_reactions:[]
-});
-const priv = (text) => ({
-  id:'local',number:null,user:'System',text,time:'12:34:57',private:true
+const makeMsg=(number,user,text,privateMessage=false)=>({
+  id:'m'+number,number,user,text,private:privateMessage,
+  time:'12:30:00',reactions:{},my_reactions:[]
 });
 let state = {
   username:'Alex',my_verified:false,running:true,popup:null,
-  messages:[shared(100,'Emma','old message')],threads:[]
+  messages:[makeMsg(100,'Emma','old history')],threads:[]
 };
-let poll;
-let nextTimerId=0;
-const timers = new Map();
-const fakeTimeout = (callback,ms) => {
-  const id=++nextTimerId;
-  timers.set(id,{callback,ms});
-  return id;
+let polling, opened=[], allowWindows=true, timers=new Map(), nextTimer=1;
+let backendSends=[];
+const setTimer=(fn,ms)=>{let id=nextTimer++;timers.set(id,{fn,ms});return id;};
+const clearTimer=(id)=>timers.delete(id);
+const browser={
+  screen:{availLeft:0,availTop:0,availWidth:1280,availHeight:800},
+  open(url,target,features){
+    if(!allowWindows) return null;
+    const fields = {};
+    const doc={
+      open(){},write(html){this.html=html;},close(){},
+      getElementById:id=>fields[id]||(fields[id]=new Element())
+    };
+    const win={document:doc,closed:false,focused:0,focus(){this.focused++;},
+      close(){this.closed=true;}};
+    opened.push({url,target,features,win,fields});
+    return win;
+  }
 };
-const fakeClearTimeout = id=>timers.delete(id);
-const sentCommands=[];
-const google = {colab:{kernel:{invokeFunction: async(name,args)=>{
+const google={colab:{kernel:{invokeFunction:async(name,args)=>{
   if(name.endsWith('.state')) return {data:{'application/json':state}};
   if(name.endsWith('.send')) {
-    sentCommands.push(args[0]);
+    backendSends.push(args[0]);
     return {data:{'application/json':state}};
   }
-  throw Error('unexpected callback');
+  throw Error('Unexpected Colab callback '+name);
 }}}};
-const sandbox = {
-  document,google,console,
-  setTimeout:fakeTimeout,clearTimeout:fakeClearTimeout,
-  setInterval:fn=>{poll=fn;return 1},clearInterval:()=>{},
-  window:{open(){throw Error('No window.open for toast messages');}},
-  URL:{createObjectURL:()=>'',revokeObjectURL(){}},Blob:class {},
-  REFRESHMS:1000,
-  STATE_CALLBACK_JSON:'messaging_app.test.state',
-  SEND_CALLBACK_JSON:'messaging_app.test.send'
-};
-const js = fs.readFileSync(0,'utf8');
-vm.runInNewContext(js,sandbox);
-const toast = elements['messaging-toast-SESSION_ID'];
-const title = elements['messaging-toast-title-SESSION_ID'];
-const preview = elements['messaging-toast-preview-SESSION_ID'];
-const progress = elements['messaging-toast-timer-SESSION_ID'];
-const close = elements['messaging-toast-close-SESSION_ID'];
-async function flush() {
-  await new Promise(resolve=>setTimeout(resolve,12));
+vm.runInNewContext(fs.readFileSync(0,'utf8'),{
+  document,window:browser,google,console,
+  setTimeout:setTimer,clearTimeout:clearTimer,
+  setInterval:fn=>{polling=fn;return 1;},clearInterval:()=>{},
+  STATE_CALLBACK_JSON:'messaging_app.fake.state',
+  SEND_CALLBACK_JSON:'messaging_app.fake.send',
+  REFRESHMS:1000,URL:{revokeObjectURL(){}},Blob:class{}
+});
+const flush=()=>new Promise(r=>setTimeout(r,15));
+async function poll(){polling();await flush();}
+function headerControl(label) {
+  const area=elements['messaging-display-SESSION_ID'];
+  const header=area.nodes.find(node=>node.tag==='span' &&
+    node.textContent.includes('Connected as'));
+  if(!header) throw Error('Missing chat header');
+  return header.nodes.find(x=>x.tag==='span' &&
+    x.textContent.includes(label));
 }
-async function refresh() {
-  poll();
+async function run(){
   await flush();
-}
-async function run() {
-  await flush();
-  assert.strictEqual(toast.style.display,undefined,
-    'DOM mock initial CSS is static, no JS auto-show on launch');
-  assert.strictEqual(timers.size,0,'no toast for old history');
-  assert(!js.includes('Notification.requestPermission'));
-  assert(!js.includes('desktopAlertsWindow'));
-  assert(!js.includes('new API('));
+  assert.strictEqual(opened.length,0,'no auto popup from old history');
+  assert(!elements['messaging-toast-SESSION_ID'],'no in-chat card');
 
-  state.messages.push(shared(101,'Sasha','Hello from class!'));
-  await refresh();
-  assert.strictEqual(toast.style.display,'block');
-  assert(title.textContent.includes('Sasha'),title.textContent);
-  assert(preview.textContent.includes('Hello from class!'));
-  assert(progress.style.animation.includes('6500ms'));
+  const enable=headerControl('Desktop popups OFF');
+  assert(enable && enable.events.click);
+  enable.events.click();
+  assert.strictEqual(opened.length,1,'opt-in click opens a real window');
+  let p=opened[0];
+  assert(p.features.includes('popup=yes'));
+  assert(p.features.includes('width=355'));
+  assert(p.features.includes('left=909'),p.features);
+  assert(p.features.includes('top=619'),p.features);
+  assert(p.doc===undefined);
+  assert(p.win.document.html.includes('Pletzel Chat'));
+  assert(p.win.document.html.includes('@keyframes expire'));
+  assert(p.fields.sender.textContent.includes('Preview'));
   assert.strictEqual(timers.size,1);
-  let firstTimer=[...timers.keys()][0];
+  assert.strictEqual([...timers.values()][0].ms,6500);
+  assert(headerControl('Desktop popups ON'));
 
-  await refresh();
-  assert.strictEqual(timers.size,1,'no duplicate on unchanged poll');
-  assert(timers.has(firstTimer),'unchanged poll cannot restart timer');
-
-  // Own messages and local System entries do not produce alerts.
-  state.messages.push(shared(102,'Alex','my sent message'),priv('Private warning'));
-  await refresh();
-  assert(timers.has(firstTimer),'own/system messages must not replace toast');
-
-  // Replace existing toast when a new message appears.
-  state.messages.push(shared(103,'Emma','New   message \n with   spaces!'));
-  await refresh();
-  assert.strictEqual(timers.size,1);
-  assert(!timers.has(firstTimer),'old countdown must be canceled');
-  assert(title.textContent.includes('Emma'));
-  assert.strictEqual(preview.textContent,'New message with spaces!');
-  assert(!preview.textContent.includes('System'));
-
-  // Multiple fresh messages: single toast with latest author's preview.
-  state.messages.push(shared(104,'Sasha','one'),shared(105,'Emma','two'));
-  await refresh();
-  assert(title.textContent.includes('2 new messages'));
-  assert(preview.textContent.includes('Emma: two'));
-  assert.strictEqual(timers.size,1);
-
-  // Untrusted chat markup must only appear as text, not HTML.
-  state.messages.push(shared(106,'Emma','<img src=x onerror=alert(1)>'));
-  await refresh();
-  assert(preview.textContent.includes('<img'));
-  assert.strictEqual(preview.nodes.length,1);
-
-  // Auto-close after progress line finishes.
-  assert.strictEqual(timers.size,1);
-  const current=[...timers.values()][0];
-  assert.strictEqual(current.ms,6500);
-  current.callback();
-  assert.strictEqual(toast.style.display,'none');
+  // Auto-close THE ACTUAL SEPARATE WINDOW after the timer.
+  const firstTimer=[...timers.values()][0];
+  firstTimer.fn();
+  assert.strictEqual(p.win.closed,true);
   assert.strictEqual(timers.size,0);
 
-  // Click X immediately closes the next toast.
-  state.messages.push(shared(107,'Sasha','bye'));
-  await refresh();
-  assert.strictEqual(toast.style.display,'block');
-  close.events.click();
-  assert.strictEqual(toast.style.display,'none');
+  state.messages.push(makeMsg(101,'Sasha','Hello there!'));
+  await poll();
+  assert.strictEqual(opened.length,2,'incoming other user starts desktop popup');
+  p=opened[1];
+  assert(p.fields.sender.textContent.includes('Sasha'));
+  assert(p.fields.preview.textContent.includes('Hello there!'));
+  assert.strictEqual(timers.size,1);
+
+  await poll();
+  assert.strictEqual(opened.length,2,'duplicate poll cannot reopen');
+  state.messages.push(makeMsg(102,'Alex','mine'));
+  state.messages.push(makeMsg(103,'System','private',true));
+  await poll();
+  assert.strictEqual(opened.length,2,'own and private messages ignored');
+
+  // New incoming message while window open: update, no additional window.
+  state.messages.push(makeMsg(104,'Emma','  New\n  hi   friend '));
+  await poll();
+  assert.strictEqual(opened.length,2);
+  assert.strictEqual(p.fields.preview.textContent,'New hi friend');
+  assert(p.fields.sender.textContent.includes('Emma'));
+  assert.strictEqual(timers.size,1);
+
+  // New batch summarized in a single popup.
+  state.messages.push(makeMsg(105,'Sasha','one'));
+  state.messages.push(makeMsg(106,'Emma','two'));
+  await poll();
+  assert.strictEqual(opened.length,2);
+  assert(p.fields.sender.textContent.includes('2 new messages'));
+  assert(p.fields.preview.textContent.includes('Emma: two'));
+
+  state.messages.push(makeMsg(107,'Emma','<img src=x onerror=alert(1)>'));
+  await poll();
+  assert(p.fields.preview.textContent.includes('<img'));
+  assert.strictEqual(p.fields.preview.nodes.length,1,'escape via textContent');
+  assert.strictEqual(backendSends.length,0);
+
+  // X button closes this actual popup without disabling later alerts.
+  p.fields.close.events.click();
+  assert(p.win.closed);
   assert.strictEqual(timers.size,0);
 
-  // Local preview command must open the toast without calling the backend.
+  // /testpopup is local-only and creates an actual popup on its own click.
   const input=elements['messaging-input-SESSION_ID'];
   const form=elements['messaging-form-SESSION_ID'];
-  input.value='/testtoast';
+  input.value='/testpopup';
   form.events.submit({preventDefault(){}});
   assert.strictEqual(input.value,'');
-  assert.strictEqual(toast.style.display,'block');
-  assert(title.textContent.includes('Preview'));
-  assert(preview.textContent.includes('sample message preview'));
-  assert.strictEqual(timers.size,1);
-  assert.strictEqual(sentCommands.length,0,'testtoast cannot touch shared history');
-  close.events.click();
+  assert.strictEqual(opened.length,3);
+  assert.strictEqual(backendSends.length,0);
+  opened[2].fields.close.events.click();
+
+  // If policy blocks automatic windows, disable future attempts and show
+  // BLOCKED in the chat header rather than silently using an in-page toast.
+  allowWindows=false;
+  state.messages.push(makeMsg(108,'Sasha','new blocked message'));
+  await poll();
+  assert.strictEqual(opened.length,3);
+  assert(headerControl('Desktop popups BLOCKED'));
+  state.messages.push(makeMsg(109,'Emma','next blocked message'));
+  await poll();
+  assert.strictEqual(opened.length,3);
+  allowWindows=true;
+  const retry=headerControl('Desktop popups BLOCKED');
+  retry.events.click();
+  assert.strictEqual(opened.length,4,'retry must be a real user click');
+  assert(headerControl('Desktop popups ON'));
 
   state.running=false;
-  await refresh();
-  assert.strictEqual(toast.style.display,'none');
-  console.log('In-chat toasts: delivery, privacy, preview, timer, close, XSS: PASS');
+  await poll();
+  assert.strictEqual(opened[3].win.closed,true);
+  assert.strictEqual(timers.size,0);
+  console.log('Desktop popup: real window, position, timer, X, privacy, opt-in, policy-block: PASS');
 }
-run().catch(err=>{ console.error(err);process.exitCode=1; });
+run().catch(e=>{console.error(e);process.exitCode=1;});
 """
 
-class ChatToastTests(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("node"), "Node.js not installed")
-    def test_new_messages_show_deduplicated_self_closing_toasts(self):
-        result = subprocess.run(
-            ["node","-e",NODE_TEST],input=JAVASCRIPT,
-            capture_output=True,text=True,timeout=20,check=False)
-        self.assertEqual(result.returncode,0,result.stdout+"\n"+result.stderr)
+class DesktopPopupTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "Node.js required")
+    def test_real_popup_window_behavior_and_policy_failure(self):
+        run = subprocess.run(["node","-e",NODE_TEST],input=JAVASCRIPT,
+                             text=True,capture_output=True,timeout=20)
+        self.assertEqual(run.returncode,0,run.stdout+"\n"+run.stderr)
 
-    def test_colab_style_and_no_permission_prompt(self):
-        source = SOURCE.read_text(encoding="utf-8")
-        self.assertIn("CLIENT_VERSION = '5.42'",source)
-        self.assertIn('position:fixed;right:12px;bottom:12px',HTML)
-        self.assertIn('background:#ffffff;color:#202124',HTML)
-        self.assertIn('background:#1a73e8',HTML)
-        self.assertIn('width:min(330px',HTML)
-        self.assertIn('aria-label="Dismiss chat notification"',HTML)
-        self.assertNotIn('notificationAccess',JAVASCRIPT)
-        self.assertNotIn('desktopAlertsWindow',JAVASCRIPT)
-        self.assertNotIn('requestPermission',JAVASCRIPT)
-        self.assertNotIn('new Notification(',JAVASCRIPT)
+    def test_no_built_in_browser_notifications_or_embedded_toast(self):
+        self.assertIn("CLIENT_VERSION = '5.43'",SOURCE.read_text(encoding="utf-8"))
+        self.assertNotIn('messaging-toast-SESSION_ID',HTML)
+        self.assertIn("popup=yes,width=",JAVASCRIPT)
+        self.assertIn("window.open('', 'pletzel-desktop-SESSION_ID'",JAVASCRIPT)
+        self.assertIn("setTimeout(closeDesktopPopup, DESKTOP_POPUP_MS)",JAVASCRIPT)
+        self.assertNotIn("Notification.requestPermission",JAVASCRIPT)
+        self.assertNotIn("new Notification(",JAVASCRIPT)
+        self.assertNotIn("requestPermission()",JAVASCRIPT)
 
 
-if __name__ == "__main__":
+if __name__=="__main__":
     unittest.main()
