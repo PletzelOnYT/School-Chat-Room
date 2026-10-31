@@ -380,7 +380,7 @@ def parse_chat_log(raw):
         except UnicodeError as exc:
             raise ChatFileError('Shared chat contains invalid UTF-8.') from exc
     decoder = json.JSONDecoder()
-    skip = len(raw) - len(raw.lstrip())
+    skip = len(raw) - len(raw.lstrip(' \t\r\n'))
     try:
         initial, pos = decoder.raw_decode(raw, skip)
     except (ValueError, TypeError) as exc:
@@ -389,7 +389,7 @@ def parse_chat_log(raw):
         raise ChatFileError('Shared history must begin with a JSON array.')
     messages = list(initial)
     while True:
-        pos += len(raw[pos:]) - len(raw[pos:].lstrip())
+        pos += len(raw[pos:]) - len(raw[pos:].lstrip(' \t\r\n'))
         if pos >= len(raw):
             break
         if raw[pos] != APPEND_RECORD_SEPARATOR:
