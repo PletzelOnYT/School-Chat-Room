@@ -98,9 +98,11 @@ def obtain_guardian():
     colocated = (script_path is not None
                  and script_path.name == "guardian_stress_lab.py"
                  and script_path.is_file())
-    in_colab = ("google.colab" in sys.modules or
-                bool(os.environ.get("COLAB_RELEASE_TAG")) or
-                bool(os.environ.get("COLAB_GPU")))
+    in_colab = (bool(os.environ.get("COLAB_RELEASE_TAG")) or
+                bool(os.environ.get("COLAB_GPU")) or
+                # An imported google.colab module alone is not proof of a
+                # notebook: local test runners can import it too.
+                ("google.colab" in sys.modules and not colocated))
     local = script_path.parent / "owner_guardian.py" if colocated else None
     if local is not None and local.is_file() and not in_colab:
         module = _load_guardian_source(local.read_bytes(), str(local))
