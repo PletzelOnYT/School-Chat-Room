@@ -227,6 +227,25 @@ class GuardianTests(unittest.TestCase):
         self.assertFalse(guardian.simple_title(invalid))
         self.assertIn("unknown",guardian.check_new_event(invalid,{},{}))
 
+    def test_accept_and_restore_simple_rename(self):
+        self.mon.process()
+        rename={"kind":"rename","time":"04:16:00",
+                "user":"Guest-626","name":"Pletzel"}
+        self.assertTrue(guardian.simple_rename(rename))
+        self.assertIsNone(guardian.check_new_event(rename,{},{}))
+        self.shared.write_text(json.dumps([self.legacy,rename]))
+        self.assertEqual(self.mon.process(),"healthy")
+        self.assertEqual(guardian.count_events(self.mon.db),2)
+        self.shared.write_text(json.dumps([self.legacy]))
+        self.assertEqual(self.mon.process(),"restored")
+        self.assertEqual(json.loads(self.shared.read_text())[-1],rename)
+
+    def test_reject_malicious_rename_schema(self):
+        invalid={"kind":"rename","time":"04:16:00",
+                 "user":"Guest-626","name":"Owner"}
+        self.assertFalse(guardian.simple_rename(invalid))
+        self.assertIn("unknown",guardian.check_new_event(invalid,{},{}))
+
     def test_tampered_approved_text_restored(self):
         self.mon.process()
         e=self.event("safely signed text")
