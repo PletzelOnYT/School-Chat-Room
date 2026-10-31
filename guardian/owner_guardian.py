@@ -844,8 +844,16 @@ class Guardian:
                                  "untouched for next scan / manual inspection.")
                         return "corrupt"
                 if self.repair:
-                    recover_existing(self.shared,known,self.private)
+                    try:
+                        recover_existing(
+                            self.shared,known,self.private,
+                            expected_raw=raw_snapshot)
+                    except ConcurrentChatChange:
+                        self.log("Invalid shared file changed during attempted "
+                                 "repair; preserving new data for rescan.")
+                        return "rescan"
                     self.log("Restored last approved chat history IN PLACE.")
+                    self.backup()
                     return "restored"
                 return "corrupt"
 
@@ -954,11 +962,18 @@ class Guardian:
                 fresh,_=read_shared(self.shared)
             except (OSError,ValueError):
                 fresh=None
-            if fresh is not None and fresh!=raw:
-                self.log("Shared file changed during inspection; rescanning next pass")
+            if fresh is None or fresh!=raw:
+                self.log("Shared file changed or became unreadable during scan; "
+                         "preserving other writers' data for next pass.")
                 return "rescan"
             restored=db_events(self.db)
-            recover_existing(self.shared,restored,self.private)
+            try:
+                recover_existing(
+                    self.shared,restored,self.private,expected_raw=raw)
+            except ConcurrentChatChange:
+                self.log("Shared file changed just before repair write; "
+                         "rescan without erasing new messages.")
+                return "rescan"
             incident(self.db,"Repaired invalid/deleted history",action="restored")
             self.backup()
             self.log(f"Recovered approved history ({len(restored)} records) IN PLACE")
