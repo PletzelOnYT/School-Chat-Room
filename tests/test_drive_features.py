@@ -21,7 +21,8 @@ NAMES = {"read_messages", "write_event", "write_plain_message",
          "is_title_event", "is_simple_record", "title_event",
          "is_rename_event", "rename_event",
          "is_simple_reaction", "simple_reaction_event",
-         "search_messages", "build_threads", "parse_chat_log",
+         "search_messages", "chronological_display_messages",
+         "build_threads", "parse_chat_log",
          "load_outbox", "save_outbox", "remember_outgoing", "reconcile_outbox"}
 FUNCTIONS = [node for node in TREE.body
              if isinstance(node, ast.FunctionDef) and node.name in NAMES]
