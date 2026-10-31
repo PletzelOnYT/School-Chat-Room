@@ -16,6 +16,7 @@ from pathlib import Path
 SOURCE = Path(__file__).resolve().parents[1].joinpath("messaging_app.py").read_text()
 TREE = ast.parse(SOURCE)
 NAMES = {"read_messages", "write_event", "write_plain_message",
+         "message_hash", "is_clock_event", "clock_event",
          "append_event_in_place", "is_plain_message",
          "is_title_event", "is_simple_record", "title_event",
          "is_rename_event", "rename_event",
@@ -36,6 +37,7 @@ def storage_env(path):
         "TITLE_FIELDS": frozenset(("kind","time","user","title")),
         "RENAME_FIELDS": frozenset(("kind","time","user","name")),
         "REACTION_FIELDS": frozenset(("kind","time","user","target","emoji","active")),
+        "CLOCK_FIELDS": frozenset(("kind","time","user","epoch","message_hash")),
         "is_valid_emoji": lambda emoji: isinstance(emoji,str) and any(ord(x)>=0x2600 for x in emoji),
         "TITLE_VERIFIED": "Verified", "TITLE_NONE": "None",
         "CHAT_FILE_PATH": str(path),
