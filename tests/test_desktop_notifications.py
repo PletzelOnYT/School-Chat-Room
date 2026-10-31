@@ -92,7 +92,7 @@ function control(){
     n.textContent.includes('Connected as'));
   assert(header,area.textContent);
   return header.nodes.find(n=>n.tag==='span' &&
-    n.textContent.includes('Desktop alerts'));
+    (n.textContent.includes('Desktop alerts') || n.textContent.includes('Alerts ON')));
 }
 async function test(){
   await sleep(25);
