@@ -339,7 +339,7 @@ def decode_shared_stream(raw):
     except UnicodeError as exc:
         raise ValueError("shared chat contains invalid UTF-8") from exc
     decoder=json.JSONDecoder()
-    skip=len(data)-len(data.lstrip())
+    skip=len(data)-len(data.lstrip(" \t\r\n"))
     try:
         history,pos=decoder.raw_decode(data,skip)
     except ValueError as exc:
@@ -348,7 +348,7 @@ def decode_shared_stream(raw):
         raise ValueError("chat history must begin with a JSON array")
     events=list(history)
     while True:
-        pos+=len(data[pos:])-len(data[pos:].lstrip())
+        pos+=len(data[pos:])-len(data[pos:].lstrip(" \t\r\n"))
         if pos==len(data):
             return events
         if data[pos]!=APPEND_RECORD_SEPARATOR:
