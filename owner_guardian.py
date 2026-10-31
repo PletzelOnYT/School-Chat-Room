@@ -1,4 +1,4 @@
-# @title Messaging App — Owner Guardian v2.4
+# @title Messaging App — Owner Guardian v2.5
 """Owner-side Google Drive watchdog. Does not run inside messaging_app.py.
 
 - Approves only allowlisted, signed NEW events and stores a durable event ledger.
@@ -33,7 +33,7 @@ import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-GUARDIAN_VERSION = "2.4"
+GUARDIAN_VERSION = "2.5"
 # Exact existing shared file; Guardian never copies the message archive.
 SHARED_CHAT_FILE_ID = '1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd'
 SHARED_CHAT_FILE_LINK = (
@@ -882,6 +882,37 @@ class Guardian:
         self.db.close()
 
 
+def guardian_authorize_owner_colab(authorize=None):
+    """Ask Colab for real *user* Drive API consent before any Drive API call.
+
+    Mounting /content/drive alone does not supply OAuth credentials for REST.
+    In affected runtimes google.auth.default() otherwise selects a GCE
+    credential, whose metadata service has no service account (HTTP 404).
+    Colab authenticate_user() is idempotent for an already authorized account
+    and shows a Google consent prompt only when required.
+    """
+    if authorize is None:
+        try:
+            from google.colab import auth
+            authorize=lambda: auth.authenticate_user(clear_output=False)
+        except ImportError as exc:
+            raise RuntimeError(
+                "Colab authorization is unavailable in this Python runtime. "
+                "Add the original chat.json shortcut manually in Google Drive."
+            ) from exc
+    print("Owner Guardian: checking Google user permission for the Drive "
+          "shortcut. Complete a Google sign-in prompt if shown.",flush=True)
+    try:
+        authorize()
+    except Exception as exc:
+        raise RuntimeError(
+            "Google user authorization was denied or unavailable ("+
+            type(exc).__name__+"). Open the original shared chat.json in "
+            "Google Drive and use Organize > Add shortcut in My Drive. "
+            "Google Workspace account restrictions cannot be bypassed."
+        ) from exc
+
+
 def guardian_user_drive_session(get_default=None, login=None,
                                 make_request=None, make_session=None,
                                 is_machine=None):
@@ -970,11 +1001,15 @@ def ensure_shared_chat_shortcut(drive_root, session=None, sleep=None,
 
     if session is None:
         try:
+            # Do this BEFORE creating an AuthorizedSession. Otherwise
+            # google.auth.default() can select a broken VM credential and
+            # cause the observed metadata.google.internal 404 RefreshError.
+            guardian_authorize_owner_colab()
             session = guardian_user_drive_session()
         except RuntimeError as exc:
             fail(str(exc))
         except Exception as exc:
-            fail('Google Drive API authorization failed (' +
+            fail('Google Drive user authorization failed (' +
                  type(exc).__name__ + ')')
 
     api = 'https://www.googleapis.com/drive/v3/files'
@@ -1058,6 +1093,10 @@ def ensure_shared_chat_shortcut(drive_root, session=None, sleep=None,
     except FileNotFoundError:
         raise
     except Exception as exc:
+        if type(exc).__name__ in ('TransportError','RefreshError'):
+            fail('Google Drive API received invalid machine credentials ('+
+                 type(exc).__name__+'). Colab user OAuth is required; '+
+                 'do not retry Google VM metadata credentials')
         fail('the Drive API could not complete the request (' +
              type(exc).__name__ + ')')
 
