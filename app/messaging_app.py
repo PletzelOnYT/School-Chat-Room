@@ -1,4 +1,4 @@
-# @title Messaging App v5.47 — Google Drive Messenger
+# @title Messaging App v5.48 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.47'
+CLIENT_VERSION = '5.48'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1869,6 +1869,10 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   let desktopPopupWindow = null;
   let desktopPopupCloseTimer = null;
   const DESKTOP_POPUP_MS = 6500;
+  let appWindow = null;
+  let appElements = null;
+  let appWindowBlocked = false;
+  let focusAfterSend = input;
   const popupCommands = new Set([
     '/help', '/hellp', '/rules', '/version', '/whoami', '/id',
     '/users', '/verified', '/mentions', '/search', '/find', '/muted'
@@ -2112,6 +2116,259 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     showDesktopPopup(latest.user,latest.text,fromOthers.length);
   }
 
+
+  // A second, resizable app window mirrors this Colab session; it never
+  // mounts Drive, creates a second account, or starts a second poller.
+  function appWindowFeatures() {
+    const width = 780, height = 650;
+    const screenBounds = window.screen || {};
+    const x = Number(screenBounds.availLeft || 0);
+    const y = Number(screenBounds.availTop || 0);
+    const w = Number(screenBounds.availWidth || 1280);
+    const h = Number(screenBounds.availHeight || 800);
+    const left = x + Math.max(0, Math.floor((w - width) / 2));
+    const top = y + Math.max(0, Math.floor((h - height) / 2));
+    return 'popup=yes,width=' + Math.min(width, w) +
+      ',height=' + Math.min(height, h) +
+      ',left=' + left + ',top=' + top + ',resizable=yes,scrollbars=yes';
+  }
+
+  function appDocument() {
+    // Static markup only. Usernames and chat content are inserted by textContent.
+    return '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+      '<title>Pletzel Chat · App</title><style>' +
+      '*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;}' +
+      'body{background:#0d121b;color:#e7effa;font:14px system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;}' +
+      '.shell{height:100vh;height:100dvh;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;}' +
+      '.top{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid #253247;background:#151e2d;min-width:0;}' +
+      '.logo{width:38px;height:38px;display:grid;place-items:center;border-radius:12px;background:#3178f5;color:white;font-weight:800;font-size:20px;flex:none;}' +
+      '.heading{flex:1;min-width:0}.name{font-weight:750;font-size:16px;letter-spacing:.15px;}.sub{font-size:12px;color:#9fb0c6;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
+      '.close{background:#25344a;color:#dce9fc;border:1px solid #344961;border-radius:9px;width:34px;height:34px;cursor:pointer;font-size:21px;flex:none;}' +
+      '.close:hover{background:#3b526e}.messages{min-height:0;overflow:auto;overscroll-behavior:contain;padding:20px 22px 26px;scrollbar-color:#3c4d65 transparent;}' +
+      '.message{position:relative;margin:0 0 12px;border:1px solid #243147;border-radius:13px;background:#172131;padding:11px 13px;overflow-wrap:anywhere;}' +
+      '.message:hover{border-color:#36516d}.message.mine{background:#182c34;border-color:#29515a}.message.private{background:#282634;border-color:#54455b;}' +
+      '.meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;margin-bottom:5px;font-size:12px;}' +
+      '.author{font-weight:750;color:#7cdfad;font-size:13px}.private .author{color:#ff899c}.check{color:#69b2ff;font-weight:800;}' +
+      '.clock{color:#82eaf5;font-variant-numeric:tabular-nums}.number{color:#90a3bc}.body{white-space:pre-wrap;line-height:1.48;overflow-wrap:anywhere;}' +
+      '.actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:8px;}' +
+      '.action{background:#22344b;color:#c6d9f1;border:1px solid #37506c;border-radius:7px;padding:3px 8px;cursor:pointer;font:12px system-ui,sans-serif;}' +
+      '.action:hover{background:#32516c}.action.active{background:#294859;border-color:#4d8ca3;color:#d0f5ff;}' +
+      '.composer{padding:13px 18px max(14px,env(safe-area-inset-bottom));border-top:1px solid #253247;background:#151e2d;}' +
+      '.field{display:flex;gap:10px;align-items:center;min-width:0;}' +
+      '.input{flex:1;min-width:0;background:#0d1625;color:#f0f7ff;border:1px solid #425674;border-radius:10px;padding:12px 14px;outline:none;font:14px system-ui,sans-serif;}' +
+      '.input:focus{border-color:#56a4ff;box-shadow:0 0 0 2px #245183}.input::placeholder{color:#8596ab;}' +
+      '.send{padding:12px 18px;border:0;border-radius:10px;color:#fff;background:#3178f5;font-weight:750;cursor:pointer;}' +
+      '.send:hover{background:#5595ff}.send:disabled,.input:disabled{opacity:.55;cursor:not-allowed;}' +
+      '.hint{color:#8194ad;font-size:11px;margin:7px 3px 0;}' +
+      '.empty{color:#92a5bc;text-align:center;margin:50px auto;line-height:1.6;}' +
+      '@media(max-width:540px){.top{padding:10px 12px;gap:9px}.logo{width:33px;height:33px}.messages{padding:12px 10px 18px}.message{padding:10px;margin-bottom:9px}.composer{padding:10px}.send{padding:11px 12px}.input{padding:11px 10px}.name{font-size:14px}.sub{font-size:11px}}' +
+      '</style></head><body><div class="shell">' +
+      '<header class="top"><div class="logo" aria-hidden="true">P</div>' +
+      '<div class="heading"><div class="name">Pletzel Chat</div>' +
+      '<div id="app-status" class="sub">Connecting to your Colab chat…</div></div>' +
+      '<button id="app-close" class="close" type="button" aria-label="Close app window">×</button></header>' +
+      '<main id="app-messages" class="messages" role="log" aria-label="Chat messages">' +
+      '<div class="empty">Connecting to chat…</div></main>' +
+      '<form id="app-form" class="composer" autocomplete="off">' +
+      '<div class="field"><input id="app-input" class="input" type="text" maxlength="1000" ' +
+      'aria-label="Message" placeholder="Message the chat…" />' +
+      '<button id="app-send" class="send" type="submit">Send</button></div>' +
+      '<div class="hint">Enter to send · Replies and reactions stay synced with Colab</div>' +
+      '</form></div></body></html>';
+  }
+
+  function appTimeline(state) {
+    // Same thread / anchored-private-notice ordering as the original renderer.
+    const groups = Array.isArray(state.threads) ? state.threads : [];
+    if (!groups.length)
+      return (state.messages || []).map(msg => ({msg, depth:0}));
+    const timeline = [];
+    for (const group of groups) {
+      if (!group?.root?.id) continue;
+      const nums = [group.root.number,
+        ...(group.replies || []).map(reply => reply.number)];
+      timeline.push({kind:'thread',group,anchor:Math.max(0,
+        ...nums.filter(Number.isFinite))});
+    }
+    for (const msg of (state.messages || []).filter(item => item.private)) {
+      const anchor = Number.isFinite(msg.anchor) ?
+        msg.anchor : Number.POSITIVE_INFINITY;
+      let insertion = 0;
+      for (let i=0;i<timeline.length;i++)
+        if (timeline[i].anchor <= anchor) insertion = i+1;
+      timeline.splice(insertion,0,{kind:'local',msg,anchor});
+    }
+    const flat = [], seen = new Set();
+    for (const item of timeline) {
+      if (item.kind === 'local') {
+        flat.push({msg:item.msg,depth:0});
+        continue;
+      }
+      const children = new Map();
+      for (const reply of item.group.replies || []) {
+        const parent = reply.reply_to || item.group.root.id;
+        if (!children.has(parent)) children.set(parent,[]);
+        children.get(parent).push(reply);
+      }
+      for (const list of children.values())
+        list.sort((a,b) => (a.display_rank ?? a.number ?? 0) -
+                           (b.display_rank ?? b.number ?? 0));
+      function visit(msg, depth) {
+        if (!msg?.id || seen.has(msg.id)) return;
+        seen.add(msg.id);
+        flat.push({msg,depth});
+        for (const child of children.get(msg.id) || [])
+          visit(child,Math.min(depth+1,4));
+      }
+      visit(item.group.root,0);
+    }
+    return flat;
+  }
+
+  function renderApp(state) {
+    if (!appWindow || appWindow.closed || !appElements || !state) return;
+    try {
+      const win = appWindow, doc = win.document;
+      const view = appElements.messages;
+      const bottom = view.scrollHeight - view.scrollTop - view.clientHeight < 85;
+      const previousTop = view.scrollTop;
+      const fragment = doc.createDocumentFragment();
+      const own = String(state.username || '').toLocaleLowerCase();
+      appElements.status.textContent = state.running ?
+        ('● Connected as ' + String(state.username || 'Guest')) : '● Chat disconnected';
+      appElements.input.disabled = !state.running;
+      appElements.send.disabled = !state.running;
+      const rows = appTimeline(state);
+      if (!rows.length) {
+        const placeholder = doc.createElement('div');
+        placeholder.className = 'empty';
+        placeholder.textContent = 'No messages yet. Start the conversation!';
+        fragment.appendChild(placeholder);
+      }
+      for (const {msg,depth} of rows) {
+        const box = doc.createElement('article');
+        box.className = 'message' +
+          (msg.private ? ' private' : '') +
+          (String(msg.user || '').toLocaleLowerCase() === own ? ' mine' : '');
+        if (depth) box.style.marginInlineStart = (Math.min(depth,4)*16) + 'px';
+        const meta = doc.createElement('div');
+        meta.className = 'meta';
+        function part(className,text) {
+          const item = doc.createElement('span');
+          item.className = className;
+          item.textContent = String(text);
+          meta.appendChild(item);
+        }
+        part('clock','[' + displayedTime(msg) + ']');
+        if (!msg.private) part('number','#' + msg.number);
+        if (depth) part('number','↳');
+        if (!msg.private && msg.verified) part('check','☑');
+        part('author',msg.user || 'Unknown');
+        box.appendChild(meta);
+        const body = doc.createElement('div');
+        body.className = 'body';
+        body.textContent = String(msg.text || '');
+        box.appendChild(body);
+        if (!msg.private && Number.isSafeInteger(msg.number)) {
+          const actions = doc.createElement('div');
+          actions.className = 'actions';
+          function action(label,callback,active=false) {
+            const button = doc.createElement('button');
+            button.type = 'button';
+            button.className = 'action' + (active ? ' active' : '');
+            button.textContent = label;
+            button.addEventListener('click',callback);
+            actions.appendChild(button);
+          }
+          action('↳ Reply',() => {
+            appElements.input.value = '/reply ' + msg.number + ' ';
+            appElements.input.focus();
+          });
+          const reactions = Object.entries(msg.reactions || {})
+            .filter(([emoji,count]) => count > 0);
+          const used = new Set((msg.my_reactions || []));
+          for (const [emoji,count] of reactions)
+            action(emoji + ' ' + count,() => sendInline(
+              (used.has(emoji) ? '/unreact ' : '/react ') +
+              msg.number + ' ' + emoji,appElements.input),used.has(emoji));
+          action('+ React',() => {
+            const picker = doc.createElement('div');
+            picker.className = 'actions';
+            for (const emoji of emojiChoices) {
+              const b = doc.createElement('button');
+              b.type='button';b.className='action';
+              b.textContent=emoji;
+              b.addEventListener('click',() => {
+                sendInline((used.has(emoji) ? '/unreact ' : '/react ') +
+                  msg.number + ' ' + emoji,appElements.input);
+                picker.remove();
+              });
+              picker.appendChild(b);
+            }
+            if (actions.nextSibling && actions.nextSibling.className === 'actions')
+              actions.nextSibling.remove();
+            else box.appendChild(picker);
+          });
+          box.appendChild(actions);
+        }
+        fragment.appendChild(box);
+      }
+      view.replaceChildren(fragment);
+      // Stay at the newest message unless the user is reading older history.
+      view.scrollTop = bottom ? view.scrollHeight : previousTop;
+    } catch (error) {
+      console.debug('App window could not be refreshed:',error);
+      appWindow = null;
+      appElements = null;
+    }
+  }
+
+  function openAppWindow() {
+    if (stopped || !root.isConnected) return;
+    if (appWindow && !appWindow.closed && appElements) {
+      try { appWindow.focus(); } catch(error) { /* browser may restrict focus */ }
+      return;
+    }
+    let win = null;
+    try {
+      // This is called synchronously by the button: no automatic popups.
+      win = window.open('', 'pletzel-chat-app-SESSION_ID', appWindowFeatures());
+      if (!win || win.closed) throw new Error('Browser denied app window');
+      win.document.open();
+      win.document.write(appDocument());
+      win.document.close();
+      const doc = win.document;
+      const elements = {
+        messages:doc.getElementById('app-messages'),
+        status:doc.getElementById('app-status'),
+        input:doc.getElementById('app-input'),
+        send:doc.getElementById('app-send')
+      };
+      doc.getElementById('app-close').addEventListener('click',() => win.close());
+      doc.getElementById('app-form').addEventListener('submit',event => {
+        event.preventDefault();
+        if (stopped || !root.isConnected || win.closed) return;
+        const value = elements.input.value;
+        if (!value.trim()) return;
+        if (isPopupCommand(value)) openCommandWindow();
+        elements.input.value = '';
+        sendInline(value,elements.input);
+      });
+      appWindow = win;
+      appElements = elements;
+      appWindowBlocked = false;
+      renderApp(latestState);
+      try { win.focus();elements.input.focus(); } catch(error) { /* optional */ }
+    } catch (error) {
+      console.debug('App popup was blocked or could not start:',error);
+      appWindowBlocked = true;
+      appWindow = null; appElements = null;
+      if (win && !win.closed) try { win.close(); } catch(ignore) {}
+      if (latestState) render(latestState);
+    }
+  }
+
   function colored(text, color, bold = false) {
     const span = document.createElement('span');
     span.style.color = color;
@@ -2184,11 +2441,17 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       }
     } finally {
       sending = false;
-      if (!stopped) input.focus();
+      if (!stopped) {
+        try {
+          if (focusAfterSend && focusAfterSend.isConnected) focusAfterSend.focus();
+          else input.focus();
+        } catch (error) { input.focus(); }
+      }
     }
   }
-  function sendInline(command) {
+  function sendInline(command, composer=input) {
     if (stopped) return;
+    focusAfterSend = composer;
     sendQueue.push(command);
     drainSendQueue();
   }
@@ -2318,6 +2581,13 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     popupControl.title = 'Click to enable/disable separate Chrome desktop popups. ' +
       'Automatic popups may be blocked by school policy.';
     header.appendChild(popupControl);
+    header.appendChild(document.createTextNode('  '));
+    const appControl = textControl('[Open in App]',openAppWindow,
+      appWindowBlocked ? '#FF5555' : '#00BFFF');
+    appControl.title = appWindowBlocked ?
+      'Browser blocked the app window. Allow popups for Colab and try again.' :
+      'Open the same live chat in a resizable app-style window.';
+    header.appendChild(appControl);
     // Fullscreen is still available without adding any icons to the classic UI.
     header.title = 'Double-click to toggle fullscreen';
     header.addEventListener('dblclick', () => {
@@ -2406,6 +2676,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       form.style.display = 'none';
       closed.style.display = 'block';
     }
+    renderApp(state);
   }
 
   async function refreshChat() {
