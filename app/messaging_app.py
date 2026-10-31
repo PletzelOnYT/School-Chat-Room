@@ -1,4 +1,4 @@
-# @title Messaging App v5.46 — Google Drive Messenger
+# @title Messaging App v5.47 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.46'
+CLIENT_VERSION = '5.47'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1980,9 +1980,9 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   }
 
   function popupNotificationDocument() {
-    // Chrome can enforce a substantially taller minimum outer window than
-    // the requested 56px. Use the ENTIRE available content viewport so the
-    // notification never becomes a tiny strip with blank space below it.
+    // Chrome may enforce a taller minimum than the requested 56px.
+    // Anchor the card to all four VIEWPORT edges and the timer to the
+    // VIEWPORT bottom, independent of the popup's requested dimensions.
     // All untrusted message fields are set with textContent, never HTML.
     return '<!doctype html><html><head><meta charset="utf-8">' +
       '<title>Pletzel Chat</title>' +
@@ -1991,7 +1991,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       '*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;' +
       'overflow:hidden;background:#fff;color:#202124;' +
       'font:12px Arial,Helvetica,sans-serif}' +
-      '.card{height:100vh;width:100%;min-height:56px;position:relative;' +
+      '.card{position:fixed;inset:0;width:auto;height:auto;min-height:0;' +
       'display:flex;align-items:center;background:#fff;' +
       'border:1px solid #dadce0;border-left:3px solid #1a73e8}' +
       '.content{width:100%;display:flex;align-items:center;gap:10px;' +
@@ -2008,7 +2008,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       'border-radius:4px;background:transparent;color:#5f6368;' +
       'cursor:pointer;align-self:flex-start}' +
       'button:hover{background:#f1f3f4;color:#202124}' +
-      '.track{position:absolute;bottom:0;left:0;right:0;height:3px;' +
+      '.track{position:fixed;bottom:0;left:0;right:0;height:3px;z-index:2;' +
       'background:#e8f0fe}.bar{height:100%;width:100%;background:#1a73e8;' +
       'animation:expire 6.5s linear forwards}' +
       '</style></head><body><div class="card"><div class="content">' +
