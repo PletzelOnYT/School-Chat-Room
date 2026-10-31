@@ -637,6 +637,7 @@ def analyze(events):
     All legacy privileged role records are ignored.
     """
     verified = set()
+    verified_names = set()
     # Old auto-grants had no separate marker from /vf. They cannot establish
     # a badge in v5.23; people must explicitly claim with the new format.
     legacy_claimed = set()
@@ -664,6 +665,13 @@ def analyze(events):
             continue
         seen_ids.add(event_id)
         kind = str(e.get('kind','message'))
+        if kind == 'title' and is_title_event(e):
+            name_key = e['user'].casefold()
+            if e['title'] == TITLE_VERIFIED:
+                verified_names.add(name_key)
+            else:
+                verified_names.discard(name_key)
+            continue
         signed = valid_signature(e)
         if signed:
             seen_any_signed_event = True
@@ -876,8 +884,11 @@ def analyze(events):
             if target == msg['id'] and user == identity_public and enabled
         ]
         sender = msg['sender_key']
-        msg['verified'] = bool(sender and sender in verified)
-    return dict(messages=messages, by_number=by_number,
+        msg['verified'] = (msg['user'].casefold() in verified_names or
+                           bool(sender and sender in verified))
+    if username.casefold() in verified_names:
+        verified.add(identity_public)
+    return dict(verified_names=verified_names, messages=messages, by_number=by_number,
                 identities=identities, seen_aliases=seen_aliases, display_names=display_names,
                 name_owners=name_owners, verified=verified)
 
@@ -1033,14 +1044,12 @@ def resolve_verified_target(query, state):
 
 
 def claim_self_verified():
-    """Set one blue checkmark for the calling signed identity, never anyone else."""
+    """Explicitly save a name-based blue checkmark using a title event."""
     current = latest_analysis()
-    if identity_public in current['verified']:
+    if username.casefold() in current['verified_names']:
         return True
-    event = event_now('role', role='verified', target_key=identity_public,
-                      active=True, self_verified=True, verification_version=2)
-    return bool(write_event(event) and
-                identity_public in latest_analysis()['verified'])
+    return bool(write_event(title_event(username, True)) and
+                username.casefold() in latest_analysis()['verified_names'])
 
 
 # Mounting Drive is necessary to load chat history, but it is NOT evidence
@@ -1164,7 +1173,7 @@ def snapshot():
                 })
         error = ''
     except ChatFileError as exc:
-        a = {'messages': [], 'verified': set()}
+        a = {'messages': [], 'verified': set(), 'verified_names': set()}
         error = str(exc)
     with state_lock:
         # Place private system messages at the conversational position where
@@ -1188,7 +1197,7 @@ def snapshot():
                      'threads': threads,
                      'popup': next_popup,
                      'running': running,
-                     'my_verified': identity_public in a['verified']})
+                     'my_verified': username.casefold() in a['verified_names']})
 
 
 
@@ -1279,31 +1288,23 @@ def submit_message(raw):
                     note('Could not save the checkmark to shared chat.json. Retry.')
                 return snapshot()
             if command == '/uvf':
-                # Intentionally unlisted in all help/command menus. Any
-                # authenticated chat identity can revoke anyone's checkmark.
-                # The target can later use /vf to claim it again.
+                # Unlisted. Four-field messages cannot authenticate a person:
+                # the badge belongs to the displayed name, not a key.
                 current = latest_analysis()
-                target_key = resolve_verified_target(arg, current)
-                if target_key is None:
-                    note('User not found or ambiguous. Use the exact @name '
-                         'or a 12-character identity ID from /users.')
+                target_name = arg.lstrip('@').strip()
+                if target_name.casefold() not in current['verified_names']:
+                    note('@' + (target_name or '?') + ' is not Verified.')
                     return snapshot()
-                target_name = current['display_names'].get(target_key, arg)
-                if target_key not in current['verified']:
-                    note(target_name + ' does not currently have a checkmark.')
-                    return snapshot()
-                evt = event_now('role', role='verified',
-                                target_key=target_key, active=False,
-                                unverify_anyone=True, verification_version=2)
-                if write_event(evt):
-                    result = latest_analysis()
-                    if target_key not in result['verified']:
+                names = {m['user'].casefold(): m['user']
+                         for m in current['messages']}
+                target_name = names.get(target_name.casefold(), target_name)
+                if write_event(title_event(target_name, False)):
+                    if target_name.casefold() not in latest_analysis()['verified_names']:
                         note('Blue checkmark removed from ' + target_name + '.')
                     else:
-                        note('Revocation saved, but Drive has not yet '
-                             'confirmed the new badge state.')
+                        note('Drive did not confirm the title change yet.')
                 else:
-                    note('Could not save the checkmark revocation. Retry.')
+                    note('Could not save title revocation. Retry.')
                 return snapshot()
             if command in ('/help', '/hellp'):
                 popup('MESSAGING APP COMMANDS', HELP_TEXT)
@@ -1330,15 +1331,15 @@ def submit_message(raw):
                      'Keep your Google Drive .schoolchat/identity.json private and backed up.')
                 return snapshot()
             if command in ('/users', '/verified'):
-                people = sorted(a['display_names'].items(), key=lambda pair: pair[1].casefold())
+                names = {m['user'].casefold(): m['user'] for m in a['messages']}
+                for name_key in a['verified_names']:
+                    names.setdefault(name_key, name_key)
+                people = sorted(names.values(), key=str.casefold)
                 if command == '/verified':
-                    people = [(pub, name) for pub, name in people if pub in a['verified']]
-                lines = [
-                    ('☑ ' if pub in a['verified'] else '') +
-                    f'@{name} | ID {short_id(pub)}'
-                    for pub, name in people[-50:]
-                ]
-                note(('VERIFIED IDENTITIES' if command == '/verified' else 'SIGNED IDENTITIES') +
+                    people = [n for n in people if n.casefold() in a['verified_names']]
+                lines = [('☑ ' if name.casefold() in a['verified_names'] else '') +
+                         '@' + name for name in people[-50:]]
+                note(('VERIFIED USERS' if command == '/verified' else 'CHAT USERS') +
                      '\n' + ('\n'.join(lines) if lines else '(none)'))
                 return snapshot()
             if command == '/stats':
