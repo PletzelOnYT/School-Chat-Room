@@ -17,6 +17,7 @@ TREE = ast.parse(SOURCE)
 NAMES = {"read_messages", "write_event", "write_plain_message",
          "append_event_in_place", "is_plain_message",
          "is_title_event", "is_simple_record", "title_event",
+         "is_rename_event", "rename_event",
          "search_messages", "build_threads"}
 FUNCTIONS = [node for node in TREE.body
              if isinstance(node, ast.FunctionDef) and node.name in NAMES]
@@ -28,6 +29,7 @@ def storage_env(path):
         "shlex": shlex, "datetime": datetime,
         "PLAIN_MESSAGE_FIELDS": frozenset(("kind","time","user","text")),
         "TITLE_FIELDS": frozenset(("kind","time","user","title")),
+        "RENAME_FIELDS": frozenset(("kind","time","user","name")),
         "TITLE_VERIFIED": "Verified", "TITLE_NONE": "None",
         "CHAT_FILE_PATH": str(path),
         "file_lock": threading.RLock(),
