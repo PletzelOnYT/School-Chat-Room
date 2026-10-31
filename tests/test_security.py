@@ -33,6 +33,10 @@ env = {
     "b64decode": lambda s: base64.b64decode(s, validate=True),
     "valid_signature": lambda e: e.get("sig") == "test-valid",
     "is_plain_message": lambda e: False,
+    "is_title_event": lambda e: False,
+    "TITLE_VERIFIED": "Verified",
+    "TITLE_NONE": "None",
+    "username": "Alex",
     "is_valid_emoji": lambda _: True,
 }
 exec(compile(ast.Module(body=functions, type_ignores=[]), "<chat>", "exec"), env)
