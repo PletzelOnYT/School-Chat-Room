@@ -8,6 +8,7 @@ import shlex
 import tempfile
 import threading
 import time
+import uuid
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -19,7 +20,8 @@ NAMES = {"read_messages", "write_event", "write_plain_message",
          "is_title_event", "is_simple_record", "title_event",
          "is_rename_event", "rename_event",
          "is_simple_reaction", "simple_reaction_event",
-         "search_messages", "build_threads"}
+         "search_messages", "build_threads", "parse_chat_log",
+         "load_outbox", "save_outbox", "remember_outgoing", "reconcile_outbox"}
 FUNCTIONS = [node for node in TREE.body
              if isinstance(node, ast.FunctionDef) and node.name in NAMES]
 
@@ -27,6 +29,8 @@ FUNCTIONS = [node for node in TREE.body
 def storage_env(path):
     env = {
         "os": os, "re": re, "json": json, "time": time, "hashlib": hashlib,
+        "uuid": uuid, "APPEND_RECORD_SEPARATOR": "\x1e",
+        "last_outbox_check": 0.0,
         "shlex": shlex, "datetime": datetime,
         "PLAIN_MESSAGE_FIELDS": frozenset(("kind","time","user","text")),
         "TITLE_FIELDS": frozenset(("kind","time","user","title")),
@@ -35,6 +39,8 @@ def storage_env(path):
         "is_valid_emoji": lambda emoji: isinstance(emoji,str) and any(ord(x)>=0x2600 for x in emoji),
         "TITLE_VERIFIED": "Verified", "TITLE_NONE": "None",
         "CHAT_FILE_PATH": str(path),
+        "PRIVATE_FOLDER": str(path.parent / ".local_receipts"),
+        "PRIVATE_OUTBOX_PATH": str(path.parent / ".local_receipts" / "outbox.json"),
         "file_lock": threading.RLock(),
         "ChatFileError": type("ChatFileError",(Exception,),{}),
         "short_id": lambda s: str(s)[:12],
@@ -73,12 +79,13 @@ class FourFieldDriveTests(unittest.TestCase):
     def test_tail_append_is_beautified_and_no_ids(self):
         new=entry("fdg")
         self.assertTrue(self.env["write_event"](new))
-        records=json.loads(self.path.read_bytes())
+        records=self.env["read_messages"]()
         self.assertEqual(records,self.initial+[new])
         raw=self.path.read_text()
-        self.assertIn('\n  {\n    "kind": "message",\n    "time": "04:15:50"',raw)
-        self.assertIn('"text": "fdg"\n  }\n]',raw)
-        self.assertEqual(len(list(self.path.parent.iterdir())),1)
+        self.assertTrue(raw.startswith(json.dumps(self.initial,indent=2,ensure_ascii=False)+"\n"))
+        self.assertIn('\x1e{\n  "kind": "message",\n  "time": "04:15:50"',raw)
+        self.assertIn('"text": "fdg"\n}',raw)
+        self.assertEqual(len(list(self.path.parent.glob("chat.json"))),1)
 
     def test_rejects_metadata_without_rewriting_file(self):
         before=self.path.read_bytes()
