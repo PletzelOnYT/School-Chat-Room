@@ -121,27 +121,30 @@ async function run(){
   assert(app.win.document.html.includes('height:100dvh'));
   assert(app.win.document.html.includes('@media(max-width:540px)'));
   assert(app.win.document.html.includes('id="app-input"'));
+  assert(app.win.document.html.includes('class="app-bar"'));
+  assert(app.win.document.html.includes('class="app-footer"'));
+  assert(app.win.document.html.includes('id="app-transcript"'));
   assert(app.win.document.html.includes('font-family:monospace;font-size:13px'));
-  assert(app.win.document.html.includes('height:40px'));
-  assert(app.win.document.html.includes('width:min(INPUTPXpx,100%)'));
+  assert(app.win.document.html.includes('margin: auto auto 0;'),
+    'short conversations should sit close to the composer');
+  assert(app.win.document.html.includes('overflow-y:auto'));
+  assert(app.win.document.html.includes('max-width:900px'));
   assert(app.win.document.html.includes('class="input-shell"'));
-  assert(app.win.document.html.includes('border-radius:11px'));
+  assert(app.win.document.html.includes('border-radius:12px'));
   assert(app.win.document.html.includes('.input-shell:focus-within'));
-  assert(app.win.document.html.includes('placeholder="Type a message…"'));
-  assert(app.win.document.html.includes('Enter ↵'));
+  assert(app.win.document.html.includes('placeholder="Message the chat…"'));
+  assert(app.win.document.html.includes('id="app-send"'));
+  assert(app.win.document.html.includes('Shift+Enter for a new line'));
   assert(app.win.document.html.includes('@media(prefers-reduced-motion:reduce)'));
-  assert(app.win.document.html.includes('max-width:WRAPCHch'));
   assert(app.win.document.html.includes('white-space:pre-wrap;overflow-wrap:anywhere'));
   assert(!app.win.document.html.includes('class="message"'),
-    'no redesigned chat cards');
-  assert(!app.win.document.html.includes('id="app-send"'),
-    'the original terminal has only an input, not a Send button');
+    'keep original terminal-style chat lines, not redesigned message cards');
   assert(!app.win.document.html.includes('Hello <b>'),
     'messages must not be interpolated into app HTML');
-  assert(app.elems['app-messages'].textContent.includes('Hello <b>not markup</b>'));
-  assert(app.elems['app-messages'].textContent.includes('--- Connected as: '));
-  assert(app.elems['app-messages'].textContent.includes('--- Type your message and press Enter.'));
-  assert(app.elems['app-messages'].textContent.includes('Alex'));
+  assert(app.elems['app-transcript'].textContent.includes('Hello <b>not markup</b>'));
+  assert(app.elems['app-status'].textContent.includes('Connected as Alex'));
+  assert(app.elems['app-transcript'].nodes.some(x => x.className==='chat-row'),
+    'messages should be integrated in a readable scrollable transcript');
 
   // Re-click focuses the existing window without creating another session.
   control('[Open in App]').events.click();
@@ -163,16 +166,18 @@ async function run(){
   state.messages.push(makeMsg(2,'Sasha','New message from Colab'));
   polling();
   await sleep(30);
-  assert(app.elems['app-messages'].textContent.includes('New message from Colab'));
+  assert(app.elems['app-transcript'].textContent.includes('New message from Colab'));
   assert.strictEqual(appInput.value,'draft in progress');
-  const message=app.elems['app-messages'].nodes.find(x=>x.tag==='span' &&
+  const row=app.elems['app-transcript'].nodes.find(x=>
+    x.className==='chat-row' && x.textContent.includes('Hello <b>not markup</b>'));
+  const message=row?.nodes.find(x=>x.tag==='span' &&
     x.textContent.includes('Hello <b>not markup</b>'));
   assert(message && message.events.click,
     'messages in the popup should be clickable exactly as in Colab');
   message.events.click();
-  const reply=findControl(app.elems['app-messages'],'[Reply]');
+  const reply=findControl(app.elems['app-transcript'],'[Reply]');
   assert(reply&&reply.events.click,'original inline [Reply] must work');
-  assert(findControl(app.elems['app-messages'],'[React]'),
+  assert(findControl(app.elems['app-transcript'],'[React]'),
     'original inline [React] must work');
   reply.events.click();
   assert(appInput.value.startsWith('/reply 1 '));
@@ -182,7 +187,7 @@ async function run(){
   assert(app.win.closed);
   control('[Open in App]').events.click();
   assert.strictEqual(opened.length,2);
-  assert(opened[1].elems['app-messages'].textContent.includes('New message from Colab'));
+  assert(opened[1].elems['app-transcript'].textContent.includes('New message from Colab'));
   assert(control('Desktop popups OFF'));
 
   // Browsers that block popups retain the classic chat and show a retry cue.
@@ -191,7 +196,7 @@ async function run(){
   control('[Open in App]').events.click();
   assert(control('[Open in App]').title.includes('Browser blocked'));
   assert(control('Desktop popups OFF'));
-  console.log('Original terminal preserved in app popup, with live mirror, send, replies, and resize: PASS');
+  console.log('Refined app layout: classic messages, live sync, send, reply, and popup controls: PASS');
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});
 """
@@ -199,12 +204,12 @@ run().catch(error=>{console.error(error);process.exitCode=1;});
 
 class AppWindowTests(unittest.TestCase):
     def test_layout_and_safe_app_bridge_are_present(self):
-        self.assertIn("CLIENT_VERSION = '5.50'", SOURCE.read_text(encoding="utf-8"))
+        self.assertIn("CLIENT_VERSION = '5.51'", SOURCE.read_text(encoding="utf-8"))
         self.assertIn("textControl('[Open in App]',openAppWindow", SCRIPT)
         self.assertIn("function appWindowFeatures()", SCRIPT)
         self.assertIn("function renderApp(state)", SCRIPT)
         self.assertIn("function appTimeline(state)", SCRIPT)
-        self.assertIn("view.replaceChildren()", SCRIPT)
+        self.assertIn("transcript.replaceChildren()", SCRIPT)
         self.assertNotIn("innerHTML = msg.text", SCRIPT)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js not installed")
