@@ -105,7 +105,7 @@ async function run(){
   assert(p.features.includes('left=938'),p.features);
   assert(p.features.includes('top=732'),p.features);
   assert(p.doc===undefined);
-  assert(p.win.document.html.includes('Pletzel Chat'));
+  assert(p.win.document.html.includes('Chat Room'));
   assert(p.win.document.html.includes('@keyframes expire'));
   assert(p.win.document.html.includes('white-space:nowrap;overflow:hidden;text-overflow:ellipsis'));
   assert(p.win.document.html.includes('height:3px'));
