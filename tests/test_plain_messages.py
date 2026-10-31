@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+import uuid
 from pathlib import Path
 
 from test_security import env as legacy_env
@@ -19,13 +20,16 @@ NAMES = {"is_plain_message","plain_message","display_only_message_id",
          "is_title_event","is_simple_record","title_event",
          "is_rename_event","rename_event",
          "is_simple_reaction","simple_reaction_event",
-         "analyze","write_event"}
+         "analyze","write_event","parse_chat_log","load_outbox",
+         "save_outbox","remember_outgoing","reconcile_outbox"}
 NODES = [n for n in TREE.body if isinstance(n,ast.FunctionDef) and n.name in NAMES]
 
 def setup(extra=None):
     env=dict(legacy_env)
     env.update({
         "os": os, "re": re, "hashlib": hashlib, "json": json, "time": time,
+        "uuid": uuid, "APPEND_RECORD_SEPARATOR": "\x1e",
+        "last_outbox_check": 0.0,
         "REPLY_TEXT_RE": re.compile(r'^↳ \[reply:#(\d+)\] (.+)$', re.DOTALL),
         "PLAIN_MESSAGE_FIELDS": frozenset(("kind","time","user","text")),
         "TITLE_FIELDS": frozenset(("kind","time","user","title")),
@@ -63,14 +67,17 @@ class PlainMessagesTests(unittest.TestCase):
             original=[{"kind":"message","time":"04:12:00",
                        "user":"ColabUser","text":"existing history"}]
             path.write_text(json.dumps(original, indent=2)+"\n")
-            env=setup({"CHAT_FILE_PATH":str(path)})
+            env=setup({"CHAT_FILE_PATH":str(path),
+                       "PRIVATE_FOLDER":str(Path(folder)/"private"),
+                       "PRIVATE_OUTBOX_PATH":str(Path(folder)/"private"/"outbox.json")})
             item=env["plain_message"]("fdg")
             self.assertTrue(env["write_event"](item))
-            entries=json.loads(path.read_text())
+            entries=env["read_messages"]()
             self.assertEqual(entries[0],original[0])
             self.assertEqual(entries[-1],item)
             self.assertEqual(set(entries[-1]),{"kind","time","user","text"})
-            self.assertEqual(len(list(Path(folder).iterdir())),1)
+            self.assertEqual(len(list(Path(folder).glob("*.json"))),1)
+            self.assertTrue(path.read_text().startswith(json.dumps(original, indent=2)+"\\n"))
 
     def test_simple_message_appears_after_signed_history(self):
         env=setup()
