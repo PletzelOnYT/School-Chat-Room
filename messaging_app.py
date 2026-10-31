@@ -172,8 +172,11 @@ def ensure_shared_chat_shortcut(drive_root, session=None, sleep=None,
                 sleep(1)
         fail('Drive created/found the shortcut but it is not yet visible '
              'in the mounted filesystem; remount Drive and rerun')
-    except (OSError, ValueError, TypeError, KeyError) as exc:
-        fail('the Drive API or its response was unavailable')
+    except FileNotFoundError:
+        raise
+    except Exception as exc:
+        fail('the Drive API could not complete the request (' +
+             type(exc).__name__ + ')')
 
 
 CHAT_FILE_PATH = ensure_shared_chat_shortcut(DRIVE_ROOT)
