@@ -1,4 +1,4 @@
-# @title Messaging App v5.45 — Google Drive Messenger
+# @title Messaging App v5.46 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.45'
+CLIENT_VERSION = '5.46'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1980,33 +1980,39 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   }
 
   function popupNotificationDocument() {
-    // A compact, desktop-window banner. Chrome still controls window chrome
-    // and minimum dimensions; the page itself is intentionally one-line slim.
-    // All user data is assigned using textContent, never interpreted as HTML.
+    // Chrome can enforce a substantially taller minimum outer window than
+    // the requested 56px. Use the ENTIRE available content viewport so the
+    // notification never becomes a tiny strip with blank space below it.
+    // All untrusted message fields are set with textContent, never HTML.
     return '<!doctype html><html><head><meta charset="utf-8">' +
       '<title>Pletzel Chat</title>' +
       '<meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<style>@keyframes expire{from{width:100%}to{width:0%}}' +
       '*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;' +
-      'overflow:hidden;background:#fff;color:#202124;font:12px Arial,Helvetica,sans-serif}' +
-      '.card{position:relative;width:100%;height:56px;max-height:100%;border:1px solid #dadce0}' +
-      '.content{position:absolute;top:0;left:0;width:100%;height:53px;' +
-      'display:flex;align-items:center;gap:7px;padding:3px 8px}' +
-      '.avatar{width:22px;height:22px;flex:none;border-radius:50%;' +
+      'overflow:hidden;background:#fff;color:#202124;' +
+      'font:12px Arial,Helvetica,sans-serif}' +
+      '.card{height:100vh;width:100%;min-height:56px;position:relative;' +
+      'display:flex;align-items:center;background:#fff;' +
+      'border:1px solid #dadce0;border-left:3px solid #1a73e8}' +
+      '.content{width:100%;display:flex;align-items:center;gap:10px;' +
+      'padding:7px 10px 10px 9px}' +
+      '.avatar{width:30px;height:30px;flex:none;border-radius:50%;' +
       'background:#e8f0fe;color:#1a73e8;display:flex;align-items:center;' +
-      'justify-content:center;font-size:12px;font-weight:700}' +
+      'justify-content:center;font-size:16px;font-weight:bold}' +
       '.message{min-width:0;flex:1;overflow:hidden}' +
-      '.sender{font-weight:600;font-size:12px;line-height:15px;' +
+      '.sender{font-weight:600;font-size:12px;line-height:17px;' +
       'white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-      '.preview{margin-top:1px;font-size:11px;line-height:14px;color:#5f6368;' +
+      '.preview{margin-top:2px;font-size:12px;line-height:16px;color:#5f6368;' +
       'white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-      'button{font-size:16px;line-height:16px;padding:0 2px;border:0;' +
-      'background:transparent;color:#5f6368;cursor:pointer;align-self:flex-start}' +
-      '.track{position:absolute;bottom:0;left:0;right:0;height:2px;' +
+      'button{font-size:18px;line-height:18px;padding:2px 4px;border:0;' +
+      'border-radius:4px;background:transparent;color:#5f6368;' +
+      'cursor:pointer;align-self:flex-start}' +
+      'button:hover{background:#f1f3f4;color:#202124}' +
+      '.track{position:absolute;bottom:0;left:0;right:0;height:3px;' +
       'background:#e8f0fe}.bar{height:100%;width:100%;background:#1a73e8;' +
       'animation:expire 6.5s linear forwards}' +
       '</style></head><body><div class="card"><div class="content">' +
-      '<div class="avatar" aria-hidden="true">●</div><div class="message">' +
+      '<div class="avatar" aria-hidden="true">P</div><div class="message">' +
       '<div class="sender" id="sender"></div>' +
       '<div class="preview" id="preview"></div></div>' +
       '<button type="button" id="close" aria-label="Close notification">×</button>' +
