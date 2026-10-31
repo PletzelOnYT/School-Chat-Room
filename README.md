@@ -1,4 +1,4 @@
-# Messaging App v5.27
+# Messaging App v5.28
 
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
@@ -22,7 +22,7 @@ New messages append in the same multi-line format, using an in-place modificatio
 
 ### New title events
 
-A user can claim the blue ☑ badge with the unlisted `/vf` command. This appends a *separate* simple record to the same JSON file:
+A blue ☑ badge is represented by a separate simple title record in the same JSON file:
 
 ```json
 {
@@ -33,11 +33,11 @@ A user can claim the blue ☑ badge with the unlisted `/vf` command. This append
 }
 ```
 
-The unlisted `/uvf Pletzel` appends a similar record with `"title": "None"`. Normal messages remain untouched and retain their original four keys. The most recent title record for a display name wins.
+A title revocation appends a similar record with `"title": "None"`. Normal messages remain untouched and retain their original four keys. The most recent title record for a display name wins.
 
 ### Renaming and reactions
 
-The hidden `/rename Pletzel` command now saves a compact rename event:
+Nickname changes save a compact rename event:
 
 ```json
 {
@@ -48,7 +48,7 @@ The hidden `/rename Pletzel` command now saves a compact rename event:
 }
 ```
 
-The original `user` key is the person's stable local starting nickname. Renames persist across Colab restarts, and an existing blue ☑ Verified title follows the new nickname. Use `/vf` before renaming.
+The original `user` key is the person's stable local starting nickname. Renames persist across Colab restarts, and an existing blue ☑ Verified title follows the new nickname.
 
 Emoji reactions also work with small metadata records:
 
@@ -76,7 +76,7 @@ Emoji reactions also work with small metadata records:
 
 - Green usernames, cyan timestamps, chronological threads, text search, anti-gibberish checks, and queued sends remain in the terminal-style UI.
 - Replies store a compact parent marker inside their `text` field so each entry still has exactly four keys.
-- **Verified checkmarks are self-claimed and tied to a display name, not a signed person.** `/vf` enables the blue badge, `/uvf <name>` revokes it, and `/verified` lists current badges. There is no Google identity attestation.
+- **Verified checkmarks are self-claimed and tied to a display name, not a signed person.** A separate title record enables or revokes the blue badge. There is no Google identity attestation.
 - `/rename <name>` persists through a simple record without altering old chat entries; reactions use name-based records and numeric message references. Both are functional but not cryptographically authenticated.
 - Four-field messages cannot prove who authored them. Editors of the shared Drive file can impersonate names or change content.
 - JSON tail append is **not an atomic multi-user transaction** on Google Drive. Simultaneous writers may still conflict.
