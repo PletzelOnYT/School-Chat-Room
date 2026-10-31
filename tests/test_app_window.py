@@ -123,6 +123,15 @@ async function run(){
  assert(app.features.includes('width=1080'));
  assert(html.includes('class="rail"')&&html.includes('class="sidebar"'));
  assert(html.includes('class="topbar"'));
+ assert(html.includes('<title>Chat Room</title>'));
+ assert(html.includes('<div class="server-title"><span>Chat Room</span></div>'));
+ assert(html.includes('class="rail-badge" title="Chat Room">C'));
+ assert(!html.includes('Pletzel Chat'),'do not use old app name');
+ assert(!html.includes('server-sub'),'remove decorative dropdown chevron');
+ assert(!html.includes('One shared chat room.'),'remove redundant sidebar explanation');
+ assert(!html.includes('Messages sync through your Colab session.'));
+ assert(!html.includes('Pletzel Chat · Shared room'));
+ assert(!html.includes('channel-description'),'remove redundant topbar subtitle');
  assert(html.includes('class="composer-wrap"'));
  assert(html.includes('class="message"')===false,'messages must be dynamic');
  assert(html.includes('id="app-search"'));
@@ -290,7 +299,7 @@ run().catch(e=>{console.error(e);process.exitCode=1});
 class AppWindowTests(unittest.TestCase):
     def test_discord_style_only_affects_popup(self):
         source=SOURCE.read_text(encoding="utf-8")
-        self.assertIn("CLIENT_VERSION = '5.55'",source)
+        self.assertIn("CLIENT_VERSION = '5.56'",source)
         self.assertIn('font-family:monospace;font-size:13px',HTML)
         self.assertIn('height:19px',HTML)
         self.assertIn("textControl('[Open in App]',openAppWindow",SCRIPT)
