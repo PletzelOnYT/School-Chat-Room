@@ -935,6 +935,18 @@ def launch_panel(guardian=None):
             if change["new"]:
                 try:
                     current["live"] = LiveChatOverlay(module)
+                    # The full 59-case adversarial suite now tests a private
+                    # copy of the ACTUAL live-room snapshot when attached.
+                    # Never use the original shared path as its write target.
+                    old_lab = get_lab()
+                    replacement_lab = StressLab(
+                        module, seed=current["live"]._current)
+                    old_lab.close()
+                    current["lab"] = replacement_lab
+                    nonlocal_initial[0] = preview_snapshot(
+                        module, replacement_lab.seed)
+                    update_inspector()
+                    refresh_preview("")
                     live_apply.disabled = False
                     live_refresh.disabled = False
                     render_live()
@@ -951,8 +963,16 @@ def launch_panel(guardian=None):
                     overlay.close()
                 live_apply.disabled = True
                 live_refresh.disabled = True
+                old_lab = get_lab()
+                replacement_lab = StressLab(module)
+                old_lab.close()
+                current["lab"] = replacement_lab
+                nonlocal_initial[0] = preview_snapshot(
+                    module, replacement_lab.seed)
+                update_inspector()
+                refresh_preview("")
                 render_live()
-                print("Detached live viewer; temporary snapshot deleted.")
+                print("Detached live viewer; test suite reset to synthetic data.")
 
     def on_visual_hack(_):
         with output:
