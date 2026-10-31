@@ -16,6 +16,7 @@ from test_security import env as legacy_env
 SOURCE = Path(__file__).resolve().parents[1].joinpath("messaging_app.py").read_text()
 TREE = ast.parse(SOURCE)
 NAMES = {"is_plain_message","plain_message","display_only_message_id",
+         "message_hash","is_clock_event","clock_event",
          "read_messages","append_event_in_place","write_plain_message",
          "is_title_event","is_simple_record","title_event",
          "is_rename_event","rename_event",
@@ -35,6 +36,7 @@ def setup(extra=None):
         "TITLE_FIELDS": frozenset(("kind","time","user","title")),
         "RENAME_FIELDS": frozenset(("kind","time","user","name")),
         "REACTION_FIELDS": frozenset(("kind","time","user","target","emoji","active")),
+        "CLOCK_FIELDS": frozenset(("kind","time","user","epoch","message_hash")),
         "GOOGLE_ACCOUNT_USERNAME": "Pletzel",
         "TITLE_VERIFIED": "Verified", "TITLE_NONE": "None",
         "username": "Pletzel",
@@ -52,6 +54,29 @@ def setup(extra=None):
 
 
 class PlainMessagesTests(unittest.TestCase):
+
+    def test_absolute_clock_sidecar_preserves_four_field_message(self):
+        env=setup()
+        stamp=1793405400
+        msg=env["plain_message"]("hello at a known time",timestamp=stamp)
+        clock=env["clock_event"](msg,stamp)
+        self.assertEqual(set(msg),{"kind","time","user","text"})
+        self.assertEqual(set(clock),{"kind","time","user","epoch","message_hash"})
+        self.assertTrue(env["is_clock_event"](clock))
+        state=env["analyze"]([msg,clock])
+        self.assertEqual(len(state["messages"]),1)
+        self.assertEqual(state["messages"][0]["issued_at"],stamp)
+        self.assertEqual(state["messages"][0]["time"],msg["time"])
+
+    def test_invalid_clock_sidecar_cannot_override_message(self):
+        env=setup()
+        stamp=1793405400
+        msg=env["plain_message"]("protect the original text",timestamp=stamp)
+        clock=env["clock_event"](msg,stamp)
+        wrong=dict(clock,epoch=stamp+3600)
+        self.assertFalse(env["is_clock_event"](wrong))
+        self.assertIsNone(env["analyze"]([msg,wrong])["messages"][0]["issued_at"])
+
     def test_record_exactly_four_fields_in_requested_order(self):
         env=setup()
         result=env["plain_message"]("fdg")
