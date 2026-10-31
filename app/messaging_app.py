@@ -1243,6 +1243,7 @@ HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /me <action>               Post a chat action
 /stats                     Chat statistics
 /ping                      Check shared file
+/testtoast                 Preview a local bottom-right notification
 /version                   Show the running chat version and clock mode
 /exit                      Close the chat
 
@@ -2328,6 +2329,11 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     if (stopped) return;
     const value = input.value;
     if (!value.trim()) return;
+    if (value.trim().toLowerCase() === '/testtoast') {
+      input.value = '';
+      showMessageToast('Preview', 'This is a sample message preview. It closes automatically.', 1);
+      return; // Purely local: never sent to Colab or shared chat.json.
+    }
     if (isPopupCommand(value)) openCommandWindow();
     input.value = '';
     // Do not disable the text input just because another message is pending.
