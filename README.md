@@ -3,6 +3,23 @@
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
 
+## Guardian v2.6: Correct handling of Colab user credentials
+
+In some Colab runtimes, Google's **ephemeral user authorization**
+(`USE_AUTH_EPHEM=1`) is represented by the same Python credential class as
+Compute Engine credentials. The prior Guardian rejected that class after
+successful user consent. v2.6 accepts this specific Colab configuration
+**only when the credential can refresh successfully**, and continues to
+reject ordinary unauthenticated VM and service-account credentials.
+
+In standard Colab user authorization, an authorized credential file can be
+stored as `/content/.adc/adc.json`. If the default lookup still returns a
+VM identity, Guardian checks that Colab-managed user file and validates its
+OAuth credentials instead. Credentials and tokens are never printed or
+placed in the chat log, GitHub, or shared Drive. A school policy may still
+block authorization, in which case add a shortcut to the original file
+manually using the same Google account; no policy is bypassed.
+
 ## Guardian v2.5: Fix recurring Colab VM credential RefreshError
 
 Some Colab sessions keep exposing Compute Engine ADC even when Drive is
