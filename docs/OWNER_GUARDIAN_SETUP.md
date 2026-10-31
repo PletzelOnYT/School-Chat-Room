@@ -1,4 +1,4 @@
-# Messaging App — Owner Guardian v3.0
+# Messaging App — Owner Guardian v3.1
 
 The owner runs a **separate Python program** (`guardian/owner_guardian.py`) in their own Google Colab notebook. The chat itself, including the original terminal UI and `chat.json`, remains unchanged. No Vercel, Redis, or additional shared folder is required.
 
@@ -27,6 +27,39 @@ because the app switched to append-only writes.
 - If messages disappear, are modified, or are reordered, repairs the existing shared file using the approved history.
 - If the file is empty, corrupted, or truncated, attempts to restore the approved history **in place**.
 - If the original Drive object is in Trash, it optionally attempts to **untrash the original file ID** using a Google token already available in the session.
+
+## Guardian v3.1: Advanced anti-tamper and flood detection
+
+The guardian now performs additional **owner-side checks** without changing the
+shared chat's existing message format:
+
+- **Strict append-only ledger order:** Newly observed events cannot be inserted
+  before approved history, even if they carry otherwise valid signatures.
+- **Ambiguous JSON rejection:** Rejects duplicate object keys and non-finite
+  numbers (`NaN`, `Infinity`) instead of interpreting them inconsistently.
+  A malformed append-only journal is preserved for manual investigation, not
+  automatically overwritten.
+- **Additional message spam checks:** Cross-nickname repeated-message bursts
+  and room-wide ten-second spikes are flagged. Signed-message limits use the
+  time the guardian *observes* each event rather than an attacker-supplied
+  timestamp.
+- **Metadata flood protection:** Reactions, title changes, renames, clock
+  sidecars, and legacy identity metadata have per-sender and room-wide rate
+  limits; approved observation counts survive monitoring restarts.
+- **Unicode/time validation:** New events with hidden formatting characters or
+  impossible `HH:MM:SS` display times are rejected.
+
+Start the updated guardian with `--audit-only` if you want to review the
+newer rules before allowing auto-repair. The guardian logs rejected events
+privately and preserves the source whenever a concurrent file edit makes
+repair unsafe.
+
+**Important limits:** A Google Drive Editor can still submit unsigned messages
+under arbitrary names, and locally downloaded Colab/Python code cannot be
+protected from copying or modification by a watchdog. This is detection and
+best-effort recovery, not proof of identity, guaranteed anti-piracy, or a
+server-enforced ban system. For actual write prevention, restrict Drive Editor
+access and use a server-controlled messaging backend with authentication.
 
 ## Guardian v3.0: Verified backups, conflict-safe recovery and health status
 
