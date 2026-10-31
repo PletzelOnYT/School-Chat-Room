@@ -58,6 +58,43 @@ class TitleBadgeTests(unittest.TestCase):
                           if e.get("kind")=="title"],
                          ["Verified","None","Verified"])
 
+    def test_hidden_named_claim_targets_another_user(self):
+        state = self.env["submit_message"]("/vf Emma")
+        self.assertIn("emma", state["verified_names"])
+        self.assertNotIn("pletzel", state["verified_names"])
+        self.assertFalse(state["messages"][0]["verified"])
+        self.assertTrue(state["messages"][1]["verified"])
+        event = self.env["read_messages"]()[-1]
+        self.assertEqual(set(event), {"kind", "time", "user", "title"})
+        self.assertEqual(event["user"], "Emma")
+        self.assertEqual(event["title"], "Verified")
+        # Repeated grant is idempotent rather than writing extra records.
+        self.env["submit_message"]("/vf @EMMA")
+        self.assertEqual(len(self.env["read_messages"]()), 3)
+        # Existing secret revocation still works on the named user.
+        state = self.env["submit_message"]("/uvf Emma")
+        self.assertNotIn("emma", state["verified_names"])
+        state = self.env["submit_message"]("/vf @emma")
+        self.assertIn("emma", state["verified_names"])
+        self.assertEqual([e["title"] for e in self.env["read_messages"]()
+                          if e.get("kind") == "title"],
+                         ["Verified", "None", "Verified"])
+
+    def test_named_claim_rejects_unknown_user(self):
+        original = list(self.env["read_messages"]())
+        state = self.env["submit_message"]("/vf Missing User")
+        self.assertEqual(self.env["read_messages"](), original)
+        self.assertNotIn("missing user", state["verified_names"])
+
+    def test_named_claim_accepts_names_with_spaces(self):
+        records = self.env["read_messages"]()
+        records.append({"kind":"message", "time":"04:15:52",
+                        "user":"Emma Marie", "text":"Here"})
+        self.path.write_text(json.dumps(records, indent=2)+"\\n")
+        state = self.env["submit_message"]("/vf @Emma Marie")
+        self.assertIn("emma marie", state["verified_names"])
+        self.assertTrue(state["messages"][-1]["verified"])
+
     def test_title_schema_is_exact_and_other_roles_rejected(self):
         valid=self.env["title_event"]("Pletzel",True)
         self.assertTrue(self.env["is_title_event"](valid))
