@@ -68,6 +68,26 @@ class PlainMessagesTests(unittest.TestCase):
         self.assertEqual(state["messages"][0]["issued_at"],stamp)
         self.assertEqual(state["messages"][0]["time"],msg["time"])
 
+
+    def test_legacy_clocks_infer_dates_across_midnight_without_reordering(self):
+        env=setup()
+        stamp=1793498400
+        first={"kind":"message","time":"23:58:00",
+               "user":"Pletzel","text":"before midnight"}
+        second={"kind":"message","time":"00:01:00",
+                "user":"Pletzel","text":"after midnight"}
+        known=env["plain_message"]("absolute timestamp",timestamp=stamp)
+        state=env["analyze"]([first,second,known,env["clock_event"](known,stamp)])
+        posts=state["messages"]
+        self.assertEqual([m["text"] for m in posts],
+                         ["before midnight","after midnight","absolute timestamp"])
+        self.assertEqual([m["number"] for m in posts],[1,2,3])
+        self.assertTrue(posts[0]["time_estimated"])
+        self.assertTrue(posts[1]["time_estimated"])
+        self.assertFalse(posts[2]["time_estimated"])
+        self.assertLess(posts[0]["estimated_epoch"],posts[1]["estimated_epoch"])
+        self.assertLess(posts[1]["estimated_epoch"],posts[2]["issued_at"])
+
     def test_invalid_clock_sidecar_cannot_override_message(self):
         env=setup()
         stamp=1793405400
