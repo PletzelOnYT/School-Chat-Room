@@ -1,4 +1,4 @@
-# @title Messaging App v5.48 — Google Drive Messenger
+# @title Messaging App v5.49 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.48'
+CLIENT_VERSION = '5.49'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -2134,48 +2134,28 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   }
 
   function appDocument() {
-    // Static markup only. Usernames and chat content are inserted by textContent.
+    // Same terminal-style HTML and exact input dimensions as CHAT_HTML.
+    // The only additions are a resizable viewport and an internal scroll area.
+    // Message content is never interpolated into this document.
     return '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
-      '<meta name="viewport" content="width=device-width, initial-scale=1">' +
-      '<title>Pletzel Chat · App</title><style>' +
-      '*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;}' +
-      'body{background:#0d121b;color:#e7effa;font:14px system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;}' +
-      '.shell{height:100vh;height:100dvh;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;}' +
-      '.top{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid #253247;background:#151e2d;min-width:0;}' +
-      '.logo{width:38px;height:38px;display:grid;place-items:center;border-radius:12px;background:#3178f5;color:white;font-weight:800;font-size:20px;flex:none;}' +
-      '.heading{flex:1;min-width:0}.name{font-weight:750;font-size:16px;letter-spacing:.15px;}.sub{font-size:12px;color:#9fb0c6;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
-      '.close{background:#25344a;color:#dce9fc;border:1px solid #344961;border-radius:9px;width:34px;height:34px;cursor:pointer;font-size:21px;flex:none;}' +
-      '.close:hover{background:#3b526e}.messages{min-height:0;overflow:auto;overscroll-behavior:contain;padding:20px 22px 26px;scrollbar-color:#3c4d65 transparent;}' +
-      '.message{position:relative;margin:0 0 12px;border:1px solid #243147;border-radius:13px;background:#172131;padding:11px 13px;overflow-wrap:anywhere;}' +
-      '.message:hover{border-color:#36516d}.message.mine{background:#182c34;border-color:#29515a}.message.private{background:#282634;border-color:#54455b;}' +
-      '.meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;margin-bottom:5px;font-size:12px;}' +
-      '.author{font-weight:750;color:#7cdfad;font-size:13px}.private .author{color:#ff899c}.check{color:#69b2ff;font-weight:800;}' +
-      '.clock{color:#82eaf5;font-variant-numeric:tabular-nums}.number{color:#90a3bc}.body{white-space:pre-wrap;line-height:1.48;overflow-wrap:anywhere;}' +
-      '.actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:8px;}' +
-      '.action{background:#22344b;color:#c6d9f1;border:1px solid #37506c;border-radius:7px;padding:3px 8px;cursor:pointer;font:12px system-ui,sans-serif;}' +
-      '.action:hover{background:#32516c}.action.active{background:#294859;border-color:#4d8ca3;color:#d0f5ff;}' +
-      '.composer{padding:13px 18px max(14px,env(safe-area-inset-bottom));border-top:1px solid #253247;background:#151e2d;}' +
-      '.field{display:flex;gap:10px;align-items:center;min-width:0;}' +
-      '.input{flex:1;min-width:0;background:#0d1625;color:#f0f7ff;border:1px solid #425674;border-radius:10px;padding:12px 14px;outline:none;font:14px system-ui,sans-serif;}' +
-      '.input:focus{border-color:#56a4ff;box-shadow:0 0 0 2px #245183}.input::placeholder{color:#8596ab;}' +
-      '.send{padding:12px 18px;border:0;border-radius:10px;color:#fff;background:#3178f5;font-weight:750;cursor:pointer;}' +
-      '.send:hover{background:#5595ff}.send:disabled,.input:disabled{opacity:.55;cursor:not-allowed;}' +
-      '.hint{color:#8194ad;font-size:11px;margin:7px 3px 0;}' +
-      '.empty{color:#92a5bc;text-align:center;margin:50px auto;line-height:1.6;}' +
-      '@media(max-width:540px){.top{padding:10px 12px;gap:9px}.logo{width:33px;height:33px}.messages{padding:12px 10px 18px}.message{padding:10px;margin-bottom:9px}.composer{padding:10px}.send{padding:11px 12px}.input{padding:11px 10px}.name{font-size:14px}.sub{font-size:11px}}' +
-      '</style></head><body><div class="shell">' +
-      '<header class="top"><div class="logo" aria-hidden="true">P</div>' +
-      '<div class="heading"><div class="name">Pletzel Chat</div>' +
-      '<div id="app-status" class="sub">Connecting to your Colab chat…</div></div>' +
-      '<button id="app-close" class="close" type="button" aria-label="Close app window">×</button></header>' +
-      '<main id="app-messages" class="messages" role="log" aria-label="Chat messages">' +
-      '<div class="empty">Connecting to chat…</div></main>' +
-      '<form id="app-form" class="composer" autocomplete="off">' +
-      '<div class="field"><input id="app-input" class="input" type="text" maxlength="1000" ' +
-      'aria-label="Message" placeholder="Message the chat…" />' +
-      '<button id="app-send" class="send" type="submit">Send</button></div>' +
-      '<div class="hint">Enter to send · Replies and reactions stay synced with Colab</div>' +
-      '</form></div></body></html>';
+      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<title>Messaging App</title><style>' +
+      'html,body{margin:0;width:100%;height:100%;background:white;color:black;}' +
+      'body{font-family:monospace;font-size:13px;}' +
+      '#app-shell{height:100vh;height:100dvh;min-height:0;display:flex;flex-direction:column;}' +
+      '#app-messages{white-space:pre-wrap;overflow-wrap:anywhere;max-width:WRAPCHch;' +
+      'line-height:normal;margin:0;flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;}' +
+      '#app-form{margin:0;padding:0;flex:none;}' +
+      '#app-input{display:block;box-sizing:border-box;width:min(INPUTPXpx,100%);' +
+      'height:19px;margin:0;padding:1px 2px;' +
+      'background:white;border:1px solid #999;border-radius:0;color:black;' +
+      'font-family:monospace;font-size:13px;outline:auto;outline-width:0;}' +
+      '@media(max-width:540px){#app-messages{max-width:100%;}}' +
+      '</style></head><body><div id="app-shell">' +
+      '<div id="app-messages" role="log" aria-label="Chat messages"></div>' +
+      '<form id="app-form" autocomplete="off">' +
+      '<input id="app-input" type="text" aria-label="Chat message" /></form>' +
+      '</div></body></html>';
   }
 
   function appTimeline(state) {
@@ -2229,95 +2209,38 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   function renderApp(state) {
     if (!appWindow || appWindow.closed || !appElements || !state) return;
     try {
-      const win = appWindow, doc = win.document;
+      const doc = appWindow.document;
       const view = appElements.messages;
-      const bottom = view.scrollHeight - view.scrollTop - view.clientHeight < 85;
+      const atBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 85;
       const previousTop = view.scrollTop;
-      const fragment = doc.createDocumentFragment();
-      const own = String(state.username || '').toLocaleLowerCase();
-      appElements.status.textContent = state.running ?
-        ('● Connected as ' + String(state.username || 'Guest')) : '● Chat disconnected';
+      // Exact same inline text controls, colors, clock and line formatting.
+      view.replaceChildren();
+      const header = doc.createElement('span');
+      header.appendChild(doc.createTextNode('--- Connected as: '));
+      appendVerifiedTitle(state.my_verified, header);
+      header.appendChild(colored(state.username, 'green', true));
+      header.appendChild(doc.createTextNode(' ---  '));
+      header.appendChild(textControl(desktopPopupStatusText(),
+        toggleDesktopPopups,desktopPopupBlocked ? '#FF5555' :
+          (desktopPopupsEnabled ? '#34A853' : '#00BFFF')));
+      header.appendChild(doc.createTextNode('  '));
+      header.appendChild(textControl('[Open in App]',openAppWindow,'#00BFFF'));
+      view.appendChild(header);
+      newline(view);
+      view.appendChild(doc.createTextNode(
+        "--- Type your message and press Enter. Type '/exit' to quit. ---"));
+      newline(view);newline(view);
+      for (const {msg,depth} of appTimeline(state)) {
+        renderLine(msg,state.username || '',depth,true,view,appElements.input);
+      }
       appElements.input.disabled = !state.running;
-      appElements.send.disabled = !state.running;
-      const rows = appTimeline(state);
-      if (!rows.length) {
-        const placeholder = doc.createElement('div');
-        placeholder.className = 'empty';
-        placeholder.textContent = 'No messages yet. Start the conversation!';
-        fragment.appendChild(placeholder);
+      if (!state.running) {
+        view.appendChild(doc.createTextNode('--- Chat closed ---'));
+        newline(view);
       }
-      for (const {msg,depth} of rows) {
-        const box = doc.createElement('article');
-        box.className = 'message' +
-          (msg.private ? ' private' : '') +
-          (String(msg.user || '').toLocaleLowerCase() === own ? ' mine' : '');
-        if (depth) box.style.marginInlineStart = (Math.min(depth,4)*16) + 'px';
-        const meta = doc.createElement('div');
-        meta.className = 'meta';
-        function part(className,text) {
-          const item = doc.createElement('span');
-          item.className = className;
-          item.textContent = String(text);
-          meta.appendChild(item);
-        }
-        part('clock','[' + displayedTime(msg) + ']');
-        if (!msg.private) part('number','#' + msg.number);
-        if (depth) part('number','↳');
-        if (!msg.private && msg.verified) part('check','☑');
-        part('author',msg.user || 'Unknown');
-        box.appendChild(meta);
-        const body = doc.createElement('div');
-        body.className = 'body';
-        body.textContent = String(msg.text || '');
-        box.appendChild(body);
-        if (!msg.private && Number.isSafeInteger(msg.number)) {
-          const actions = doc.createElement('div');
-          actions.className = 'actions';
-          function action(label,callback,active=false) {
-            const button = doc.createElement('button');
-            button.type = 'button';
-            button.className = 'action' + (active ? ' active' : '');
-            button.textContent = label;
-            button.addEventListener('click',callback);
-            actions.appendChild(button);
-          }
-          action('↳ Reply',() => {
-            appElements.input.value = '/reply ' + msg.number + ' ';
-            appElements.input.focus();
-          });
-          const reactions = Object.entries(msg.reactions || {})
-            .filter(([emoji,count]) => count > 0);
-          const used = new Set((msg.my_reactions || []));
-          for (const [emoji,count] of reactions)
-            action(emoji + ' ' + count,() => sendInline(
-              (used.has(emoji) ? '/unreact ' : '/react ') +
-              msg.number + ' ' + emoji,appElements.input),used.has(emoji));
-          action('+ React',() => {
-            const picker = doc.createElement('div');
-            picker.className = 'actions';
-            for (const emoji of emojiChoices) {
-              const b = doc.createElement('button');
-              b.type='button';b.className='action';
-              b.textContent=emoji;
-              b.addEventListener('click',() => {
-                sendInline((used.has(emoji) ? '/unreact ' : '/react ') +
-                  msg.number + ' ' + emoji,appElements.input);
-                picker.remove();
-              });
-              picker.appendChild(b);
-            }
-            if (actions.nextSibling && actions.nextSibling.className === 'actions')
-              actions.nextSibling.remove();
-            else box.appendChild(picker);
-          });
-          box.appendChild(actions);
-        }
-        fragment.appendChild(box);
-      }
-      view.replaceChildren(fragment);
-      // Stay at the newest message unless the user is reading older history.
-      view.scrollTop = bottom ? view.scrollHeight : previousTop;
-    } catch (error) {
+      // Keep the app at the bottom, but do not interrupt reading old messages.
+      view.scrollTop = atBottom ? view.scrollHeight : previousTop;
+    } catch(error) {
       console.debug('App window could not be refreshed:',error);
       appWindow = null;
       appElements = null;
@@ -2332,7 +2255,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     }
     let win = null;
     try {
-      // This is called synchronously by the button: no automatic popups.
+      // This button is user-activated; never spawn automatic chat windows.
       win = window.open('', 'pletzel-chat-app-SESSION_ID', appWindowFeatures());
       if (!win || win.closed) throw new Error('Browser denied app window');
       win.document.open();
@@ -2341,16 +2264,19 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       const doc = win.document;
       const elements = {
         messages:doc.getElementById('app-messages'),
-        status:doc.getElementById('app-status'),
-        input:doc.getElementById('app-input'),
-        send:doc.getElementById('app-send')
+        input:doc.getElementById('app-input')
       };
-      doc.getElementById('app-close').addEventListener('click',() => win.close());
       doc.getElementById('app-form').addEventListener('submit',event => {
         event.preventDefault();
         if (stopped || !root.isConnected || win.closed) return;
         const value = elements.input.value;
         if (!value.trim()) return;
+        if (['/testpopup','/testtoast'].includes(value.trim().toLowerCase())) {
+          elements.input.value = '';
+          showDesktopPopup('Preview',
+            'This is a desktop popup preview. It closes in 6.5 seconds.');
+          return;
+        }
         if (isPopupCommand(value)) openCommandWindow();
         elements.input.value = '';
         sendInline(value,elements.input);
@@ -2360,10 +2286,11 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       appWindowBlocked = false;
       renderApp(latestState);
       try { win.focus();elements.input.focus(); } catch(error) { /* optional */ }
-    } catch (error) {
+    } catch(error) {
       console.debug('App popup was blocked or could not start:',error);
       appWindowBlocked = true;
-      appWindow = null; appElements = null;
+      appWindow = null;
+      appElements = null;
       if (win && !win.closed) try { win.close(); } catch(ignore) {}
       if (latestState) render(latestState);
     }
@@ -2376,7 +2303,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     span.textContent = String(text ?? '');
     return span;
   }
-  const newline = () => area.appendChild(document.createTextNode('\n'));
+  const newline = (target=area) => target.appendChild(document.createTextNode('\n'));
   function replyData(reply) { return reply?.data?.['application/json'] ?? null; }
 
   function renderTextWithMentions(text, currentUsername, target=area) {
@@ -2492,7 +2419,8 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       two(moment.getMinutes()) + ':' + two(moment.getSeconds());
   }
 
-  function renderLine(msg, currentUsername, nested=false, interactive=true) {
+  function renderLine(msg, currentUsername, nested=false, interactive=true,
+                      targetArea=area, targetInput=input) {
     // The normal view prints exactly one row per message. Action controls
     // only appear when that message is selected; none are appended per row.
     const line = document.createElement('span');
@@ -2524,38 +2452,39 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         render(latestState);
       });
     }
-    area.appendChild(line);
-    newline();
+    targetArea.appendChild(line);
+    newline(targetArea);
 
     if (!msg.private && interactive && selectedMessageId === msg.id) {
       const group = threadFor(msg.id);
-      area.appendChild(document.createTextNode('   '));
-      area.appendChild(textControl('[React]', () => {
+      targetArea.appendChild(document.createTextNode('   '));
+      targetArea.appendChild(textControl('[React]', () => {
         selectedEmojiPicker = !selectedEmojiPicker;
         render(latestState);
       }, '#3498FF'));
-      area.appendChild(document.createTextNode('  '));
-      area.appendChild(textControl('[Reply]', () => {
-        input.value = '/reply ' + msg.number + ' ';
-        input.focus();
-        input.setSelectionRange(input.value.length, input.value.length);
+      targetArea.appendChild(document.createTextNode('  '));
+      targetArea.appendChild(textControl('[Reply]', () => {
+        targetInput.value = '/reply ' + msg.number + ' ';
+        targetInput.focus();
+        targetInput.setSelectionRange(targetInput.value.length, targetInput.value.length);
       }, '#3498FF'));
-      area.appendChild(document.createTextNode('  '));
-      area.appendChild(textControl('[Close]', () => {
+      targetArea.appendChild(document.createTextNode('  '));
+      targetArea.appendChild(textControl('[Close]', () => {
         selectedMessageId = null; selectedEmojiPicker = false;
         showSelectedThread = false; render(latestState);
       }));
-      newline();
+      newline(targetArea);
       if (selectedEmojiPicker) {
-        area.appendChild(document.createTextNode('   '));
+        targetArea.appendChild(document.createTextNode('   '));
         for (const emoji of emojiChoices) {
           const mine = (msg.my_reactions || []).includes(emoji);
-          area.appendChild(textControl(emoji + ' ', () => {
+          targetArea.appendChild(textControl(emoji + ' ', () => {
             selectedEmojiPicker = false;
-            sendInline((mine ? '/unreact ' : '/react ') + msg.number + ' ' + emoji);
+            sendInline((mine ? '/unreact ' : '/react ') + msg.number + ' ' + emoji,
+              targetInput);
           }, mine ? '#3498FF' : '#999999'));
         }
-        newline();
+        newline(targetArea);
       }
     }
   }
