@@ -2,6 +2,22 @@
 
 The owner runs a **separate Python program** (`owner_guardian.py`) in their own Google Colab notebook. The chat itself, including the original terminal UI and `chat.json`, remains unchanged. No Vercel, Redis, or additional shared folder is required.
 
+## Important v5.30 append-only format change
+
+**Stop any older Guardian before launching v5.30 chat clients.** Prior
+Guardian versions assume `chat.json` is one JSON array and may rewrite
+appended records as though the file were corrupt.
+
+The updated Guardian reads both the original JSON array and the extra
+record-separated JSON events appended after it. Appended frames are not
+one valid JSON document, so normal `json.load()` will not parse the
+entire file. A partially synchronized append will be flagged for
+inspection rather than triggering an automatic overwrite.
+
+Use the newest `owner_guardian.py`, preferably test with `--audit-only`
+first. Keep your existing healthy SQLite backup; **do not reset it** just
+because the app switched to append-only writes.
+
 ## What it monitors
 
 - Every 5 seconds, checks the **original** shared `chat.json`.
