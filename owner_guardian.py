@@ -276,8 +276,12 @@ def read_shared(path):
         raise ValueError("shared JSON is invalid") from exc
     if not isinstance(entries,list):
         raise ValueError("chat.json must be a JSON array")
-    if not any(isinstance(x,dict) and x.get("id")==ANCHOR for x in entries):
-        raise ValueError("history anchor is missing; wrong or erased room")
+    legacy_anchor=any(isinstance(x,dict) and x.get("id")==ANCHOR for x in entries)
+    simplified=all(isinstance(x,dict) and
+                   set(x)=={"kind","time","user","text"} and
+                   x.get("kind")=="message" for x in entries)
+    if not legacy_anchor and not simplified:
+        raise ValueError("file is neither original history nor simplified four-field chat")
     return raw,entries
 
 
@@ -497,6 +501,16 @@ class Guardian:
                     return "restored"
                 return "corrupt"
 
+        # A deliberate four-field migration invalidates old ID-based
+        # checkpoints. Never undo it automatically and restore old metadata.
+        migrated=(bool(live) and all(isinstance(e,dict) and
+                    set(e)=={"kind","time","user","text"} for e in live))
+        old_baseline=any(e.get("id")==ANCHOR for e in known)
+        if migrated and old_baseline:
+            self.log("FORMAT MIGRATION detected. Old guardian checkpoint "
+                     "does not apply; restart with --reset-baseline.")
+            return "migration_needs_baseline"
+
         # Compare known approved history against live file, even if someone
         # changed a prior signed event or deleted the entire chat array.
         observed=set()
@@ -603,6 +617,8 @@ def main(argv=None):
     parser.add_argument("--file-id",default="",help="Original Google Drive file ID for trash recovery")
     parser.add_argument("--interval",type=float,default=5.0,help="Seconds between scans")
     parser.add_argument("--once",action="store_true",help="Scan once and exit")
+    parser.add_argument("--reset-baseline",action="store_true",
+                        help="Archive old SQLite and trust migrated 4-field history")
     parser.add_argument("--audit-only",action="store_true",help="Never modify shared chat.json")
     args=parser.parse_args(argv)
     root=drive_root() if not args.file or not args.private else None
@@ -615,6 +631,14 @@ def main(argv=None):
         file_id_file=private/"original_file_id.txt"
         if file_id_file.exists():
             args.file_id=file_id_file.read_text().strip()
+    if args.reset_baseline:
+        current=private/"guardian.sqlite3"
+        if current.exists():
+            archive=private/("guardian_before_format_migration_%d.sqlite3" %
+                             int(time.time()))
+            shutil.copy2(current,archive)
+            current.unlink()
+        print("Old guardian baseline archived; re-enrolling 4-field history.",flush=True)
     # SQLite runs locally, with every approved version checkpointed to private
     # Google Drive using the SQLite backup API. No SQLite lock on Drive FUSE.
     local_temp=tempfile.TemporaryDirectory(prefix="messaging_guardian_")
