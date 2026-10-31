@@ -589,6 +589,71 @@ def restore_trash_by_id(file_id, timeout=8):
         return "Drive API unavailable or denied: "+type(exc).__name__
 
 
+
+def historical_clock_audit(events, now=None):
+    """Explain old timestamps without changing protected source or post order.
+
+    Absolute time comes only from signed legacy epochs and matching UTC clock
+    sidecars. Bare HH:MM:SS is ambiguous; estimates assume an ordered UTC log,
+    and MUST NOT be treated as proof of the original sending date.
+    """
+    anchor=int(time.time() if now is None else now)+300
+    known={}
+    for e in events:
+        if simple_clock(e):
+            key=e["message_hash"]
+            known.setdefault(key,[]).append(e)
+    entries=[]
+    for idx,e in enumerate(events):
+        if not isinstance(e,dict) or e.get("kind")!="message":
+            continue
+        raw=e.get("time","")
+        if not isinstance(raw,str):
+            raw=""
+        absolute=None
+        basis="unknown"
+        if type(e.get("issued_at")) is int and 946684800<=e["issued_at"]<=4102444800:
+            absolute=e["issued_at"]
+            basis="stored_epoch"
+        elif simple_message(e):
+            matches=known.get(plain_message_hash(e),[])
+            for meta in matches:
+                if meta["user"]==e["user"] and meta["time"]==e["time"]:
+                    absolute=meta["epoch"]
+                    basis="clock_metadata"
+                    break
+        entries.append({"position":idx,"user":str(e.get("user",""))[:128],
+                        "stored_time":raw,"epoch":absolute,"basis":basis})
+    counts={"exact":0,"estimated":0,"unknown":0}
+    for item in reversed(entries):
+        absolute=item["epoch"]
+        if type(absolute) is int:
+            anchor=absolute
+            counts["exact"]+=1
+            continue
+        clock=re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d):([0-5]\d)",
+                           item["stored_time"])
+        if not clock:
+            counts["unknown"]+=1
+            continue
+        h,m,sec=[int(x) for x in clock.groups()]
+        candidate=(anchor//86400)*86400+h*3600+m*60+sec
+        if candidate>anchor+300:
+            candidate-=86400
+        if candidate>=946684800 and 0<=anchor-candidate<=86400+300:
+            item["epoch"]=candidate
+            item["basis"]="inferred_utc_not_verified"
+            counts["estimated"]+=1
+            anchor=candidate
+        else:
+            counts["unknown"]+=1
+    return {"schema":1,"generated_utc":dt.datetime.now(dt.timezone.utc).isoformat(),
+            "warning":"Date-less clocks may have gaps or used local time. "
+                      "Inferred UTC times are estimates, not authenticated; "
+                      "the shared chat log is not reordered or rewritten.",
+            "counts":counts,"messages":entries}
+
+
 class Guardian:
     def __init__(self,shared,private_directory,db_path,drive_file_id="",repair=True):
         self.shared=Path(shared)
@@ -604,12 +669,30 @@ class Guardian:
                 shutil.copyfile(persisted,self.db_path)
         self.db=connect_db(self.db_path)
         self.last_missing_notice=0.0
+        self.last_clock_report=0.0
 
     def log(self,msg):
         print("["+dt.datetime.now().strftime("%H:%M:%S")+"] "+msg,flush=True)
 
     def backup(self):
         private_db_backup(self.db,self.private)
+
+    def clock_report(self, events, force=False):
+        """Emit protected owner-only clock report, never mutate chat.json."""
+        now=time.monotonic()
+        if not force and now-self.last_clock_report<120:
+            return
+        report=historical_clock_audit(events)
+        destination=self.private/"historical_clock_audit.json"
+        pending=self.private/"historical_clock_audit.pending.json"
+        with open(pending,"w",encoding="utf-8") as fh:
+            json.dump(report,fh,indent=2,ensure_ascii=False)
+        os.replace(pending,destination)
+        self.last_clock_report=now
+        counts=report["counts"]
+        self.log("Historical clock audit: "+
+                 f'{counts["exact"]} exact, {counts["estimated"]} inferred, '+
+                 f'{counts["unknown"]} unknown. No history reordered.')
 
     def process(self):
         """One monitoring pass; no destructive operations when history untrusted."""
@@ -632,6 +715,7 @@ class Guardian:
             self.backup()
             self.log(f"Baseline enrolled: {len(initial)} events, {len(raw)} bytes."
                      " Historical records grandfathered; new events enforced.")
+            self.clock_report(initial,force=True)
             return "enrolled"
         expected={event_id(item,index):item for index,item in enumerate(known)}
         try:
@@ -784,6 +868,7 @@ class Guardian:
             self.backup()
             self.log(f"Recovered approved history ({len(restored)} records) IN PLACE")
             return "restored"
+        self.clock_report(live,force=bool(additions))
         return "healthy"
 
     def close(self):
