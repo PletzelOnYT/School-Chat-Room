@@ -1,7 +1,17 @@
-# Messaging App v5.32
+# Messaging App v5.33
 
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
+
+## v5.33: Hardened Owner Guardian v2.1 and historical timestamp recovery
+
+The Colab client automatically reconstructs **estimated** local display times for older date-less messages by walking the archived chat order backwards from newer absolute UTC timestamps. It accounts for midnight rollovers. An inferred time displays with a leading `~` (approximate), whereas signed or clock-metadata-backed timestamps have no marker. **This never changes or sorts stored messages**: message numbers, reply targets and reaction references stay intact. Unknown gaps, older client timezones, and missing dates cannot be recovered with certainty.
+
+Owner Guardian v2.1 adds a persistent rolling spam-rate window (including across process restarts), a room-wide flood limiter to reduce nickname-rotation attacks, rejection of suspicious name-format control characters, stronger clock/message correspondence checking, and tamper recovery from its approved private database. Owner Guardian continuously writes `.messaging_guardian/historical_clock_audit.json` in the owner's private Drive: each message is marked `clock_metadata`/`stored_epoch` (absolute), `inferred_utc_not_verified` (approximate), or `unknown`. The Guardian **does not** rewrite historic timestamps without evidence or rearrange the shared file; it preserves a forensic record of what can and cannot be inferred.
+
+These controls are **best-effort, not identity verification or DDoS protection**. Shared `chat.json` remains unsigned for plain messages. People with write access can spoof display names or deliberately send new records; rate limits can also affect legitimate bursts. For stronger security, a single authenticated server and atomic per-message storage are needed.
+
+To activate: stop the prior Owner Guardian and Colab chat cells, restart the **current** `owner_guardian.py` first, then rerun your existing GitHub chat launcher. No `chat.json` deletion or baseline reset is required. Type `/version` in chat to verify **v5.33**. The Guardian prints **v2.1** on startup.
 
 ## v5.32: Clock validation, browser-local time, and /version
 
