@@ -1,4 +1,4 @@
-# @title Messaging App v5.33 — Owner Guardian v2.1
+# @title Messaging App — Owner Guardian v2.2
 """Owner-side Google Drive watchdog. Does not run inside messaging_app.py.
 
 - Approves only allowlisted, signed NEW events and stores a durable event ledger.
@@ -33,7 +33,12 @@ import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-GUARDIAN_VERSION = "2.1"
+GUARDIAN_VERSION = "2.2"
+# Exact existing shared file; Guardian never copies the message archive.
+SHARED_CHAT_FILE_ID = '1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd'
+SHARED_CHAT_FILE_LINK = (
+    'https://drive.google.com/file/d/'
+    '1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd/view')
 ANCHOR = "081cad07-8430-4c0e-8000-f3a4a379536a"
 MAX_FILE = 48 * 1024 * 1024
 MAX_EVENT = 16 * 1024
@@ -877,11 +882,146 @@ class Guardian:
         self.db.close()
 
 
+def ensure_shared_chat_shortcut(drive_root, session=None, sleep=None,
+                                max_polls=12):
+    """Join the ORIGINAL shared room by making one Drive shortcut, not a copy.
+
+    Use only credentials already authorized in Colab. A school account whose
+    Drive API access is restricted must not be prompted for extra OAuth scopes
+    or switched to an alternative account automatically.
+    """
+    chat_path = os.path.join(drive_root, 'chat.json')
+    if os.path.isfile(chat_path):
+        return chat_path
+    if os.path.lexists(chat_path):
+        raise RuntimeError('My Drive already contains a non-file chat.json. '
+                           'Not replacing it or creating a second room.')
+    if sleep is None:
+        sleep = time.sleep
+
+    def fail(reason):
+        raise FileNotFoundError(
+            'Automatic chat.json shortcut setup could not complete: ' + reason +
+            '. Open ' + SHARED_CHAT_FILE_LINK +
+            ' with the same Google account as Colab and use '
+            '"Organize > Add shortcut", selecting the root of My Drive, '
+            'then rerun this launcher. Never upload a copy of chat.json.'
+        )
+
+    if session is None:
+        try:
+            import google.auth
+            from google.auth.transport.requests import AuthorizedSession
+            credentials, _ = google.auth.default()
+            session = AuthorizedSession(credentials)
+        except Exception as exc:
+            fail('existing Colab Drive API credentials were unavailable')
+
+    api = 'https://www.googleapis.com/drive/v3/files'
+    try:
+        # Prevent duplicate shortcuts after a previous launch or Drive sync.
+        existing = []
+        cursor = None
+        for _ in range(5):
+            params = {
+                'q': ("'root' in parents and name = 'chat.json' "
+                      "and trashed = false"),
+                'fields': ('nextPageToken,files(id,name,mimeType,'
+                           'shortcutDetails(targetId))'),
+                'pageSize': 100,
+            }
+            if cursor:
+                params['pageToken'] = cursor
+            listing = session.get(api, params=params, timeout=15)
+            if listing.status_code != 200:
+                fail('Drive did not permit listing My Drive shortcuts '
+                     '(HTTP ' + str(listing.status_code) + ')')
+            data = listing.json()
+            existing.extend(data.get('files', []))
+            cursor = data.get('nextPageToken')
+            if not cursor:
+                break
+        if cursor:
+            fail('Drive shortcut search was incomplete')
+        def is_target_shortcut(item):
+            return (item.get('mimeType') == 'application/vnd.google-apps.shortcut'
+                    and (item.get('shortcutDetails') or {}).get('targetId')
+                    == SHARED_CHAT_FILE_ID)
+        # Refuse even ONE colliding chat.json; a Drive mount could expose the
+        # wrong item when multiple files have an identical display name.
+        if any(not is_target_shortcut(item) for item in existing):
+            fail('a different chat.json already exists in My Drive; '
+                 'it must not be replaced')
+        correct = any(is_target_shortcut(item) for item in existing)
+        if not correct:
+            # Confirm the target is accessible; permissions are never edited.
+            target = session.get(
+                api + '/' + SHARED_CHAT_FILE_ID,
+                params={'fields': 'id,name,mimeType,trashed'},
+                timeout=15,
+            )
+            if target.status_code != 200:
+                fail('this account cannot access the original shared file '
+                     '(HTTP ' + str(target.status_code) + ')')
+            info = target.json()
+            if (info.get('id') != SHARED_CHAT_FILE_ID or
+                    info.get('mimeType') != 'application/json' or
+                    info.get('trashed')):
+                fail('the linked target is not the expected live chat.json')
+            shortcut = session.post(
+                api,
+                json={'name': 'chat.json',
+                      'mimeType': 'application/vnd.google-apps.shortcut',
+                      'parents': ['root'],
+                      'shortcutDetails': {'targetId': SHARED_CHAT_FILE_ID}},
+                params={'fields': 'id,name,mimeType,shortcutDetails(targetId)'},
+                timeout=15,
+            )
+            if shortcut.status_code not in (200, 201):
+                fail('Drive rejected creating the shortcut '
+                     '(HTTP ' + str(shortcut.status_code) + ')')
+            created = shortcut.json()
+            if ((created.get('shortcutDetails') or {}).get('targetId')
+                    != SHARED_CHAT_FILE_ID):
+                fail('Drive did not confirm the shortcut target')
+            print('Created a shortcut to the existing shared chat.json '
+                  'in this account\'s My Drive. No file was copied.')
+
+        # Drive FUSE can take some time to expose new shortcuts.
+        for attempt in range(max_polls):
+            if os.path.isfile(chat_path):
+                return chat_path
+            if attempt < max_polls - 1:
+                sleep(1)
+        fail('Drive created/found the shortcut but it is not yet visible '
+             'in the mounted filesystem; remount Drive and rerun')
+    except FileNotFoundError:
+        raise
+    except Exception as exc:
+        fail('the Drive API could not complete the request (' +
+             type(exc).__name__ + ')')
+
+
+
 def drive_root():
+    """Automatically mount Drive in Colab with the user's permission."""
     for path in ("/content/drive/MyDrive","/content/drive/My Drive"):
         if os.path.isdir(path):
             return Path(path)
-    raise RuntimeError("Google Drive not mounted. Mount it first in Colab.")
+    if os.path.isdir("/content"):
+        try:
+            from google.colab import drive
+            drive.mount("/content/drive")
+        except ImportError:
+            pass
+        except Exception as exc:
+            raise RuntimeError("Google Drive could not be mounted in Colab: " +
+                               type(exc).__name__ + ": " + str(exc)) from exc
+        for path in ("/content/drive/MyDrive","/content/drive/My Drive"):
+            if os.path.isdir(path):
+                return Path(path)
+    raise RuntimeError("Google Drive not mounted. Open in Colab or use "
+                       "--file and --private for an explicit local run.")
 
 
 def main(argv=None):
@@ -896,7 +1036,12 @@ def main(argv=None):
     parser.add_argument("--audit-only",action="store_true",help="Never modify shared chat.json")
     args=parser.parse_args(argv)
     root=drive_root() if not args.file or not args.private else None
-    shared=Path(args.file) if args.file else root/"chat.json"
+    # Auto-enroll only for the default shared room. Explicit --file paths
+    # remain completely untouched (tests, audit/recovery and owner overrides).
+    shared=(Path(args.file) if args.file else
+            Path(ensure_shared_chat_shortcut(str(root))))
+    if not args.file and not args.file_id:
+        args.file_id=SHARED_CHAT_FILE_ID
     private=Path(args.private) if args.private else root/".messaging_guardian"
     private.mkdir(parents=True,exist_ok=True)
     if args.file_id:
