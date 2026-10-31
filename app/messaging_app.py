@@ -1,4 +1,4 @@
-# @title Messaging App v5.40 — Google Drive Messenger
+# @title Messaging App v5.41 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.40'
+CLIENT_VERSION = '5.41'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -440,6 +440,15 @@ def rename_event(new_name):
             'time': time.strftime('%H:%M:%S', time.gmtime()),
             'user': GOOGLE_ACCOUNT_USERNAME,
             'name': new_name}
+
+
+# Define reaction validators before read_messages() checks startup history.
+# Existing chat archives may already contain reaction records.
+def is_valid_emoji(emoji):
+    # A small validation rule for typical emoji and multi-codepoint emoji.
+    if not isinstance(emoji, str) or not 1 <= len(emoji) <= 8 or re.search(r'[\x00-\x1f\x7f]', emoji):
+        return False
+    return any(ord(c) >= 0x2600 for c in emoji)
 
 
 def is_simple_reaction(event):
@@ -1185,13 +1194,6 @@ def analyze(events):
                 messages=messages, by_number=by_number,
                 identities=identities, seen_aliases=seen_aliases, display_names=display_names,
                 name_owners=name_owners, verified=verified)
-
-
-def is_valid_emoji(emoji):
-    # A small validation rule for typical emoji and multi-codepoint emoji.
-    if not 1 <= len(emoji) <= 8 or re.search(r'[\x00-\x1f\x7f]', emoji):
-        return False
-    return any(ord(c) >= 0x2600 for c in emoji)
 
 
 def note(value):
