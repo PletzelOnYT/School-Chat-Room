@@ -1,4 +1,30 @@
-# Messaging App v5.39
+# Messaging App v5.40
+
+## Messaging App v5.40 — Why Chrome did not show a permission prompt
+
+The experimental `[Desktop alerts]` popup now reports exactly what Chrome
+returns when **Enable notifications** is clicked:
+
+- `DENIED` before requesting permission: Chrome already blocks this origin,
+  so no prompt can appear. Review Chrome site settings, if school policy allows.
+- `API unavailable`: notification requests are not available in the
+  Colab-generated popup or its sandbox/origin.
+- `DEFAULT` followed by `DENIED`: Chrome refused the request, possibly
+  due to its notification policies or the popup's inherited Colab context.
+- `GRANTED`: notifications were already allowed, so no permission prompt is
+  needed; the **Test notification** button can verify display.
+
+A diagnostic line also shows whether the popup is an `about:` document
+rather than a separately hosted HTTPS site. Creating an `about:blank`
+window from Colab does **not** guarantee a fresh first-party origin; this
+is a browser constraint, not a permission that code can force. A real
+standalone HTTPS chat or notification companion page is required to
+reliably request permissions. A school-managed Chromebook may still block
+notifications through administrative policy even there.
+
+This upgrade **does not bypass or change Chromebook policies** and makes
+no changes to the shared Drive chat or Guardian. Restart the Colab cell
+to see the new diagnostic messages in the notification setup window.
 
 ## Messaging App v5.39 — Experimental Chromebook desktop notifications
 
