@@ -1,4 +1,4 @@
-# @title Messaging App v5.44 — Google Drive Messenger
+# @title Messaging App v5.45 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.44'
+CLIENT_VERSION = '5.45'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1957,7 +1957,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   }
 
   function popupWindowFeatures() {
-    const width = 330, height = 112, margin = 12;
+    const width = 330, height = 56, margin = 12;
     let left = 0, top = 0;
     try {
       const bounds = window.screen || {};
@@ -1989,10 +1989,10 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       '<style>@keyframes expire{from{width:100%}to{width:0%}}' +
       '*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;' +
       'overflow:hidden;background:#fff;color:#202124;font:12px Arial,Helvetica,sans-serif}' +
-      '.card{position:relative;width:100%;height:100%;border:1px solid #dadce0}' +
-      '.content{position:absolute;top:50%;transform:translateY(-50%);width:100%;' +
-      'display:flex;align-items:center;gap:8px;padding:5px 9px 8px}' +
-      '.avatar{width:23px;height:23px;flex:none;border-radius:50%;' +
+      '.card{position:relative;width:100%;height:56px;max-height:100%;border:1px solid #dadce0}' +
+      '.content{position:absolute;top:0;left:0;width:100%;height:53px;' +
+      'display:flex;align-items:center;gap:7px;padding:3px 8px}' +
+      '.avatar{width:22px;height:22px;flex:none;border-radius:50%;' +
       'background:#e8f0fe;color:#1a73e8;display:flex;align-items:center;' +
       'justify-content:center;font-size:12px;font-weight:700}' +
       '.message{min-width:0;flex:1;overflow:hidden}' +
