@@ -2362,6 +2362,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     const top=scroll.scrollTop;
     const previousValue=el.threadInput.value;
     const replies=group.replies||[];
+    const parents=appMessageMap(state);
     el.threadMeta.textContent=replies.length+' '+(replies.length===1?'reply':'replies');
     body.replaceChildren();
 
@@ -2377,6 +2378,20 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       time.className='thread-time';
       time.textContent=displayedTime(message);
       item.appendChild(time);
+      if(message.reply_to){
+        const parent=parents.get(message.reply_to)||null;
+        item.appendChild(appReplyPreview(doc,parent,parent?.number,
+          ()=>appJumpToMessage(message.reply_to)));
+      }
+      if(message.verified){
+        const badge=doc.createElement('span');
+        badge.className='verified';
+        badge.textContent='✓';
+        badge.title='Verified badge';
+        badge.setAttribute('aria-label','Verified badge');
+        badge.style.marginLeft='6px';
+        item.appendChild(badge);
+      }
       const content=doc.createElement('div');
       content.className='thread-body';
       appTextWithPings(doc,message.text,state.username,appKnownNames,content);
@@ -2396,7 +2411,9 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     divider.textContent=replies.length+' '+(replies.length===1?'REPLY':'REPLIES');
     body.appendChild(divider);
     for(const reply of replies) card(reply);
-    el.threadTarget.textContent='Replying to '+String((appThreadTarget||group.root).user||'Unknown');
+    const threadParent=appThreadTarget||group.root;
+    el.threadTarget.textContent='Replying to '+String(threadParent.user||'Unknown')+
+      ' · '+String(threadParent.text||'').replace(/\s+/g,' ').slice(0,90);
     el.threadInput.value=previousValue;
     scroll.scrollTop=bottom?scroll.scrollHeight:top;
   }
