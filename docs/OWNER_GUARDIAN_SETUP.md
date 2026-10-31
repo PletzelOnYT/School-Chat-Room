@@ -1,4 +1,4 @@
-# Messaging App — Owner Guardian v2.6
+# Messaging App — Owner Guardian v3.0
 
 The owner runs a **separate Python program** (`guardian/owner_guardian.py`) in their own Google Colab notebook. The chat itself, including the original terminal UI and `chat.json`, remains unchanged. No Vercel, Redis, or additional shared folder is required.
 
@@ -27,6 +27,30 @@ because the app switched to append-only writes.
 - If messages disappear, are modified, or are reordered, repairs the existing shared file using the approved history.
 - If the file is empty, corrupted, or truncated, attempts to restore the approved history **in place**.
 - If the original Drive object is in Trash, it optionally attempts to **untrash the original file ID** using a Google token already available in the session.
+
+## Guardian v3.0: Verified backups, conflict-safe recovery and health status
+
+The Owner Guardian v3.0 verifies approved event ledger checksums and IDs
+before rebuilding the shared chat. Damaged private checkpoints are rejected
+instead of being used as repair sources. SQLite backup candidates must pass
+database and row-integrity checks before the last good owner-private backup
+is replaced. If the shared file changes between detection and repair, the
+Guardian rescans rather than overwriting messages sent concurrently.
+
+The monitor also publishes **`My Drive/.messaging_guardian/guardian_health.json`**
+with scan status, latest check time (UTC), consecutive errors and the latest
+record counts. Treat the file as private, like the SQLite backup. To confirm
+the monitor is alive, check that `checked_at_utc` keeps advancing; a stale
+timestamp or `status: error:GuardianLedgerError` requires owner attention.
+This is best-effort monitoring: Colab sessions can time out, and a Google
+Drive FUSE write is not atomic across all connected chat clients.
+
+**Upgrade without resetting anything:** Stop the old owner-only Guardian
+cell, rerun the existing Guardian GitHub launcher, and confirm it reports
+v3.0. Keep the same shared file/shortcut, private approved-history ledger,
+and existing backup history. Do not use `--reset-baseline` to work around
+a failed integrity check; inspect or restore a trustworthy private backup.
+The client does not need to be changed.
 
 ## Guardian v2.6: Correct handling of Colab user credentials
 
