@@ -1,225 +1,227 @@
-"""The app-style popup must mirror the existing Colab chat, not duplicate it."""
+"""Exercise the Discord-style popup without disturbing the original Colab UI."""
 import ast
 import shutil
 import subprocess
 import unittest
 from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parents[1] / "app" / "messaging_app.py"
-TREE = ast.parse(SOURCE.read_text(encoding="utf-8"))
-HTML = next(ast.literal_eval(node.value) for node in TREE.body
-            if isinstance(node, ast.Assign)
-            and any(isinstance(t, ast.Name) and t.id == "CHAT_HTML"
-                    for t in node.targets))
-SCRIPT = HTML.split("<script>", 1)[1].split("</script>", 1)[0]
+SOURCE=Path(__file__).resolve().parents[1]/"app"/"messaging_app.py"
+TREE=ast.parse(SOURCE.read_text(encoding="utf-8"))
+HTML=next(ast.literal_eval(n.value) for n in TREE.body if isinstance(n,ast.Assign)
+          if any(isinstance(t,ast.Name) and t.id=="CHAT_HTML" for t in n.targets))
+SCRIPT=HTML.split("<script>",1)[1].split("</script>",1)[0]
 
-NODE_TEST = r"""
+NODE_TEST=r"""
 const assert=require('assert'),vm=require('vm'),fs=require('fs');
-class TextNode {
-  constructor(s){this.textContent=String(s);}
+class TextNode{constructor(t){this.textContent=String(t)}}
+class Element{
+ constructor(tag='div'){
+   this.tag=tag;this.nodes=[];this.events={};this.style={};this.value='';
+   this.isConnected=true;this.scrollTop=0;this.scrollHeight=150;this.clientHeight=150;
+   this.className='';this.placeholder='';
+ }
+ appendChild(x){this.nodes.push(x);return x}
+ replaceChildren(...nodes){this.nodes=nodes}
+ get textContent(){return this.nodes.map(x=>x.textContent||'').join('')}
+ set textContent(text){this.nodes=[new TextNode(text)]}
+ setAttribute(key,value){this[key]=value}
+ addEventListener(name,fn){this.events[name]=fn}
+ focus(){this.focused=true}
+ setSelectionRange(){}
 }
-class Element {
-  constructor(tag='div'){
-    this.tag=tag;this.nodes=[];this.events={};this.style={};
-    this.value='';this.isConnected=true;this.scrollTop=0;
-    this.scrollHeight=100;this.clientHeight=100;
-  }
-  appendChild(x){this.nodes.push(x);return x;}
-  replaceChildren(...xs){
-    this.nodes=xs.flatMap(x=>x.tag==='fragment'?x.nodes:[x]);
-  }
-  get textContent(){return this.nodes.map(x=>x.textContent||'').join('');}
-  set textContent(s){this.nodes=[new TextNode(s)];}
-  addEventListener(k,fn){this.events[k]=fn;}
-  setAttribute(k,v){this[k]=v;}
-  focus(){this.focused=true;}
-  setSelectionRange(){}
-  remove(){this.removed=true;}
-}
-const mainElements={};
-const doc={
-  getElementById:id=>mainElements[id]||(mainElements[id]=new Element()),
-  createElement:tag=>new Element(tag),
-  createTextNode:t=>new TextNode(t)
+const elems={};
+const document={
+ getElementById:id=>elems[id]||(elems[id]=new Element()),
+ createElement:tag=>new Element(tag),
+ createTextNode:t=>new TextNode(t)
 };
-const makeMsg=(n,user,text)=>({
-  id:'m'+n,number:n,user,text,private:false,verified:false,
-  time:'18:30:00',issued_at:1793450000,reactions:{},my_reactions:[]
+const makeMsg=(number,user,text,extra={})=>({
+ id:'m'+number,number,user,text,private:false,
+ time:'18:30:00',issued_at:1793450000,reactions:{},my_reactions:[],
+ ...extra
 });
 let state={
-  username:'Alex',my_verified:true,running:true,popup:null,
-  messages:[makeMsg(1,'Emma','Hello <b>not markup</b>')],threads:[]
+ username:'Alex',my_verified:false,running:true,popup:null,
+ messages:[
+   makeMsg(1,'Emma','Hello <img src=x onerror=alert(1)>'),
+   makeMsg(2,'Alex','Good morning',{reactions:{'👍':2},my_reactions:['👍']}),
+ ],threads:[]
 };
-const opened=[],sends=[];
-let polling=null,allowPopups=true;
+let polling,allowed=true,openCount=0;
+const opened=[],sent=[];
 const browser={
-  screen:{availLeft:0,availTop:0,availWidth:1280,availHeight:800},
-  open(url,name,features){
-    if(!allowPopups)return null;
-    const elems={};
-    const popupDoc={
-      open(){},close(){},write(s){this.html=s;},
-      getElementById:id=>elems[id]||(elems[id]=new Element()),
-      createElement:tag=>new Element(tag),
-      createTextNode:t=>new TextNode(t),
-      createDocumentFragment:()=>new Element('fragment')
-    };
-    const win={
-      document:popupDoc,closed:false,focus(){this.focused=true;},
-      close(){this.closed=true;}
-    };
-    opened.push({win,elems,url,name,features});
-    return win;
-  }
+ screen:{availLeft:0,availTop:0,availWidth:1450,availHeight:930},
+ open(url,name,features){
+   if(!allowed)return null;
+   const nodes={};
+   const popupDocument={
+     open(){},write(text){this.html=text},close(){},
+     getElementById:id=>nodes[id]||(nodes[id]=new Element()),
+     createElement:tag=>new Element(tag),
+     createTextNode:t=>new TextNode(t)
+   };
+   const win={document:popupDocument,closed:false,
+     close(){this.closed=true},focus(){this.focused=true}};
+   opened.push({win,name,features,nodes});openCount++;
+   return win;
+ }
 };
 const google={colab:{kernel:{invokeFunction:async(name,args)=>{
-  if(name.endsWith('.state')) return {data:{'application/json':state}};
-  if(name.endsWith('.send')) {
-    sends.push(args[0]);
-    return {data:{'application/json':state}};
-  }
-  throw Error('Unexpected callback '+name);
+ if(name.endsWith('.state'))return {data:{'application/json':state}};
+ if(name.endsWith('.send')){
+   sent.push(args[0]);return {data:{'application/json':state}};
+ }
+ throw Error('Invalid callback');
 }}}};
+const logged=[];
 vm.runInNewContext(fs.readFileSync(0,'utf8'),{
-  document:doc,window:browser,google,console,
-  setTimeout,clearTimeout,
-  setInterval:fn=>{polling=fn;return 1;},clearInterval:()=>{},
-  STATE_CALLBACK_JSON:'messaging_app.demo.state',
-  SEND_CALLBACK_JSON:'messaging_app.demo.send',
-  REFRESHMS:1000,URL:{revokeObjectURL(){}},Blob:class{}
+ document,window:browser,google,console:{
+   debug:(...args)=>logged.push(args.map(String).join(' ')),
+   error:(...args)=>logged.push(args.map(String).join(' '))
+ },
+ setTimeout,clearTimeout,setInterval:fn=>{polling=fn;return 1;},
+ clearInterval:()=>{},URL:{revokeObjectURL(){}},Blob:class{},
+ STATE_CALLBACK_JSON:'chat.test.state',SEND_CALLBACK_JSON:'chat.test.send',
+ REFRESHMS:1000
 });
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-function control(label){
-  const area=mainElements['messaging-display-SESSION_ID'];
-  const header=area.nodes.find(x=>x.tag==='span'&&
-    x.textContent.includes('Connected as'));
-  assert(header,'classic Colab header must still exist');
-  return header.nodes.find(x=>x.textContent.includes(label));
+function find(node,predicate){
+ if(predicate(node))return node;
+ for(const child of node.nodes||[]){
+   const hit=find(child,predicate);
+   if(hit)return hit;
+ }
+ return null;
 }
-function findControl(node,label){
-  if(node.tag==='span'&&node.textContent===label&&node.events?.click)return node;
-  for(const n of node.nodes||[]) {
-    const found=findControl(n,label);
-    if(found)return found;
-  }
-  return null;
+function all(node,predicate){
+ const results=[];
+ function visit(n){
+   if(predicate(n))results.push(n);
+   for(const child of n.nodes||[])visit(child);
+ }
+ visit(node);return results;
+}
+function clickButton(node,text){
+ const hit=find(node,n=>n.tag==='button' && n.textContent.includes(text));
+ assert(hit && hit.events.click,'missing '+text);
+ hit.events.click();return hit;
+}
+function classicControl(label){
+ const area=elems['messaging-display-SESSION_ID'];
+ const header=find(area,n=>n.tag==='span'&&n.textContent.includes('Connected as'));
+ return header?.nodes.find(n=>n.tag==='span'&&n.textContent.includes(label));
 }
 async function run(){
-  await sleep(20);
-  const openButton=control('[Open in App]');
-  assert(openButton&&openButton.events.click);
-  assert(control('Desktop popups OFF'),
-    'existing desktop notifications must remain unchanged');
-  assert.strictEqual(opened.length,0,'app must never auto-open');
+ await sleep(25);
+ assert(classicControl('[Open in App]'),'open button stays in Colab');
+ assert(classicControl('Desktop popups OFF'),'desktop notifications unchanged');
+ assert.strictEqual(opened.length,0,'no unsolicited popup');
+ classicControl('[Open in App]').events.click();
+ assert.strictEqual(opened.length,1);
+ const app=opened[0],html=app.win.document.html,el=app.nodes;
+ assert(app.features.includes('resizable=yes'));
+ assert(app.features.includes('width=1080'));
+ assert(html.includes('class="rail"')&&html.includes('class="sidebar"'));
+ assert(html.includes('class="topbar"'));
+ assert(html.includes('class="composer-wrap"'));
+ assert(html.includes('class="message"')===false,'messages must be dynamic');
+ assert(html.includes('id="app-search"'));
+ assert(html.includes('@media(max-width:670px)'));
+ assert(html.includes('background:var(--surface)'));
+ assert(!html.includes('onerror=alert'),'untrusted text must not be in markup');
+ assert(el['app-profile-name'].textContent.includes('Alex'));
+ assert(el['app-profile-status'].textContent.includes('Colab'));
+ const transcript=el['app-transcript'];
+ assert(transcript.textContent.includes('Hello <img src=x onerror=alert(1)>'));
+ const message=find(transcript,n=>n.tag==='article'&&n.className==='message');
+ assert(message,'each message is a proper Discord-style row');
+ assert(find(message,n=>n.className==='avatar'),'message has avatar');
+ assert(find(message,n=>n.className==='message-user'),'message has username');
+ assert(find(message,n=>n.className==='message-time'),'message has timestamp');
+ assert(find(transcript,n=>n.className==='react-pill mine'),'reactions retained');
+ assert.strictEqual(opened.length,1);
+ classicControl('[Open in App]').events.click();
+ assert.strictEqual(opened.length,1,'repeated opens focus existing popup');
 
-  openButton.events.click();
-  assert.strictEqual(opened.length,1);
-  const app=opened[0];
-  assert(app.name.includes('pletzel-chat-app-'));
-  assert(app.features.includes('popup=yes'));
-  assert(app.features.includes('resizable=yes'));
-  assert(app.win.document.html.includes('height:100dvh'));
-  assert(app.win.document.html.includes('@media(max-width:540px)'));
-  assert(app.win.document.html.includes('id="app-input"'));
-  assert(app.win.document.html.includes('class="app-bar"'));
-  assert(app.win.document.html.includes('class="app-footer"'));
-  assert(app.win.document.html.includes('id="app-transcript"'));
-  assert(app.win.document.html.includes('font-family:monospace;font-size:13px'));
-  assert(app.win.document.html.includes('margin: auto auto 0;'),
-    'short conversations should sit close to the composer');
-  assert(app.win.document.html.includes('overflow-y:auto'));
-  assert(app.win.document.html.includes('max-width:900px'));
-  assert(app.win.document.html.includes('class="input-shell"'));
-  assert(app.win.document.html.includes('border-radius:12px'));
-  assert(app.win.document.html.includes('.input-shell:focus-within'));
-  assert(app.win.document.html.includes('placeholder="Message the chat…"'));
-  assert(app.win.document.html.includes('id="app-send"'));
-  assert(app.win.document.html.includes('Shift+Enter for a new line'));
-  assert(app.win.document.html.includes('@media(prefers-reduced-motion:reduce)'));
-  assert(app.win.document.html.includes('white-space:pre-wrap;overflow-wrap:anywhere'));
-  assert(!app.win.document.html.includes('class="message"'),
-    'keep original terminal-style chat lines, not redesigned message cards');
-  assert(!app.win.document.html.includes('Hello <b>'),
-    'messages must not be interpolated into app HTML');
-  assert(app.elems['app-transcript'].textContent.includes('Hello <b>not markup</b>'));
-  assert(app.elems['app-status'].textContent.includes('Connected as Alex'));
-  assert(app.elems['app-transcript'].nodes.some(x => x.className==='chat-row'),
-    'messages should be integrated in a readable scrollable transcript');
+ const input=el['app-input'],form=el['app-form'];
+ input.value='Hi from popup';
+ form.events.submit({preventDefault(){}});
+ await sleep(45);
+ assert.deepStrictEqual(sent,['Hi from popup']);
+ assert.strictEqual(input.value,'');
+ assert.strictEqual(elems['messaging-input-SESSION_ID'].value,'');
+ assert(input.focused,'app input remains focused');
 
-  // Re-click focuses the existing window without creating another session.
-  control('[Open in App]').events.click();
-  assert.strictEqual(opened.length,1);
-  assert.strictEqual(app.win.focused,true);
+ // A reply is sent using the unchanged /reply server command.
+ clickButton(transcript,'↳ Reply');
+ assert.strictEqual(el['app-replybar'].style.display,'flex');
+ assert(el['app-replyname'].textContent.includes('Emma'));
+ input.value='Reply from popup';
+ form.events.submit({preventDefault(){}});
+ await sleep(820);
+ assert(sent.some(x=>x==='/reply 1 Reply from popup'),sent);
+ assert.strictEqual(el['app-replybar'].style.display,'none');
 
-  // Sending in the app goes through the existing Colab callback only.
-  const appInput=app.elems['app-input'];
-  appInput.value='Message from app';
-  app.elems['app-form'].events.submit({preventDefault(){}});
-  await sleep(40);
-  assert.deepStrictEqual(sends,['Message from app']);
-  assert.strictEqual(appInput.value,'');
-  assert.strictEqual(mainElements['messaging-input-SESSION_ID'].value,'');
-  assert.strictEqual(appInput.focused,true);
+ // Emoji reactions use the unchanged server command.
+ const first=find(transcript,n=>n.tag==='article'&&n.textContent.includes('Emma'));
+ clickButton(first,'☺ React');
+ const reactPicker=find(el['app-transcript'],n=>n.className==='picker');
+ assert(reactPicker);
+ clickButton(reactPicker,'😂');
+ await sleep(810);
+ assert(sent.includes('/react 1 😂'),sent);
 
-  // Polling the parent updates the app and preserves its own input.
-  appInput.value='draft in progress';
-  state.messages.push(makeMsg(2,'Sasha','New message from Colab'));
-  polling();
-  await sleep(30);
-  assert(app.elems['app-transcript'].textContent.includes('New message from Colab'));
-  assert.strictEqual(appInput.value,'draft in progress');
-  const row=app.elems['app-transcript'].nodes.find(x=>
-    x.className==='chat-row' && x.textContent.includes('Hello <b>not markup</b>'));
-  const message=row?.nodes.find(x=>x.tag==='span' &&
-    x.textContent.includes('Hello <b>not markup</b>'));
-  assert(message && message.events.click,
-    'messages in the popup should be clickable exactly as in Colab');
-  message.events.click();
-  const reply=findControl(app.elems['app-transcript'],'[Reply]');
-  assert(reply&&reply.events.click,'original inline [Reply] must work');
-  assert(findControl(app.elems['app-transcript'],'[React]'),
-    'original inline [React] must work');
-  reply.events.click();
-  assert(appInput.value.startsWith('/reply 1 '));
+ // Search is local and only filters the current visible chat snapshot.
+ el['app-search'].value='good morning';
+ el['app-search'].events.input();
+ assert(transcript.textContent.includes('Good morning'));
+ assert(!transcript.textContent.includes('Hello <img'));
+ el['app-search'].value='';
+ el['app-search'].events.input();
 
-  // Closing and reopening creates a new usable view, not a duplicate poller.
-  app.win.close();
-  assert(app.win.closed);
-  control('[Open in App]').events.click();
-  assert.strictEqual(opened.length,2);
-  assert(opened[1].elems['app-transcript'].textContent.includes('New message from Colab'));
-  assert(control('Desktop popups OFF'));
+ // Polls synchronize the app, not just the Colab panel.
+ input.value='unsent draft';
+ state.messages.push(makeMsg(3,'Sasha','Incoming live!'));
+ polling();
+ await sleep(30);
+ assert(transcript.textContent.includes('Incoming live!'));
+ assert.strictEqual(input.value,'unsent draft');
 
-  // Browsers that block popups retain the classic chat and show a retry cue.
-  opened[1].win.close();
-  allowPopups=false;
-  control('[Open in App]').events.click();
-  assert(control('[Open in App]').title.includes('Browser blocked'));
-  assert(control('Desktop popups OFF'));
-  console.log('Refined app layout: classic messages, live sync, send, reply, and popup controls: PASS');
+ app.win.close();
+ classicControl('[Open in App]').events.click();
+ assert.strictEqual(opened.length,2);
+ assert(opened[1].nodes['app-transcript'].textContent.includes('Incoming live!'));
+ opened[1].win.close();
+ allowed=false;
+ classicControl('[Open in App]').events.click();
+ assert(classicControl('[Open in App]').title.includes('Browser blocked'));
+ assert(classicControl('Desktop popups OFF'));
+ assert(!logged.length,'Unexpected browser errors: '+logged.join(' | '));
+ console.log('Discord-style app: layout, safety, send, reply, reactions, search, live sync PASS');
 }
-run().catch(error=>{console.error(error);process.exitCode=1;});
+run().catch(e=>{console.error(e);process.exitCode=1});
 """
 
 
 class AppWindowTests(unittest.TestCase):
-    def test_layout_and_safe_app_bridge_are_present(self):
-        self.assertIn("CLIENT_VERSION = '5.51'", SOURCE.read_text(encoding="utf-8"))
-        self.assertIn("textControl('[Open in App]',openAppWindow", SCRIPT)
-        self.assertIn("function appWindowFeatures()", SCRIPT)
-        self.assertIn("function renderApp(state)", SCRIPT)
-        self.assertIn("function appTimeline(state)", SCRIPT)
-        self.assertIn("transcript.replaceChildren()", SCRIPT)
-        self.assertNotIn("innerHTML = msg.text", SCRIPT)
+    def test_discord_style_only_affects_popup(self):
+        source=SOURCE.read_text(encoding="utf-8")
+        self.assertIn("CLIENT_VERSION = '5.52'",source)
+        self.assertIn('font-family:monospace;font-size:13px',HTML)
+        self.assertIn('height:19px',HTML)
+        self.assertIn("textControl('[Open in App]',openAppWindow",SCRIPT)
+        self.assertIn("function renderApp(state",SCRIPT)
+        self.assertIn("function appTimeline(state)",SCRIPT)
+        self.assertIn("renderTextWithMentions(body",SCRIPT)
+        self.assertNotIn("innerHTML = msg.text",SCRIPT)
 
-    @unittest.skipUnless(shutil.which("node"), "Node.js not installed")
-    def test_real_popup_mirrors_sends_resizes_and_reuses_window(self):
-        result = subprocess.run(
-            ["node", "-e", NODE_TEST], input=SCRIPT,
-            text=True, capture_output=True, timeout=20, check=False,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + "\n" + result.stderr)
+    @unittest.skipUnless(shutil.which("node"),"Node.js required")
+    def test_app_visual_structure_and_live_operations(self):
+        result=subprocess.run(
+            ["node","-e",NODE_TEST],input=SCRIPT,text=True,
+            capture_output=True,timeout=25,check=False)
+        self.assertEqual(result.returncode,0,result.stdout+"\n"+result.stderr)
 
 
-if __name__ == "__main__":
+if __name__=="__main__":
     unittest.main()
