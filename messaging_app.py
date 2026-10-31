@@ -1,4 +1,4 @@
-# @title Messaging App v5.33 — Google Drive Messenger
+# @title Messaging App v5.34 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.33'
+CLIENT_VERSION = '5.34'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1518,7 +1518,7 @@ def submit_message(raw):
                 note('Messaging App v' + CLIENT_VERSION +
                      ' | timestamps: UTC storage, browser-local display; '+
                      'new messages include absolute clock metadata. '+
-                     'Older date-less messages have inferred (~) clock times; '+ 
+                     'Older date-less messages have estimated times (without ~); '+ 
                      'message numbers and stored history remain unchanged.')
                 return snapshot()
             if command == '/ping':
@@ -1852,8 +1852,8 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     }
     if (!Number.isFinite(moment.getTime())) return raw;
     const two = n => String(n).padStart(2, '0');
-    return (msg.time_estimated ? '~' : '') +
-      two(moment.getHours()) + ':' +
+    // The stored old clock may be approximate, but show a plain HH:MM:SS.
+    return two(moment.getHours()) + ':' +
       two(moment.getMinutes()) + ':' + two(moment.getSeconds());
   }
 
