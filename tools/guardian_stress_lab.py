@@ -724,6 +724,124 @@ class StressLab:
         self.temp.cleanup()
 
 
+# Live-attached mod menu: visual changes only. The original Google Drive
+# file is never opened with write access. An older entire-file "restore"
+# would overwrite messages that other classmates sent while the test ran.
+LOCAL_HACKS = {
+    "rainbow": "Rainbow-coloured name (local)",
+    "owner_badge": "Show Owner badge beside a name (local)",
+    "verified_badge": "Show Verified badge beside a name (local)",
+    "nick": "Rename displayed sender to Hacker (local)",
+    "timestamp": "Display fake 00:00:00 timestamp (local)",
+    "mask": "Mask recent message content (local)",
+    "highlight": "Highlight most recent message (local)",
+    "reverse": "Reverse shown message order (local)",
+    "ghost": "Overlay a fake chat message (local)",
+    "reaction": "Overlay a fake reaction (local)",
+    "hide": "Hide the last message from this preview (local)",
+    "uppercase": "Transform last message to uppercase (local)",
+}
+assert len(LOCAL_HACKS) == len(set(LOCAL_HACKS))
+
+
+class LiveChatOverlay:
+    """Read actual shared chat, save its state in private TEMP, modify view only.
+
+    This is NOT an authorized writer to the shared room. A complete binary
+    rewind cannot safely coexist with other users and a running Guardian.
+    Changes to an overlay are reversible immediately without a Drive write.
+    """
+
+    def __init__(self, guardian, source=None):
+        self.guardian = guardian
+        self.source = Path(source) if source is not None else LIVE_CHAT_READ_ONLY
+        self.temp = tempfile.TemporaryDirectory(prefix="guardian_live_view_")
+        self.root = Path(self.temp.name).resolve()
+        if not self.root.is_relative_to(ALLOWED_ROOT) or "/content/drive" in str(self.root):
+            self.temp.cleanup()
+            raise RuntimeError("Unsafe location for a private snapshot")
+        self._baseline = None
+        self._current = None
+        self.actions = []
+        self.refresh()
+
+    def refresh(self):
+        """Only read the source; never write to the shared file or its parent."""
+        if not self.source.is_file():
+            raise FileNotFoundError(
+                "The original chat.json is not mounted in this Colab session."
+            )
+        size = self.source.stat().st_size
+        if size > self.guardian.MAX_FILE:
+            raise ValueError("Live chat exceeds Guardian's safety size limit")
+        raw = self.source.read_bytes()
+        if len(raw) > self.guardian.MAX_FILE:
+            raise ValueError("Live file exceeds Guardian's safety size limit")
+        self.guardian.decode_shared_stream(raw)
+        if self._baseline is None:
+            self._baseline = bytes(raw)
+            (self.root / "before_live_overlay.snapshot").write_bytes(raw)
+        self._current = bytes(raw)
+        return preview_snapshot(self.guardian, self._current, row_limit=18)
+
+    def add_hack(self, name):
+        if name not in LOCAL_HACKS:
+            raise ValueError("Unsupported local visualization hack")
+        self.actions.append(name)
+
+    def preview(self):
+        snapshot = preview_snapshot(self.guardian, self._current, row_limit=18)
+        rows = snapshot["rows"]
+        for action in self.actions:
+            if action == "ghost":
+                rows.append({
+                    "kind": "message", "user": "FakeOwner", "time": "00:00:00",
+                    "text": "👻 This message exists ONLY in your modded preview.",
+                    "index": -1,
+                })
+            elif not rows:
+                continue
+            elif action == "reverse":
+                rows.reverse()
+            elif action == "hide":
+                rows.pop()
+            elif action == "mask":
+                rows[-1]["text"] = "[hidden by local mod menu]"
+            elif action == "uppercase":
+                rows[-1]["text"] = str(rows[-1]["text"]).upper()
+            elif action == "timestamp":
+                rows[-1]["time"] = "00:00:00"
+            elif action == "nick":
+                rows[-1]["user"] = "Hacker"
+            elif action == "owner_badge":
+                rows[-1]["user"] += " [OWNER (LOCAL)]"
+            elif action == "verified_badge":
+                rows[-1]["user"] += " ✓ Verified (LOCAL)"
+            elif action == "rainbow":
+                rows[-1]["user"] += " 🌈 (LOCAL)"
+            elif action == "highlight":
+                rows[-1]["kind"] = "HIGHLIGHTED MESSAGE (LOCAL)"
+            elif action == "reaction":
+                rows[-1]["text"] += "  ⭐×999 (LOCAL)"
+        snapshot["rows"] = rows
+        # Message count here represents stored messages, never fake overlays.
+        snapshot["overlay_count"] = len(self.actions)
+        return snapshot
+
+    def original_preview(self):
+        return preview_snapshot(self.guardian, self._baseline, row_limit=18)
+
+    def revert(self):
+        """Undo every local visual hack; never rewind the live shared file."""
+        self.actions.clear()
+        self.refresh()
+        return self.preview()
+
+    def close(self):
+        self.actions.clear()
+        self.temp.cleanup()
+
+
 def read_live_snapshot_only():
     """Read one original Drive snapshot; never write to it or its folder."""
     if not LIVE_CHAT_READ_ONLY.is_file():
