@@ -2403,7 +2403,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       const view=el.messages;
       const rows=appTimeline(state);
       const signature=JSON.stringify([state.username,state.my_verified,state.running,
-        state.messages,state.threads,appSearchTerm,appPickerMessageId]);
+        state.messages,state.threads,appSearchTerm,appPickerMessageId,appPingOnly,appThreadRootId]);
       el.profileName.textContent=String(state.username || 'Guest');
       el.profileStatus.textContent=state.running ? 'Connected via Colab' : 'Disconnected';
       el.profileAvatar.textContent=Array.from(String(state.username || '?'))[0]?.toUpperCase() || '?';
@@ -2411,6 +2411,18 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       el.input.disabled=!state.running;
       el.send.disabled=!state.running;
       if(!force && signature===appRenderedSignature) return;
+      const previousSessionReady=appBootstrapped;
+      const freshlyArrived=new Set();
+      for(const {msg} of rows) {
+        if(!msg?.id || appKnownIds.has(msg.id))continue;
+        appKnownIds.add(msg.id);
+        if(previousSessionReady)freshlyArrived.add(msg.id);
+        if(previousSessionReady && !msg.private &&
+           String(msg.user||'').toLocaleLowerCase()!==String(state.username||'').toLocaleLowerCase() &&
+           appHasMention(msg.text,state.username))appUnreadPings++;
+      }
+      appBootstrapped=true;
+      appUpdatePingBadge();
       const atBottom=view.scrollHeight - view.scrollTop - view.clientHeight < 110;
       const previousTop=view.scrollTop;
       appRenderedSignature=signature;
@@ -2426,6 +2438,10 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         people.push(who);
         if(people.length===10)break;
       }
+      appKnownNames=people.slice().sort((a,b)=>a.localeCompare(b));
+      if(state.username && !appKnownNames.some(name=>
+          name.toLocaleLowerCase()===String(state.username).toLocaleLowerCase()))
+        appKnownNames.push(String(state.username));
       for(const who of people){
         const member=doc.createElement('div');
         member.className='member';
@@ -2434,7 +2450,21 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         label.className='member-name';
         label.textContent=who;
         member.appendChild(label);
+        member.title='Click to mention @'+who;
+        member.style.cursor='pointer';
+        member.addEventListener('click',()=>{
+          const before=el.input.value;
+          el.input.value=before+(before && !/\s$/.test(before)?' ':'')+'@'+who+' ';
+          appDismissMentions();
+          el.input.focus();
+        });
         el.people.appendChild(member);
+      }
+      el.threadsNav.replaceChildren();
+      for(const group of (state.threads||[]).filter(g=>g.root && (g.replies||[]).length).slice(-5).reverse()) {
+        el.threadsNav.appendChild(appButton(doc,'↳ #'+group.root.number+' · '+
+          (group.replies||[]).length+' replies',()=>appOpenThread(group.root.id),
+          'member thread-nav-item'));
       }
 
       el.transcript.replaceChildren();
@@ -2444,9 +2474,12 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         const body=String(msg.text || '');
         if(appSearchTerm && !(author+' '+body).toLocaleLowerCase()
             .includes(appSearchTerm))continue;
+        if(appPingOnly && (msg.private || !appHasMention(body,state.username)))continue;
         visible++;
         const message=doc.createElement('article');
-        message.className='message'+(msg.private?' private':'');
+        const pinged=!msg.private && appHasMention(body,state.username);
+        message.className='message'+(msg.private?' private':'')+
+          (pinged?' pinged':'')+(freshlyArrived.has(msg.id)?' fresh':'');
         if(depth) {
           const context=doc.createElement('div');
           context.className='reply-context';
@@ -2480,9 +2513,15 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         message.appendChild(heading);
         const content=doc.createElement('div');
         content.className='message-body';
-        // Untrusted messages are text, NEVER interpolated into HTML.
-        renderTextWithMentions(body,state.username || '',content);
+        // Never use innerHTML for chat messages or usernames.
+        appTextWithPings(doc,body,state.username || '',appKnownNames,content);
         message.appendChild(content);
+        if(pinged){
+          const marker=doc.createElement('span');
+          marker.className='ping-marker';
+          marker.textContent='MENTIONED YOU';
+          heading.appendChild(marker);
+        }
 
         if(!msg.private && Number.isSafeInteger(msg.number)){
           const reactions=Object.entries(msg.reactions || {})
@@ -2505,11 +2544,18 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
             appReplyTarget={number:msg.number,user:author};
             showAppReply();el.input.focus();
           }));
+          tools.appendChild(appButton(doc,'▤ Thread',()=>appOpenThread(msg.id)));
           tools.appendChild(appButton(doc,'☺ React',() => {
             appPickerMessageId=appPickerMessageId===msg.id ? null : msg.id;
             renderApp(latestState,true);
           }));
           message.appendChild(tools);
+          const threadGroup=appThreadGroup(msg.id,state);
+          if(threadGroup?.root?.id===msg.id && (threadGroup.replies||[]).length){
+            message.appendChild(appButton(doc,'↳ '+threadGroup.replies.length+
+              (threadGroup.replies.length===1?' reply · View thread':' replies · View thread'),
+              ()=>appOpenThread(msg.id),'thread-link'));
+          }
           if(appPickerMessageId===msg.id){
             const picker=doc.createElement('div');
             picker.className='picker';
@@ -2531,13 +2577,16 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         empty.className='empty';
         const title=doc.createElement('div');
         title.className='empty-title';
-        title.textContent=appSearchTerm?'No matching messages':'Welcome to #general';
+        title.textContent=appPingOnly?'No mentions in view':
+          (appSearchTerm?'No matching messages':'Welcome to #general');
         const info=doc.createElement('div');
-        info.textContent=appSearchTerm?'Try a different search.':'This is the beginning of your visible chat history.';
+        info.textContent=appPingOnly?'Messages mentioning your username appear here.':
+          (appSearchTerm?'Try a different search.':'This is the beginning of your visible chat history.');
         empty.appendChild(title);empty.appendChild(info);
         el.transcript.appendChild(empty);
       }
       view.scrollTop=atBottom?view.scrollHeight:previousTop;
+      if(appThreadRootId)appRenderThread(state);
       showAppReply();
     }catch(error){
       console.debug('App rendering failed:',error);
