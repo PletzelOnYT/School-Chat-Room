@@ -49,6 +49,51 @@ Rerun the original cache-busted one-cell lab launcher below; restarting or
 resetting the real Guardian database is **not** required. Only isolated
 temporary test copies are written.
 
+## Interactive stress lab: chat preview and 59 attack scenarios
+
+The owner-only `tools/guardian_stress_lab.py` panel now shows a three-column
+**read-only chat preview** for each simulation:
+
+- **BEFORE:** The unmodified sandbox history.
+- **ATTACK:** What the modified client actually wrote into its temporary copy,
+  including spoofed titles/names, chat text, malformed records, and colors.
+- **AFTER:** The cloned chat after the real Guardian's `process()` scan.
+
+The preview is intentionally *terminal-like* instead of running the full
+student chat client: it escapes all user-supplied HTML, CSS, and script tags,
+so injection tests cannot execute in the notebook preview. A category filter
+groups **59 scenarios** across identity and badges, formatting and colors,
+spam and rate limits, clock and reactions, and file integrity. Run one case,
+a category, or all cases, then choose any completed case in **Inspect** to
+compare the snapshots. The red **REVERT ALL TEST CHANGES** control still
+restores and deletes the isolated test files; it never changes live Drive.
+
+Outcomes distinguish **BLOCKED** (automatically restored), **DETECTED ONLY**
+(flagged but not restored), **SECURITY GAP** (unauthorized/untrusted accepted
+or otherwise unprotected), **ALLOWED TEXT** (ordinary text is legal; not
+evidence of script execution), and **PASS** (valid-message positive control).
+For example, the chat's unsigned title/rename/reaction records are still
+not strong identity proofs; the lab reports the limitation rather than
+claiming prevention.
+
+To run the current panel in Colab, use the same supported public root URL
+(compatibility launcher) with a cache-busting query:
+
+```python
+import time, urllib.request
+url = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/guardian_stress_lab.py"
+exec(compile(
+    urllib.request.urlopen(url + "?v=" + str(time.time_ns()))
+        .read().decode("utf-8"), url, "exec"
+))
+```
+
+Select **Use real chat as a read-only reference** only if the owner wants
+the preview to show copied recent chat contents; the test never injects into
+that original. A local simulation tests Guardian's parser and recovery
+logic, **not** true cross-user Google Drive synchronization, server-side
+permissions, or resistance to copying the public client source.
+
 ## Owner-only modified-client attack stress lab (reversible)
 
 `guardian_stress_lab.py` is a **separate red-team test panel**. It imports
