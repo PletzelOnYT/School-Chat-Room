@@ -12,6 +12,8 @@ permission-free **Colab-style floating toast inside the chat output**.
   and a two-line message preview.
 - A thin blue progress line shrinks over **6.5 seconds**. The popup
   disappears automatically; **×** dismisses it immediately.
+- Type **`/testtoast`** in the chat input to preview the card and
+  countdown locally, without creating any shared chat message.
 - New messages from other chat users trigger toasts. Existing messages
   at startup, your own messages, private System output and repeated
   polling do not trigger alerts. Multiple messages arriving at once are
