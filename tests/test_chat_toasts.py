@@ -216,7 +216,7 @@ class DesktopPopupTests(unittest.TestCase):
         self.assertEqual(run.returncode,0,run.stdout+"\n"+run.stderr)
 
     def test_no_built_in_browser_notifications_or_embedded_toast(self):
-        self.assertIn("CLIENT_VERSION = '5.48'",SOURCE.read_text(encoding="utf-8"))
+        self.assertIn("CLIENT_VERSION = '5.49'",SOURCE.read_text(encoding="utf-8"))
         self.assertNotIn('messaging-toast-SESSION_ID',HTML)
         self.assertIn("popup=yes,width=",JAVASCRIPT)
         self.assertIn("window.open('', 'pletzel-desktop-SESSION_ID'",JAVASCRIPT)
