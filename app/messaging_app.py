@@ -1,4 +1,4 @@
-# @title Messaging App v5.56 — Google Drive Messenger
+# @title Messaging App v5.57 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.56'
+CLIENT_VERSION = '5.57'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1529,13 +1529,20 @@ def snapshot():
         for i, m in enumerate(local_messages):
             if m['anchor'] >= clear_through:
                 mixed.append((m['anchor'], i + 1, dict(m)))
+        if error:
+            # Read failures are also local System messages: they take one
+            # visible slot rather than living forever outside /last.
+            mixed.append((float('inf'), len(local_messages) + 1, {
+                'id': 'read-error', 'number': None, 'private': True,
+                'time': time.strftime('%H:%M:%S', time.gmtime()),
+                'user': 'System', 'text': error, 'reactions': {},
+            }))
         mixed.sort(key=lambda item: (item[0], item[1]))
         shown = [item[2] for item in mixed[-visible_count:]]
-        if error:
-            shown.append({'id': 'read-error', 'number': None, 'private': True,
-                          'time': time.strftime('%H:%M:%S', time.gmtime()), 'user': 'System',
-                          'text': error, 'reactions': {}})
-        threads = build_threads(a['messages'], visible_count,
+        # The reply groups are context for the frontend, not a second
+        # independent message quota. Each System notice consumes a slot.
+        shared_slots = sum(not m.get('private', False) for m in shown)
+        threads = build_threads(a['messages'], shared_slots,
                                 muted_names, clear_through)
         return JSON({'username': username, 'messages': shown,
                      'threads': threads,
@@ -2139,10 +2146,13 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   }
 
   function appTimeline(state) {
-    // Same thread / anchored-private-notice ordering as the original renderer.
+    // /last is a quota on the exact server-supplied mixed window. Thread
+    // groups supply parent context and corrected ordering, NOT extra rows.
+    const visible = Array.isArray(state.messages) ? state.messages : [];
+    const visibleIds = new Set(visible.map(msg => msg.id).filter(Boolean));
     const groups = Array.isArray(state.threads) ? state.threads : [];
     if (!groups.length)
-      return (state.messages || []).map(msg => ({msg, depth:0}));
+      return visible.map(msg => ({msg,depth:msg.reply_to ? 1 : 0}));
     const timeline = [];
     for (const group of groups) {
       if (!group?.root?.id) continue;
@@ -2151,7 +2161,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       timeline.push({kind:'thread',group,anchor:Math.max(0,
         ...nums.filter(Number.isFinite))});
     }
-    for (const msg of (state.messages || []).filter(item => item.private)) {
+    for (const msg of visible.filter(item => item.private)) {
       const anchor = Number.isFinite(msg.anchor) ?
         msg.anchor : Number.POSITIVE_INFINITY;
       let insertion = 0;
@@ -2159,7 +2169,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         if (timeline[i].anchor <= anchor) insertion = i+1;
       timeline.splice(insertion,0,{kind:'local',msg,anchor});
     }
-    const flat = [], seen = new Set();
+    const flat = [], visited = new Set(), printed = new Set();
     for (const item of timeline) {
       if (item.kind === 'local') {
         flat.push({msg:item.msg,depth:0});
@@ -2175,13 +2185,24 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         list.sort((a,b) => (a.display_rank ?? a.number ?? 0) -
                            (b.display_rank ?? b.number ?? 0));
       function visit(msg, depth) {
-        if (!msg?.id || seen.has(msg.id)) return;
-        seen.add(msg.id);
-        flat.push({msg,depth});
+        if (!msg?.id || visited.has(msg.id)) return;
+        visited.add(msg.id);
+        if (visibleIds.has(msg.id)) {
+          flat.push({msg,depth});
+          printed.add(msg.id);
+        }
+        // Walk through out-of-window ancestors so a visible reply still
+        // appears, without reintroducing old messages above /last.
         for (const child of children.get(msg.id) || [])
           visit(child,Math.min(depth+1,4));
       }
       visit(item.group.root,0);
+    }
+    // In-progress Drive synchronization may briefly supply a shared row
+    // before its thread group. Never drop a legitimately visible message.
+    for (const msg of visible) {
+      if (!msg.private && !printed.has(msg.id))
+        flat.push({msg,depth:msg.reply_to ? 1 : 0});
     }
     return flat;
   }
@@ -2979,6 +3000,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         timeline.push({kind:'message', msg});
       }
     }
+    const visibleIds = new Set((state.messages || []).map(msg => msg.id).filter(Boolean));
     const printed = new Set();
     for (const item of timeline) {
       if (item.kind !== 'thread') {
@@ -2999,12 +3021,19 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       function renderDescendant(node, depth) {
         if (!node?.id || printed.has(node.id)) return;
         printed.add(node.id);
-        renderLine(node, state.username || '', depth);
+        if (visibleIds.has(node.id))
+          renderLine(node, state.username || '', depth);
         for (const child of children.get(node.id) || []) {
           renderDescendant(child, Math.min(depth+1,4));
         }
       }
       renderDescendant(group.root, 0);
+    }
+    // A new shared message can reach the snapshot before its thread context.
+    // Still show it once, without ignoring the /last mixed-history limit.
+    for (const msg of (state.messages || [])) {
+      if (!msg.private && !printed.has(msg.id))
+        renderLine(msg, state.username || '', msg.reply_to ? 1 : 0);
     }
     if (state.popup && state.popup.id !== lastPopupId) {
       lastPopupId = state.popup.id;
