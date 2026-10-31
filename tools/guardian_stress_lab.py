@@ -28,6 +28,7 @@ import shutil
 import tempfile
 import time
 import urllib.request
+import unicodedata
 import uuid
 
 GUARDIAN_URL = (
@@ -461,6 +462,122 @@ class ModifiedClient:
         else:
             raise ValueError("Unknown test: " + case)
         self.overwrite_records(records)
+
+
+def _visible_text(value, limit=240):
+    """Show hostile input as inert characters, never as runnable HTML."""
+    src = str(value)
+    printable = []
+    for character in src[:limit]:
+        if unicodedata.category(character).startswith("C"):
+            printable.append(character.encode("unicode_escape").decode("ascii"))
+        else:
+            printable.append(character)
+    result = "".join(printable)
+    if len(src) > limit:
+        result += " … (" + str(len(src)) + " chars)"
+    return html.escape(result, quote=True)
+
+
+def preview_snapshot(guardian, raw, row_limit=12):
+    """Read only a cloned/seed snapshot and summarize it for the test UI.
+
+    The preview uses no chat runtime or browser commands. All raw user text
+    is escaped before it is displayed in ipywidgets.HTML.
+    """
+    data = bytes(raw)
+    result = {
+        "bytes": len(data), "events": 0, "messages": 0,
+        "rows": [], "error": None, "raw_excerpt": "",
+    }
+    try:
+        events = guardian.decode_shared_stream(data)
+    except (UnicodeError, ValueError, TypeError) as exc:
+        result["error"] = type(exc).__name__ + ": " + str(exc)
+        result["raw_excerpt"] = data[:300].decode("utf-8", errors="replace")
+        return result
+    result["events"] = len(events)
+    for index, event in enumerate(events):
+        if not isinstance(event, dict):
+            result["rows"].append({
+                "kind": "INVALID", "user": "raw event",
+                "time": "—", "text": repr(event)[:300], "index": index + 1,
+            })
+            continue
+        kind = str(event.get("kind", "message"))
+        if kind == "message":
+            result["messages"] += 1
+            text = str(event.get("text", ""))
+        elif kind == "title":
+            text = "Badge / title: " + str(event.get("title", ""))
+        elif kind == "rename":
+            text = "Rename to: " + str(event.get("name", ""))
+        elif kind == "reaction":
+            text = "Reaction: " + str(event.get("emoji", "")) + " (target " + \
+                   str(event.get("target", event.get("message_id", ""))) + ")"
+        elif kind == "clock":
+            continue
+        else:
+            text = str(event.get("text", event.get("role", "(metadata)")))
+        result["rows"].append({
+            "kind": kind, "user": str(event.get("user", "?")),
+            "time": str(event.get("time", "—")),
+            "text": text, "index": index + 1,
+        })
+    result["rows"] = result["rows"][-max(1, int(row_limit)):]
+    return result
+
+
+def render_chat_preview(snapshot, heading, status_label="SANDBOX"):
+    """Read-only, HTML-escaped terminal-style preview of a chat snapshot."""
+    highlight = {
+        "BEFORE": "#38bdf8", "ATTACK": "#f97316", "AFTER": "#4ade80"
+    }.get(status_label, "#a5b4fc")
+    heading = _visible_text(heading, 90)
+    details = (
+        str(snapshot["messages"]) + " messages · " +
+        str(snapshot["events"]) + " records · " +
+        str(snapshot["bytes"]) + " bytes"
+    )
+    rows = []
+    for entry in snapshot["rows"]:
+        kind = _visible_text(entry["kind"], 26).upper()
+        user = _visible_text(entry["user"], 55)
+        stamp = _visible_text(entry["time"], 18)
+        body = _visible_text(entry["text"], 220)
+        style = "#94a3b8" if kind != "MESSAGE" else "#e5e7eb"
+        rows.append(
+            '<div style="padding:9px 0;border-bottom:1px solid #27364b;'
+            'overflow-wrap:anywhere;font-size:12px;color:' + style + ';">'
+            '<span style="color:#8ea2bf">[' + stamp + ']</span> '
+            '<strong style="color:#93c5fd">' + user + '</strong>'
+            '<span style="color:#c4b5fd"> · ' + kind + '</span>'
+            '<div style="white-space:pre-wrap;margin-top:3px">'
+            + body + '</div></div>'
+        )
+    if snapshot["error"]:
+        rows.append(
+            '<div style="color:#fecaca;padding:12px;overflow-wrap:anywhere">'
+            '<b>INVALID / UNREADABLE CHAT</b><div>' +
+            _visible_text(snapshot["error"]) + '</div>'
+            '<pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
+            _visible_text(snapshot["raw_excerpt"], 240) + '</pre></div>'
+        )
+    if not rows:
+        rows.append('<div style="color:#94a3b8;padding:12px">No visible messages</div>')
+    return (
+        '<div style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;'
+        'background:#0f172a;color:#e5e7eb;border:1px solid #334155;'
+        'border-radius:12px;padding:12px;min-height:310px">'
+        '<div style="font-size:11px;font-weight:700;color:' + highlight +
+        ';letter-spacing:1px">' + _visible_text(status_label) + '</div>'
+        '<div style="font-size:14px;font-weight:700;margin:6px 0">' +
+        heading + '</div>'
+        '<div style="font-size:10px;color:#94a3b8;margin-bottom:8px">' +
+        html.escape(details) + '</div>'
+        '<div style="max-height:385px;overflow:auto">' +
+        ''.join(rows) + '</div></div>'
+    )
 
 
 class StressLab:
