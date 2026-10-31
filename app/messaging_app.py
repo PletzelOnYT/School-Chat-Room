@@ -1,4 +1,4 @@
-# @title Messaging App v5.37 — Google Drive Messenger
+# @title Messaging App v5.38 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.37'
+CLIENT_VERSION = '5.38'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -2134,41 +2134,68 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       "--- Type your message and press Enter. Type '/exit' to quit. ---"));
     newline(); newline();
 
-    // Threaded view: replies are ALWAYS immediately below their parent,
-    // including nested replies. No "View thread" action is necessary.
+    // One unified timeline for both real threaded messages and private
+    // System notices. The backend anchors each notice to the message number
+    // that existed when the local command ran. New shared messages appear
+    // below it; old notices scroll out of the visible-history window.
+    // Thread groups retain the backend's timestamp-corrected order and
+    // replies stay immediately below their parents.
     const groups = Array.isArray(state.threads) ? state.threads : [];
+    const timeline = [];
     if (groups.length) {
-      const printed = new Set();
       for (const group of groups) {
         if (!group?.root?.id) continue;
-        const children = new Map();
-        for (const reply of group.replies || []) {
-          const parent = reply.reply_to || group.root.id;
-          if (!children.has(parent)) children.set(parent, []);
-          children.get(parent).push(reply);
+        const numbers = [group.root.number,
+          ...(group.replies || []).map(reply => reply.number)];
+        const anchor = Math.max(0,
+          ...numbers.filter(value => Number.isFinite(value)));
+        timeline.push({kind:'thread', group, anchor});
+      }
+      for (const msg of (state.messages || []).filter(item => item.private)) {
+        const anchor = Number.isFinite(msg.anchor) ?
+          msg.anchor : Number.POSITIVE_INFINITY;
+        // Preserve existing thread order, including near-time inversions.
+        // Insert the local notice after the last thread/notice at or before
+        // its anchor, never in an independent fixed footer.
+        let insertion = 0;
+        for (let i=0; i<timeline.length; i++) {
+          if (timeline[i].anchor <= anchor) insertion = i + 1;
         }
-        for (const childList of children.values()) {
-          childList.sort((x,y) => (x.display_rank ?? x.number ?? 0) -
-                                      (y.display_rank ?? y.number ?? 0));
-        }
-        function renderDescendant(node, depth) {
-          if (!node?.id || printed.has(node.id)) return;
-          printed.add(node.id);
-          renderLine(node, state.username || '', depth);
-          for (const child of children.get(node.id) || []) {
-            renderDescendant(child, Math.min(depth+1,4));
-          }
-        }
-        renderDescendant(group.root, 0);
+        timeline.splice(insertion, 0, {kind:'local', msg, anchor});
       }
     } else {
-      for (const msg of (state.messages || []).filter(m => !m.private)) {
-        renderLine(msg, state.username || '');
+      // No thread groups: the server's normal mixed history is already
+      // ordered and includes private notices at their original positions.
+      for (const msg of (state.messages || [])) {
+        timeline.push({kind:'message', msg});
       }
     }
-    // Private system notices remain local and are never written to Drive.
-    for (const msg of (state.messages || []).filter(m => m.private)) {
-      renderLine(msg, state.username || '');
+    const printed = new Set();
+    for (const item of timeline) {
+      if (item.kind !== 'thread') {
+        renderLine(item.msg, state.username || '');
+        continue;
+      }
+      const group = item.group;
+      const children = new Map();
+      for (const reply of group.replies || []) {
+        const parent = reply.reply_to || group.root.id;
+        if (!children.has(parent)) children.set(parent, []);
+        children.get(parent).push(reply);
+      }
+      for (const childList of children.values()) {
+        childList.sort((x,y) => (x.display_rank ?? x.number ?? 0) -
+                                    (y.display_rank ?? y.number ?? 0));
+      }
+      function renderDescendant(node, depth) {
+        if (!node?.id || printed.has(node.id)) return;
+        printed.add(node.id);
+        renderLine(node, state.username || '', depth);
+        for (const child of children.get(node.id) || []) {
+          renderDescendant(child, Math.min(depth+1,4));
+        }
+      }
+      renderDescendant(group.root, 0);
     }
     if (state.popup && state.popup.id !== lastPopupId) {
       lastPopupId = state.popup.id;
