@@ -3,6 +3,16 @@
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
 
+## Owner Guardian v2.3: Colab kernel argument fix
+
+Jupyter and Google Colab automatically add a kernel connection option such as
+`-f /root/.local/share/jupyter/runtime/kernel-....json`. The previous
+owner-only launcher ran the Guardian as `__main__`, causing `argparse`
+to reject this unrelated option. The launcher now starts the Guardian
+using explicit default arguments, and direct calls of `guardian.main()`
+from notebook kernels also ignore the injected connection option.
+Normal command-line and explicitly provided Guardian flags remain supported.
+
 ## Owner Guardian v2.2: Automatic Drive shortcut and one-cell start
 
 The **owner-only** Guardian now also mounts Drive in Colab and creates/reuses
