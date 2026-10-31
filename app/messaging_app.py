@@ -1834,7 +1834,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   </form>
   <div id="messaging-closed-SESSION_ID" style="display:none;white-space:pre-wrap;">--- Chat closed ---</div>
   <div id="messaging-help-fallback-SESSION_ID" style="display:none;margin-top:4px;">
-    <a id="messaging-help-link-SESSION_ID" href="#" target="_blank" rel="noopener" style="color:#00BFFF;text-decoration:underline;">Open help in new window</a>
+    <a id="messaging-help-link-SESSION_ID" href="#" target="_blank" rel="noopener" style="color:#00BFFF;text-decoration:underline;">Open command output in new window</a>
     <span style="font-size:11px;color:gray;"> (Click if Chrome blocked the popup.)</span>
   </div>
 </div>
@@ -1856,60 +1856,69 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   const sendQueue = [];
   let lastQueuedDispatch = 0;
   let lastPopupId = null;
-  let pendingHelpWindow = null;
+  const pendingPopupWindows = [];
   let lastHelpURL = null;
+  const popupCommands = new Set([
+    '/help', '/hellp', '/rules', '/version', '/whoami', '/id',
+    '/users', '/verified', '/mentions', '/search', '/find', '/muted'
+  ]);
+  function isPopupCommand(value) {
+    return popupCommands.has(String(value).trim().split(/\s+/, 1)[0].toLowerCase());
+  }
 
-  function helpDocument(title, body) {
+  function commandDocument() {
     // The text is displayed as textContent, never interpreted as HTML.
-    return '<!doctype html><html><head><meta charset="utf-8"><title>Messaging App Commands</title>' +
+    return '<!doctype html><html><head><meta charset="utf-8"><title>Messaging App Command Results</title>' +
       '<style>body{background:#151515;color:#eaeaea;font:13px monospace;margin:24px;}' +
       'h2{color:#00ffff;font-size:17px;}pre{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;}' +
       'button{background:#242424;color:#fff;border:1px solid #777;padding:6px 12px;cursor:pointer;}' +
       '</style></head><body><h2 id="heading"></h2><pre id="commands"></pre>' +
       '<button onclick="window.close()">Close</button></body></html>';
   }
-  function openHelpWindow() {
-    // Must run synchronously in the user submit event, before any await.
+  function openCommandWindow() {
+    // Open synchronously on Enter, before any asynchronous Colab callback.
+    // Keep one pending window per queued long-output command.
+    let win = null;
     try {
-      const win = window.open('', '_blank', 'width=710,height=650,resizable=yes,scrollbars=yes');
+      win = window.open('', '_blank', 'width=710,height=650,resizable=yes,scrollbars=yes');
       if (win) {
-        pendingHelpWindow = win;
         win.document.open();
-        win.document.write(helpDocument());
+        win.document.write(commandDocument());
         win.document.close();
-        win.document.getElementById('heading').textContent = 'Loading commands...';
+        win.document.getElementById('heading').textContent = 'Loading command output...';
         helpFallback.style.display = 'none';
-        return;
       }
-    } catch (error) { console.debug('Separate help window blocked:', error); }
-    pendingHelpWindow = null;
+    } catch (error) {
+      console.debug('Separate command window blocked:', error);
+      win = null;
+    }
+    pendingPopupWindows.push(win);
   }
-  function showHelpPopup(popup) {
+  function showCommandPopup(popup) {
     if (!popup) return;
-    const title = String(popup.title || 'CHAT COMMANDS');
+    const title = String(popup.title || 'CHAT COMMAND OUTPUT');
     const body = String(popup.text || '');
-    if (pendingHelpWindow && !pendingHelpWindow.closed) {
+    const win = pendingPopupWindows.length ? pendingPopupWindows.shift() : null;
+    if (win && !win.closed) {
       try {
-        const doc = pendingHelpWindow.document;
+        const doc = win.document;
         doc.getElementById('heading').textContent = title;
         doc.getElementById('commands').textContent = body;
-        pendingHelpWindow.focus();
-        pendingHelpWindow = null;
+        win.focus();
         helpFallback.style.display = 'none';
         return;
-      } catch (error) { console.debug('Help window could not be updated:', error); }
+      } catch (error) { console.debug('Command window could not be updated:', error); }
     }
     // Sandbox/popup-blocker fallback: a REAL clickable link that opens a new tab.
     // No in-chat modal is created.
     const escapeHTML = text => text.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-    const page = '<!doctype html><html><head><meta charset="utf-8"><title>Messaging App Help</title>'+
+    const page = '<!doctype html><html><head><meta charset="utf-8"><title>Messaging App Command Results</title>'+
       '<style>body{background:#151515;color:#eee;font:13px monospace;padding:22px}h2{color:cyan}pre{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}</style></head>'+
       '<body><h2>'+escapeHTML(title)+'</h2><pre>'+escapeHTML(body)+'</pre></body></html>';
     if (lastHelpURL) URL.revokeObjectURL(lastHelpURL);
     lastHelpURL = URL.createObjectURL(new Blob([page], {type:'text/html'}));
     helpLink.href = lastHelpURL;
     helpFallback.style.display = 'block';
-    pendingHelpWindow = null;
   }
 
   function colored(text, color, bold = false) {
@@ -2163,7 +2172,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     }
     if (state.popup && state.popup.id !== lastPopupId) {
       lastPopupId = state.popup.id;
-      showHelpPopup(state.popup);
+      showCommandPopup(state.popup);
     }
     if (!state.running) {
       stopped = true;
@@ -2191,7 +2200,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     if (stopped) return;
     const value = input.value;
     if (!value.trim()) return;
-    if (['/help', '/hellp'].includes(value.trim().toLowerCase())) openHelpWindow();
+    if (isPopupCommand(value)) openCommandWindow();
     input.value = '';
     // Do not disable the text input just because another message is pending.
     // This client's messages are queued and sent in submission order.
