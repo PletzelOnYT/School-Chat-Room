@@ -49,7 +49,7 @@ const state = {
   running: true,
   popup: null,
   messages: [
-    {id:'a', number:101, time:'12:00:01', user:'Alex', verified:true,
+    {id:'a', number:101, time:'12:00:01', time_estimated:true, user:'Alex', verified:true,
      text:'Hey!', reactions:{}, my_reactions:[], private:false},
     {id:'b', number:102, time:'12:00:02', user:'Emma', verified:false,
      text:'Hello!', reply_to:'a', reactions:{}, my_reactions:[], private:false},
@@ -86,6 +86,7 @@ setTimeout(() => {
     const area = elements['messaging-display-SESSION_ID'];
     const original = area.textContent;
     assert(original.includes('[12:00:01] #101 ☑ Alex: Hey!'), original);
+    assert(!original.includes('~'), 'A legacy timestamp must display without ~');
     assert(original.includes('[12:00:02] #102 Emma: Hello!'), original);
     assert(original.indexOf('Alex: Hey!') < original.indexOf('Emma: Hello!'));
     assert(!original.includes('[React]'));
