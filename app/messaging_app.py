@@ -2271,8 +2271,10 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
           let node = root;
           while (node) {
             const background = window.getComputedStyle(node).backgroundColor;
-            if (background && background !== 'transparent' &&
-                !/^rgba?\\([^)]*,\\s*0(?:\\.0+)?\\)$/.test(background)) {
+            const alpha = background && background.startsWith('rgba(') ?
+              Number(background.slice(background.lastIndexOf(',')+1)
+                .replace(')', '').trim()) : 1;
+            if (background && background !== 'transparent' && alpha !== 0) {
               doc.body.style.backgroundColor = background;
               break;
             }
