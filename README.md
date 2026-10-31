@@ -1,4 +1,4 @@
-# Messaging App v5.28
+# Messaging App v5.30
 
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
@@ -18,7 +18,9 @@ Every **normal message** still uses exactly four fields, in this order:
 }
 ```
 
-New messages append in the same multi-line format, using an in-place modification of the JSON array's tail instead of rewriting its entire history.
+**v5.30 changes storage to an append-only journal.** The original formatted JSON array is left byte-for-byte unchanged; each new message, reaction, rename, or title is appended as a framed JSON object *after* that array. No older bytes are rewritten or truncated.
+
+This means the complete `chat.json` file **is no longer one valid JSON document** after the first new message. Only the updated Messaging App and updated Owner Guardian know how to read the original array plus appended records. Raw `json.load()` or an ordinary JSON validator will reject the whole file; the individual records are still JSON objects. The app uses a record-separator marker before each new object.
 
 ### New title events
 
@@ -70,7 +72,7 @@ Emoji reactions also work with small metadata records:
 1. Stop all older Colab chat cells; older versions can write incompatible records.
 2. Keep the original `chat.json` shortcut in the root of each participant's My Drive.
 3. Rerun the existing GitHub launcher (old `school_chat.py` path still loads `messaging_app.py`).
-4. If you were using the separate Owner Guardian, stop the old monitor and restart the updated one using `--reset-baseline` **once**. The old guardian database contains removed role/reaction records and must not restore them.
+4. **Stop any older Owner Guardian before anyone starts v5.30.** An older Guardian will treat the appended records as broken JSON and could overwrite them. Download the latest `owner_guardian.py` and restart it. **Do not reset an existing healthy Guardian database** solely for this upgrade; a reset would discard the prior verified backup history. Run a temporary `--audit-only` check first.
 
 ## Supported features and trade-offs
 
@@ -79,7 +81,9 @@ Emoji reactions also work with small metadata records:
 - **Verified checkmarks are self-claimed and tied to a display name, not a signed person.** A separate title record enables or revokes the blue badge. There is no Google identity attestation.
 - `/rename <name>` persists through a simple record without altering old chat entries; reactions use name-based records and numeric message references. Both are functional but not cryptographically authenticated.
 - Four-field messages cannot prove who authored them. Editors of the shared Drive file can impersonate names or change content.
-- JSON tail append is **not an atomic multi-user transaction** on Google Drive. Simultaneous writers may still conflict.
+- The app opens the existing shared file in **append-only mode** and never rewrites older chat bytes during normal sends.
+- A private, per-user `.schoolchat/message_outbox.json` holds delivery receipts. If a competing Drive save erases a recently appended event, an active or restarted client can reappend it.
+- **Google Drive Colab mounts still do not guarantee cross-user atomic append.** Private recovery receipts reduce loss, but delivery and ordering are not guaranteed when many students send simultaneously. A single-writer server or shared per-message files would be necessary for stronger guarantees.
 
 ## Owner Guardian
 
