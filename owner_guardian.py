@@ -85,9 +85,22 @@ def simple_title(event):
             and event.get("title") in ("Verified", "None"))
 
 
+def simple_rename(event):
+    """Simple four-key nickname mapping: original username -> new name."""
+    return (isinstance(event, dict) and
+            set(event) == {"kind", "time", "user", "name"} and
+            event.get("kind") == "rename" and
+            isinstance(event.get("time"), str) and
+            re.fullmatch(r"\d{2}:\d{2}:\d{2}", event["time"]) is not None and
+            isinstance(event.get("user"), str) and
+            0 < len(event["user"]) <= 128 and
+            valid_name(event.get("name")))
+
+
 def event_id(event, position=None):
     """Storage index for private ledger, not written to public chat.json."""
-    if (simple_message(event) or simple_title(event)) and position is not None:
+    if (simple_message(event) or simple_title(event) or
+            simple_rename(event)) and position is not None:
         raw=canonical_event(event).encode("utf-8")
         return "plain-%d-%s" % (position,hashlib.sha256(raw).hexdigest()[:16])
     return event.get("id") if isinstance(event,dict) else None
@@ -189,6 +202,10 @@ def check_new_event(event, accepted, rate_log, now=None):
                for ts,body in history)>=4:
             return "duplicate-message flood"
         history.append((stamp,normalized))
+        return None
+    if simple_rename(event):
+        if not valid_name(event["user"]):
+            return "invalid rename source"
         return None
     if simple_title(event):
         # Title records are self-claimed name metadata, not proof of Google ID.
@@ -302,7 +319,8 @@ def read_shared(path):
     if not isinstance(entries,list):
         raise ValueError("chat.json must be a JSON array")
     legacy_anchor=any(isinstance(x,dict) and x.get("id")==ANCHOR for x in entries)
-    simplified=all(simple_message(x) or simple_title(x) for x in entries)
+    simplified=all(simple_message(x) or simple_title(x) or
+                   simple_rename(x) for x in entries)
     if not legacy_anchor and not simplified:
         raise ValueError("file is neither original history nor simplified four-field chat")
     return raw,entries
@@ -527,7 +545,8 @@ class Guardian:
         # A deliberate four-field migration invalidates old ID-based
         # checkpoints. Never undo it automatically and restore old metadata.
         migrated=(bool(live) and all(
-                    simple_message(e) or simple_title(e) for e in live))
+                    simple_message(e) or simple_title(e) or
+                    simple_rename(e) for e in live))
         old_baseline=any(e.get("id")==ANCHOR for e in known)
         if migrated and old_baseline:
             self.log("FORMAT MIGRATION detected. Old guardian checkpoint "
