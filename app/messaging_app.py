@@ -1,4 +1,4 @@
-# @title Messaging App v5.42 — Google Drive Messenger
+# @title Messaging App v5.43 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.42'
+CLIENT_VERSION = '5.43'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1243,7 +1243,7 @@ HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /me <action>               Post a chat action
 /stats                     Chat statistics
 /ping                      Check shared file
-/testtoast                 Preview a local bottom-right notification
+/testpopup                 Test a small desktop popup (no chat message)
 /version                   Show the running chat version and clock mode
 /exit                      Close the chat
 
@@ -1840,40 +1840,6 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     <a id="messaging-help-link-SESSION_ID" href="#" target="_blank" rel="noopener" style="color:#00BFFF;text-decoration:underline;">Open command output in new window</a>
     <span style="font-size:11px;color:gray;"> (Click if Chrome blocked the popup.)</span>
   </div>
-  <style>
-    @keyframes pletzel-toast-countdown-SESSION_ID {
-      from { width:100%; }
-      to { width:0%; }
-    }
-  </style>
-  <div id="messaging-toast-SESSION_ID" role="status" aria-live="polite"
-    style="display:none;position:fixed;right:12px;bottom:12px;z-index:9999;
-           width:min(330px,calc(100vw - 24px));box-sizing:border-box;
-           background:#ffffff;color:#202124;border:1px solid #dadce0;
-           border-radius:9px;box-shadow:0 4px 18px rgba(60,64,67,.26);
-           overflow:hidden;font-family:Arial,Helvetica,sans-serif;font-size:13px;">
-    <div style="display:flex;align-items:flex-start;gap:10px;padding:11px 12px 9px;">
-      <span aria-hidden="true" style="background:#e8f0fe;color:#1a73e8;
-           width:28px;height:28px;display:flex;align-items:center;justify-content:center;
-           border-radius:50%;flex-shrink:0;font-size:16px;">●</span>
-      <div style="min-width:0;flex:1;">
-        <div id="messaging-toast-title-SESSION_ID"
-          style="font-size:12px;font-weight:bold;color:#202124;line-height:17px;"></div>
-        <div id="messaging-toast-preview-SESSION_ID"
-          style="font-size:12px;color:#5f6368;line-height:17px;margin-top:3px;
-                 overflow:hidden;overflow-wrap:anywhere;display:-webkit-box;
-                 -webkit-box-orient:vertical;-webkit-line-clamp:2;"></div>
-      </div>
-      <button id="messaging-toast-close-SESSION_ID" type="button"
-        aria-label="Dismiss chat notification"
-        style="border:0;background:transparent;color:#5f6368;cursor:pointer;
-               font-size:18px;line-height:20px;padding:0 2px;">×</button>
-    </div>
-    <div style="height:3px;background:#e8f0fe;width:100%;">
-      <div id="messaging-toast-timer-SESSION_ID"
-        style="height:3px;width:100%;background:#1a73e8;"></div>
-    </div>
-  </div>
 </div>
 <script>
 (() => {
@@ -1884,11 +1850,6 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   const closed = document.getElementById('messaging-closed-SESSION_ID');
   const helpFallback = document.getElementById('messaging-help-fallback-SESSION_ID');
   const helpLink = document.getElementById('messaging-help-link-SESSION_ID');
-  const toast = document.getElementById('messaging-toast-SESSION_ID');
-  const toastTitle = document.getElementById('messaging-toast-title-SESSION_ID');
-  const toastPreview = document.getElementById('messaging-toast-preview-SESSION_ID');
-  const toastTimer = document.getElementById('messaging-toast-timer-SESSION_ID');
-  const toastClose = document.getElementById('messaging-toast-close-SESSION_ID');
   const stateCallback = STATE_CALLBACK_JSON;
   const sendCallback = SEND_CALLBACK_JSON;
   let busy = false;
@@ -1900,11 +1861,14 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   let lastPopupId = null;
   const pendingPopupWindows = [];
   let lastHelpURL = null;
-  // Browser-permission-free toasts appear only inside this Colab chat frame.
-  // No browser Notification API, extensions or external popup windows.
+  // Opt-in actual browser popup windows, not Notification API or in-page toasts.
+  // Browsers may block automated window.open calls without a user gesture.
   let lastSeenChatNumber = null;
-  let toastDismissTimer = null;
-  const TOAST_DURATION_MS = 6500;
+  let desktopPopupsEnabled = false;
+  let desktopPopupBlocked = false;
+  let desktopPopupWindow = null;
+  let desktopPopupCloseTimer = null;
+  const DESKTOP_POPUP_MS = 6500;
   const popupCommands = new Set([
     '/help', '/hellp', '/rules', '/version', '/whoami', '/id',
     '/users', '/verified', '/mentions', '/search', '/find', '/muted'
@@ -1968,57 +1932,174 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     helpFallback.style.display = 'block';
   }
 
-  function dismissToast() {
-    if (toastDismissTimer !== null) {
-      clearTimeout(toastDismissTimer);
-      toastDismissTimer = null;
+  function closeDesktopPopup() {
+    if (desktopPopupCloseTimer !== null) {
+      clearTimeout(desktopPopupCloseTimer);
+      desktopPopupCloseTimer = null;
     }
-    toast.style.display = 'none';
-    toastTimer.style.animation = 'none';
+    if (desktopPopupWindow) {
+      try {
+        if (!desktopPopupWindow.closed) desktopPopupWindow.close();
+      } catch (error) {
+        console.debug('Could not close notification popup:', error);
+      }
+      desktopPopupWindow = null;
+    }
   }
-  toastClose.addEventListener('click', dismissToast);
 
-  function showMessageToast(author, message, count=1) {
-    if (stopped || !root.isConnected) return;
-    dismissToast();
+  function desktopPopupStatusText() {
+    if (desktopPopupBlocked) return '[Desktop popups BLOCKED]';
+    return desktopPopupsEnabled ? '[Desktop popups ON]' : '[Desktop popups OFF]';
+  }
+
+  function refreshDesktopPopupStatus() {
+    if (latestState && root.isConnected) render(latestState);
+  }
+
+  function popupWindowFeatures() {
+    const width = 355, height = 165, margin = 16;
+    let left = 0, top = 0;
+    try {
+      const bounds = window.screen || {};
+      const x = Number(bounds.availLeft || 0);
+      const y = Number(bounds.availTop || 0);
+      const w = Number(bounds.availWidth || 1000);
+      const h = Number(bounds.availHeight || 700);
+      left = Math.max(x, x + w - width - margin);
+      top = Math.max(y, y + h - height - margin);
+    } catch (error) {
+      // Chrome may restrict screen geometry. It chooses positioning instead.
+      left = 500;
+      top = 450;
+    }
+    // popup=yes requests an independent small Chrome window instead of a tab.
+    // The browser ultimately decides size, placement and whether to allow it.
+    return 'popup=yes,width=' + width + ',height=' + height +
+      ',left=' + Math.floor(left) + ',top=' + Math.floor(top) +
+      ',resizable=yes,scrollbars=no';
+  }
+
+  function popupNotificationDocument() {
+    // All dynamic content is inserted via textContent (never HTML).
+    return '<!doctype html><html><head><meta charset="utf-8">' +
+      '<title>Pletzel Chat · New message</title>' +
+      '<style>@keyframes expire{from{width:100%}to{width:0%}}' +
+      '*{box-sizing:border-box}body{margin:0;background:#fff;color:#202124;' +
+      'font:13px Arial,Helvetica,sans-serif;overflow:hidden}' +
+      '.card{position:relative;height:100vh;border:1px solid #dadce0;}' +
+      '.content{display:flex;align-items:flex-start;padding:14px 12px 10px;' +
+      'gap:10px}.avatar{width:29px;height:29px;flex:none;border-radius:50%;' +
+      'background:#e8f0fe;color:#1a73e8;display:flex;align-items:center;' +
+      'justify-content:center;font-size:17px;font-weight:bold}' +
+      '.message{min-width:0;flex:1}.sender{font-weight:600;font-size:13px;' +
+      'line-height:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '.preview{margin-top:3px;font-size:12px;line-height:17px;color:#5f6368;' +
+      'overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;' +
+      '-webkit-box-orient:vertical;overflow:hidden}' +
+      'button{font-size:19px;line-height:20px;padding:0 3px;border:0;' +
+      'background:none;color:#5f6368;cursor:pointer}' +
+      '.track{position:absolute;bottom:0;left:0;right:0;height:3px;' +
+      'background:#e8f0fe}.bar{height:100%;width:100%;background:#1a73e8;' +
+      'animation:expire 6.5s linear forwards}' +
+      '</style></head><body><div class="card"><div class="content">' +
+      '<div class="avatar" aria-hidden="true">●</div><div class="message">' +
+      '<div class="sender" id="sender"></div>' +
+      '<div class="preview" id="preview"></div></div>' +
+      '<button type="button" id="close" aria-label="Close notification">×</button>' +
+      '</div><div class="track"><div class="bar" id="bar"></div></div>' +
+      '</div></body></html>';
+  }
+
+  function showDesktopPopup(author, message, count=1) {
+    if (stopped || !root.isConnected) return false;
     const sender = String(author || 'Someone').slice(0,50);
     const preview = String(message || '').replace(/\s+/g, ' ').trim().slice(0,170);
-    toastTitle.textContent = count > 1
-      ? 'Pletzel Chat · ' + count + ' new messages'
-      : 'Pletzel Chat · ' + sender;
-    toastPreview.textContent = count > 1
-      ? (sender + ': ' + (preview || '(empty message)'))
-      : (preview || '(empty message)');
-    toast.style.display = 'block';
-    // Restart the progress line whenever a newer message replaces the toast.
-    toastTimer.style.animation = 'none';
-    void toastTimer.offsetWidth;
-    toastTimer.style.animation =
-      'pletzel-toast-countdown-SESSION_ID ' + TOAST_DURATION_MS + 'ms linear forwards';
-    toastDismissTimer = setTimeout(dismissToast, TOAST_DURATION_MS);
+    let popup = desktopPopupWindow;
+    // An already-open popup can be updated, even if a fresh window.open
+    // would require another user gesture. Once closed, reopening may be
+    // restricted by Chrome's popup blocker or the school administrator.
+    if (!popup || popup.closed) {
+      try {
+        popup = window.open('', 'pletzel-desktop-SESSION_ID',
+          popupWindowFeatures());
+      } catch (error) {
+        console.debug('Desktop notification window rejected:', error);
+        popup = null;
+      }
+    }
+    if (!popup || popup.closed) {
+      desktopPopupBlocked = true;
+      desktopPopupsEnabled = false;
+      desktopPopupWindow = null;
+      console.debug('Chrome blocked automatic desktop popup windows.');
+      refreshDesktopPopupStatus();
+      return false;
+    }
+    desktopPopupWindow = popup;
+    desktopPopupBlocked = false;
+    try {
+      popup.document.open();
+      popup.document.write(popupNotificationDocument());
+      popup.document.close();
+      popup.document.getElementById('sender').textContent =
+        count > 1 ? ('Pletzel Chat · ' + count + ' new messages')
+                  : ('Pletzel Chat · ' + sender);
+      popup.document.getElementById('preview').textContent =
+        count > 1 ? (sender + ': ' + (preview || '(empty message)'))
+                  : (preview || '(empty message)');
+      popup.document.getElementById('close').addEventListener(
+        'click', closeDesktopPopup);
+      // Browser may ignore programmatic positioning or focusing.
+      try { popup.focus(); } catch (error) { /* best-effort */ }
+      if (desktopPopupCloseTimer !== null) clearTimeout(desktopPopupCloseTimer);
+      desktopPopupCloseTimer = setTimeout(closeDesktopPopup, DESKTOP_POPUP_MS);
+      return true;
+    } catch (error) {
+      console.debug('Desktop popup could not be populated:', error);
+      closeDesktopPopup();
+      desktopPopupsEnabled = false;
+      desktopPopupBlocked = true;
+      refreshDesktopPopupStatus();
+      return false;
+    }
   }
 
-  function checkIncomingMessageToasts(state) {
-    // Do not announce old conversation history at initial load.
-    // A refresh is polled each second: only notify on unseen shared message
-    // numbers, not reactions, private System output or our own messages.
-    const records = (state.messages || []).filter(msg =>
-      msg && !msg.private && Number.isSafeInteger(msg.number) && msg.number > 0);
-    const newestNumber = records.reduce((n,msg) => Math.max(n,msg.number), 0);
-    if (lastSeenChatNumber === null) {
-      lastSeenChatNumber = newestNumber;
+  function toggleDesktopPopups() {
+    if (desktopPopupsEnabled) {
+      desktopPopupsEnabled = false;
+      desktopPopupBlocked = false;
+      closeDesktopPopup();
+      refreshDesktopPopupStatus();
       return;
     }
-    if (newestNumber <= lastSeenChatNumber) return;
+    // A deliberate click can open an initial popup without an extension or
+    // Notification API. Automatic later popups are subject to Chrome policy.
+    desktopPopupsEnabled = true;
+    desktopPopupBlocked = false;
+    showDesktopPopup('Preview',
+      'Desktop popup preview. This separate window closes in 6.5 seconds.');
+    refreshDesktopPopupStatus();
+  }
+
+  function checkIncomingDesktopPopups(state) {
+    const records = (state.messages || []).filter(msg =>
+      msg && !msg.private && Number.isSafeInteger(msg.number) && msg.number > 0);
+    const newest = records.reduce((n,msg) => Math.max(n,msg.number), 0);
+    if (lastSeenChatNumber === null) {
+      lastSeenChatNumber = newest;
+      return;
+    }
+    if (newest <= lastSeenChatNumber) return;
     const fresh = records.filter(msg => msg.number > lastSeenChatNumber)
       .sort((a,b) => a.number - b.number);
-    lastSeenChatNumber = newestNumber;
+    lastSeenChatNumber = newest;
+    if (!desktopPopupsEnabled) return;
     const currentUser = String(state.username || '').toLocaleLowerCase();
     const fromOthers = fresh.filter(msg =>
       String(msg.user || '').toLocaleLowerCase() !== currentUser);
     if (!fromOthers.length) return;
     const latest = fromOthers[fromOthers.length - 1];
-    showMessageToast(latest.user, latest.text, fromOthers.length);
+    showDesktopPopup(latest.user,latest.text,fromOthers.length);
   }
 
   function colored(text, color, bold = false) {
@@ -2209,7 +2290,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   function render(state) {
     if (!state || !root.isConnected) return;
     latestState = state;
-    checkIncomingMessageToasts(state);
+    checkIncomingDesktopPopups(state);
     if (selectedMessageId && !(state.messages || []).some(m => m.id === selectedMessageId)) {
       selectedMessageId = null;
       selectedEmojiPicker = false;
@@ -2220,7 +2301,13 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     header.appendChild(document.createTextNode('--- Connected as: '));
     appendVerifiedTitle(state.my_verified, header);
     header.appendChild(colored(state.username, 'green', true));
-    header.appendChild(document.createTextNode(' ---'));
+    header.appendChild(document.createTextNode(' ---  '));
+    const popupControl = textControl(desktopPopupStatusText(),
+      toggleDesktopPopups,desktopPopupBlocked ? '#FF5555' :
+        (desktopPopupsEnabled ? '#34A853' : '#00BFFF'));
+    popupControl.title = 'Click to enable/disable separate Chrome desktop popups. ' +
+      'Automatic popups may be blocked by school policy.';
+    header.appendChild(popupControl);
     // Fullscreen is still available without adding any icons to the classic UI.
     header.title = 'Double-click to toggle fullscreen';
     header.addEventListener('dblclick', () => {
@@ -2304,7 +2391,8 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     }
     if (!state.running) {
       stopped = true;
-      dismissToast();
+      closeDesktopPopup();
+      desktopPopupsEnabled = false;
       form.style.display = 'none';
       closed.style.display = 'block';
     }
@@ -2329,10 +2417,12 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     if (stopped) return;
     const value = input.value;
     if (!value.trim()) return;
-    if (value.trim().toLowerCase() === '/testtoast') {
+    if (['/testpopup', '/testtoast'].includes(value.trim().toLowerCase())) {
       input.value = '';
-      showMessageToast('Preview', 'This is a sample message preview. It closes automatically.', 1);
-      return; // Purely local: never sent to Colab or shared chat.json.
+      // Direct input event supplies user activation for a real browser window.
+      showDesktopPopup('Preview',
+        'This is a desktop popup preview. It closes in 6.5 seconds.');
+      return; // Purely local: never sent to the chat or Drive.
     }
     if (isPopupCommand(value)) openCommandWindow();
     input.value = '';
