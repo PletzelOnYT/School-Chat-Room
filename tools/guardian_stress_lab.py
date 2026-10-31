@@ -735,51 +735,113 @@ def read_live_snapshot_only():
 
 
 def launch_panel(guardian=None):
-    """Interactive modified-client panel with a prominent red rollback button."""
+    """Colab dashboard with read-only cloned-chat attack/repair preview."""
     import ipywidgets as widgets
     from IPython.display import display
 
     module = guardian if guardian is not None else obtain_guardian()
     current = {"lab": StressLab(module)}
-    status = widgets.HTML(
-        "<b>OWNER GUARDIAN STRESS LAB</b> — synthetic local test copy. "
-        "<span style='color:#b91c1c'><b>LIVE CHAT: NOT MODIFIED</b></span>"
+    header = widgets.HTML(
+        '<div style="background:#0b1220;padding:18px;border-radius:13px;'
+        'border:1px solid #334155;color:#e2e8f0">'
+        '<div style="font-size:19px;font-weight:800">🛡️ GUARDIAN RED-TEAM LAB</div>'
+        '<div style="font-size:12px;color:#94a3b8;margin-top:6px">'
+        'Modified-client attack simulator · Guardian v' +
+        html.escape(module.GUARDIAN_VERSION) +
+        ' · <b style="color:#4ade80">TEMPORARY COPIES ONLY</b></div>'
+        '<div style="color:#fbbf24;font-size:11px;margin-top:5px">'
+        'Preview shows a test clone, not the live chat UI. No real chat writes.'
+        '</div></div>'
     )
     use_mirror = widgets.Checkbox(
-        value=False, description="Use live chat as READ-ONLY source (copy to lab)",
-        indent=False, layout=widgets.Layout(width="460px")
+        value=False,
+        description="Read real chat once as a reference (copy stays in sandbox)",
+        indent=False,
+        layout=widgets.Layout(width="540px")
+    )
+    categories = widgets.Dropdown(
+        options=["All categories", *ATTACK_GROUPS],
+        value="All categories", description="Category:",
+        layout=widgets.Layout(width="330px"),
     )
     case_picker = widgets.Dropdown(
         options=[(name, key) for key, name in ATTACK_LABELS.items()],
         description="Attack:",
-        layout=widgets.Layout(width="530px")
+        layout=widgets.Layout(width="610px"),
     )
-    run_one = widgets.Button(description="Test selected attack", icon="shield",
-                             button_style="info")
-    run_all = widgets.Button(description="Run full stress test", icon="play",
-                             button_style="warning")
+    select_preview = widgets.Dropdown(
+        options=[("Initial sandbox chat", "")],
+        value="", description="Inspect:",
+        layout=widgets.Layout(width="500px"),
+    )
+    run_one = widgets.Button(
+        description="Launch selected attack", icon="shield",
+        button_style="info", layout=widgets.Layout(width="245px")
+    )
+    run_category = widgets.Button(
+        description="Run visible category", icon="bolt",
+        button_style="warning", layout=widgets.Layout(width="245px")
+    )
+    run_all = widgets.Button(
+        description="Run all " + str(len(ATTACK_LABELS)) + " attacks",
+        icon="play", button_style="primary",
+        layout=widgets.Layout(width="220px")
+    )
     revert = widgets.Button(
         description="🟥 REVERT ALL TEST CHANGES",
         button_style="danger", icon="undo",
-        tooltip="Restore all local test copies byte-for-byte; never touches live Drive",
-        layout=widgets.Layout(width="270px", height="43px")
+        tooltip="Restore and delete all temporary attack clones; never touch the live room",
+        layout=widgets.Layout(width="280px", height="47px")
+    )
+    preview_status = widgets.HTML()
+    initial = preview_snapshot(module, current["lab"].seed)
+    before_card = widgets.HTML(layout=widgets.Layout(width="33%"))
+    attack_card = widgets.HTML(layout=widgets.Layout(width="33%"))
+    after_card = widgets.HTML(layout=widgets.Layout(width="33%"))
+    preview_cards = widgets.HBox(
+        [before_card, attack_card, after_card],
+        layout=widgets.Layout(width="100%", gap="9px",
+                              overflow_x="auto"),
     )
     output = widgets.Output(layout=widgets.Layout(
-        border="1px solid #888", max_height="430px", overflow="auto"
+        border="1px solid #334155", max_height="390px", overflow="auto"
     ))
 
     def get_lab():
         return current["lab"]
 
+    def update_inspector(selected=""):
+        entries = [("Initial sandbox chat", "")]
+        entries += [
+            (ATTACK_LABELS[c] + " · " + status["status"], c)
+            for c, status in sorted(get_lab().previews.items())
+        ]
+        select_preview.options = entries
+        select_preview.value = selected if selected in get_lab().previews else ""
+
     def print_case(row):
-        symbol = "✅" if row["status"] in ("PASS", "BLOCKED") else "⚠️"
-        print("{} {:12s} {:50s} → {:15s} ({})".format(
-            symbol, row["status"], row["name"],
-            row["guardian_result"], "clone restored" if row["restored"] else "still changed"
+        symbol = (
+            "✅" if row["status"] in ("PASS", "BLOCKED", "ALLOWED TEXT")
+            else "🟡" if row["status"] == "DETECTED ONLY" else "⚠️"
+        )
+        print("{} {:14s} {:48s} → {:19s}".format(
+            symbol, row["status"], row["name"][:48],
+            row["guardian_result"],
         ))
 
+    def on_category(change):
+        if change.get("name") != "value":
+            return
+        cat = change["new"]
+        keys = ATTACK_GROUPS[cat] if cat != "All categories" else tuple(ATTACK_LABELS)
+        case_picker.options = [(ATTACK_LABELS[c], c) for c in keys]
+
+    def on_select_preview(change):
+        if change.get("name") == "value":
+            refresh_preview(change["new"])
+
     def mirror_toggle(change):
-        if change["name"] != "value":
+        if change.get("name") != "value":
             return
         with output:
             try:
@@ -788,65 +850,127 @@ def launch_panel(guardian=None):
                 new = StressLab(module, seed)
                 old.close()
                 current["lab"] = new
-                print("Loaded read-only live snapshot into a PRIVATE TEMP sandbox."
-                      if change["new"] else "Reset to synthetic test fixture.")
+                nonlocal_initial[0] = preview_snapshot(module, new.seed)
+                update_inspector()
+                refresh_preview("")
+                print("Source: read-only snapshot of original Drive chat, "
+                      "written ONLY to a private temporary folder."
+                      if change["new"] else
+                      "Source: small synthetic private-room fixture.")
             except Exception as exc:
                 print("Could not switch source:", type(exc).__name__, str(exc))
                 use_mirror.unobserve(mirror_toggle, names="value")
                 use_mirror.value = not change["new"]
                 use_mirror.observe(mirror_toggle, names="value")
 
+    nonlocal_initial = [initial]
+
+    def refresh_preview(case=""):
+        info = get_lab().previews.get(case)
+        if info is None:
+            before_card.value = render_chat_preview(
+                nonlocal_initial[0], "Original test data", "BEFORE")
+            empty = {"bytes": 0, "events": 0, "messages": 0, "rows": [],
+                     "error": None, "raw_excerpt": ""}
+            attack_card.value = render_chat_preview(
+                empty, "Select an attack and run it", "ATTACK")
+            after_card.value = render_chat_preview(
+                nonlocal_initial[0], "Awaiting Guardian scan", "AFTER")
+            preview_status.value = (
+                '<div style="font-size:12px;color:#64748b">'
+                'Select a case to see the cloned chat before, during, and after.'
+                '</div>'
+            )
+            return
+        preview_status.value = (
+            '<div style="margin:9px 0;padding:10px;border-radius:8px;'
+            'background:#1e293b;color:#e2e8f0;font-size:12px">'
+            '<b>' + _visible_text(info["status"]) + '</b> — ' +
+            _visible_text(info["note"]) + '</div>'
+        )
+        before_card.value = render_chat_preview(info["before"], "Before injection", "BEFORE")
+        attack_card.value = render_chat_preview(info["attack"], "Modified client wrote", "ATTACK")
+        after_card.value = render_chat_preview(info["after"], "Guardian checked", "AFTER")
+
     def on_one(_):
         with output:
             try:
-                print_case(get_lab().test(case_picker.value))
+                row = get_lab().test(case_picker.value)
+                print_case(row)
+                update_inspector(case_picker.value)
             except Exception as exc:
                 print("Test error:", type(exc).__name__, str(exc))
 
-    def on_all(_):
+    def execute_many(keys):
+        enabled = (run_one, run_category, run_all)
+        for button in enabled:
+            button.disabled = True
         with output:
-            print("Running", len(ATTACK_LABELS), "isolated attacks — no live writes.")
-            ok = 0
-            gaps = 0
-            for case in ATTACK_LABELS:
+            print("Running", len(keys), "isolated attacks; live chat NEVER written.")
+            counts = {}
+            first_gap = None
+            for i, case in enumerate(keys, 1):
                 try:
                     row = get_lab().test(case)
+                    counts[row["status"]] = counts.get(row["status"], 0) + 1
+                    if first_gap is None and row["status"] in (
+                        "SECURITY GAP", "DETECTED ONLY", "UNRESOLVED"):
+                        first_gap = case
+                    print(str(i) + "/" + str(len(keys)), end=" ")
                     print_case(row)
-                    if row["status"] in ("PASS", "BLOCKED"):
-                        ok += 1
-                    else:
-                        gaps += 1
                 except Exception as exc:
-                    gaps += 1
+                    counts["ERROR"] = counts.get("ERROR", 0) + 1
                     print("❌ ERROR", case, type(exc).__name__, str(exc))
-            print("RESULT:", ok, "expected defenses/controls;", gaps,
-                  "security gaps or errors.")
-            print("NOTE: Name/title events can be untrusted in a public-editor file;"
-                  " an offline watchdog cannot stop a participant from copying "
-                  "public client code.")
+            chosen = first_gap or (keys[-1] if keys else "")
+            update_inspector(chosen)
+            print("RESULTS:", ", ".join(k + "=" + str(v)
+                                       for k, v in sorted(counts.items())))
+            print("This tests Guardian on local snapshots, not live Google "
+                  "Drive race conditions or anti-copying protections.")
+        for button in enabled:
+            button.disabled = False
+
+    def on_category_run(_):
+        keys = ATTACK_GROUPS[categories.value] \
+            if categories.value != "All categories" else tuple(ATTACK_LABELS)
+        execute_many(keys)
+
+    def on_all(_):
+        execute_many(tuple(ATTACK_LABELS))
 
     def on_revert(_):
         with output:
             count = get_lab().revert_all()
-            print("🟥 REVERT ALL COMPLETE:", count,
-                  "local chat clones restored byte-for-byte, then removed.")
-            print("Original Google Drive chat.json: NEVER WRITTEN.")
+            update_inspector()
+            refresh_preview("")
+            print("🟥 REVERT COMPLETE:", count,
+                  "isolated chat copies restored byte-for-byte and removed.")
+            print("The original Google Drive chat was never written.")
 
+    categories.observe(on_category, names="value")
+    select_preview.observe(on_select_preview, names="value")
     use_mirror.observe(mirror_toggle, names="value")
     run_one.on_click(on_one)
+    run_category.on_click(on_category_run)
     run_all.on_click(on_all)
     revert.on_click(on_revert)
+    refresh_preview("")
     display(widgets.VBox([
-        status, use_mirror, case_picker,
-        widgets.HBox([run_one, run_all]), revert, output,
-    ]))
+        header, use_mirror,
+        widgets.HBox([categories, case_picker]),
+        widgets.HBox([run_one, run_category, run_all]), revert,
+        widgets.HTML('<b>CHAT PREVIEW — test data only</b>'),
+        select_preview, preview_status, preview_cards,
+        widgets.HTML('<b>Attack / Guardian test log</b>'), output,
+    ], layout=widgets.Layout(gap="10px", width="100%")))
     with output:
         print("Guardian version:", module.GUARDIAN_VERSION)
+        print("Attack scenarios:", len(ATTACK_LABELS))
         print(LIVE_NOTE)
-        print("All attacks run against a fresh temp copy of chat.json.")
-        print("The red button cleans up experiment files and incident logs.")
+        print("Use the red button to remove all attack test files.")
+    current["refresh_preview"] = refresh_preview
+    current["preview_cards"] = preview_cards
     return current
-
 
 def main():
     parser = argparse.ArgumentParser(
