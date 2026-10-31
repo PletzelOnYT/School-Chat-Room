@@ -66,7 +66,7 @@ const google={colab:{kernel:{invokeFunction:async (name,args)=>{
   throw Error('unexpected callback');
 }}}};
 const sandbox={
-  document,google,console,setTimeout,
+  document,google,console,setTimeout,clearTimeout,
   setInterval: fn=>{refreshHandler=fn;return 0;}, clearInterval:()=>{},
   STATE_CALLBACK_JSON:'messaging_app.test.state',
   SEND_CALLBACK_JSON:'messaging_app.test.send',
