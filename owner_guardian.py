@@ -472,7 +472,7 @@ def count_events(conn):
     return conn.execute("SELECT COUNT(*) FROM approved").fetchone()[0]
 
 
-def save_approved(conn, events):
+def save_approved(conn, events, baseline=False):
     start=count_events(conn)
     for offset,event in enumerate(events):
         line=canonical_event(event)
@@ -480,7 +480,7 @@ def save_approved(conn, events):
             "INSERT OR IGNORE INTO approved(event_id,kind,sender,json,sha256,observed_at) "
             "VALUES(?,?,?,?,?,?)",
             (event_id(event,start+offset),event.get("kind"),event.get("sender_key"),
-             line,digest(line.encode()),time.time()))
+             line,digest(line.encode()),None if baseline else time.time()))
     conn.commit()
 
 
@@ -712,7 +712,8 @@ class Guardian:
                     raise ValueError("initial history contains duplicate IDs")
                 seen.add(ident)
                 prepared.append(event)
-            save_approved(self.db,prepared)
+            # Existing chat history is not a burst of newly sent messages.
+            save_approved(self.db,prepared,baseline=True)
             self.backup()
             self.log(f"Baseline enrolled: {len(initial)} events, {len(raw)} bytes."
                      " Historical records grandfathered; new events enforced.")
