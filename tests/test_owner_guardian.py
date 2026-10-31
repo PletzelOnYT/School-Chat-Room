@@ -7,6 +7,7 @@ import tempfile
 import time
 import unittest
 import uuid
+from unittest.mock import patch
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -62,6 +63,79 @@ class GuardianTests(unittest.TestCase):
             "SELECT COUNT(*) FROM approved").fetchone()[0],1)
         self.assertTrue((self.private/"guardian.sqlite3").is_file())
         self.assertEqual(len(self.current()),1)
+
+    def test_overdrive_integrity_check_blocks_tampered_checkpoint_and_repair(self):
+        self.mon.process()
+        backup=self.private/"guardian.sqlite3"
+        protected=backup.read_bytes()
+        self.mon.db.execute(
+            "UPDATE approved SET json=? WHERE position=1",
+            ('{"kind":"message","text":"FORGED"}',))
+        self.mon.db.commit()
+        self.shared.write_bytes(b"[]")
+        before=self.shared.read_bytes()
+        with self.assertRaises(guardian.GuardianLedgerError):
+            self.mon.process()
+        self.assertEqual(self.shared.read_bytes(),before)
+        with self.assertRaises(guardian.GuardianLedgerError):
+            self.mon.backup()
+        self.assertEqual(backup.read_bytes(),protected)
+
+    def test_overdrive_rejects_ledger_id_or_digest_mismatch(self):
+        self.mon.process()
+        self.mon.db.execute(
+            "UPDATE approved SET event_id='forged-id' WHERE position=1")
+        self.mon.db.commit()
+        with self.assertRaises(guardian.GuardianLedgerError):
+            guardian.db_events(self.mon.db)
+
+    def test_overdrive_prevents_stale_snapshot_rewind(self):
+        self.mon.process()
+        before=self.shared.read_bytes()
+        self.shared.write_bytes(before+b" ")
+        other_user_bytes=self.shared.read_bytes()
+        with self.assertRaises(guardian.ConcurrentChatChange):
+            guardian.recover_existing(
+                self.shared,[self.legacy],self.private,expected_raw=before)
+        self.assertEqual(self.shared.read_bytes(),other_user_bytes)
+        self.assertFalse((self.private/"incidents").exists())
+
+    def test_overdrive_does_not_wipe_new_messages_during_repair(self):
+        self.mon.process()
+        self.shared.write_bytes(b"[]")
+        newly_written=json.dumps([self.legacy,self.event("new student message")]).encode()
+
+        def race(_path,_events,_private,expected_raw=None):
+            self.assertEqual(expected_raw,b"[]")
+            self.shared.write_bytes(newly_written)
+            raise guardian.ConcurrentChatChange("New concurrent append")
+        with patch.object(guardian,"recover_existing",side_effect=race):
+            self.assertEqual(self.mon.process(),"rescan")
+        self.assertEqual(self.shared.read_bytes(),newly_written)
+        self.assertEqual(self.mon.process(),"healthy")
+
+    def test_overdrive_owner_private_health_status_is_atomic_and_minimal(self):
+        report=guardian.write_health_status(
+            self.private,"healthy",started_at="2026-10-30T00:00:00+00:00",
+            scans=42,errors=0,last_success="2026-10-30T00:05:00+00:00",
+            approved=3,bytes_on_disk=1234,running=True)
+        self.assertEqual(report,self.private/"guardian_health.json")
+        data=json.loads(report.read_text())
+        self.assertEqual(data["guardian_version"],"3.0")
+        self.assertEqual(data["scans"],42)
+        self.assertEqual(data["approved_records"],3)
+        self.assertTrue(data["running"])
+        self.assertNotIn("text",data)
+        self.assertFalse((self.private/"guardian_health.pending.json").exists())
+
+    def test_overdrive_verified_backup_preserves_prior_backup_on_failure(self):
+        self.mon.process()
+        checkpoint=self.private/"guardian.sqlite3"
+        frozen=checkpoint.read_bytes()
+        with patch.object(guardian, "db_events",side_effect=guardian.GuardianLedgerError("damaged")):
+            with self.assertRaises(guardian.GuardianLedgerError):
+                self.mon.backup()
+        self.assertEqual(checkpoint.read_bytes(),frozen)
 
     def test_accept_valid_signed_messages_without_rewriting(self):
         self.mon.process()
