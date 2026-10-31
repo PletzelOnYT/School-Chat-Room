@@ -196,7 +196,8 @@ async function run(){
  classicControl('[Open in App]').events.click();
  assert(classicControl('[Open in App]').title.includes('Browser blocked'));
  assert(classicControl('Desktop popups OFF'));
- assert(!logged.length,'Unexpected browser errors: '+logged.join(' | '));
+ assert(logged.every(x=>x.includes('App popup blocked: Error: Browser blocked popup')),
+   'Unexpected browser errors: '+logged.join(' | '));
  console.log('Discord-style app: layout, safety, send, reply, reactions, search, live sync PASS');
 }
 run().catch(e=>{console.error(e);process.exitCode=1});
