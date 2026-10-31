@@ -41,6 +41,14 @@ guardian.main([
 
 To find the **original file ID**, open the shared file in Google Drive and copy the ID between `/d/` and `/view` in its URL. Use the ID of the real original file, **not** a shortcut or copy. Replace the placeholder; if unavailable, remove both `"--file-id"` and its placeholder. The guardian remembers an entered ID in your private Drive folder.
 
+**Migration requirement:** The live `chat.json` was converted to 196 four-field messages. Stop any guardian process from before v5.25, then on your first start with the updated guardian add `"--reset-baseline"` to the argument list, e.g.:
+
+```python
+guardian.main(["--interval", "5", "--reset-baseline"])
+```
+
+This archives the previous private SQLite checkpoint before enrolling the new simplified history. Run this option only once, and only after confirming the correct migrated shared file. Running an older guardian without the new migration handling could restore the deleted old metadata records.
+
 Keep this cell running. It will print alerts and actions. Later launches reload the private SQLite backup rather than blindly trusting the shared file again.
 
 To make a one-time check without writing repairs, use `guardian.main(["--audit-only", "--once"])` after downloading/importing the script.
