@@ -159,7 +159,7 @@ vm.runInNewContext(require('fs').readFileSync(0,'utf8'),{
  document,window,google,console, setTimeout, setInterval:()=>0,
  clearInterval:()=>{}, URL:{createObjectURL:()=>'',revokeObjectURL(){}},
  Blob:class {}, STATE_CALLBACK_JSON:'messaging_app.test.state',
- SEND_CALLBACK_JSON:'messaging_app.test.send'
+ SEND_CALLBACK_JSON:'messaging_app.test.send', REFRESHMS:1000
 });
 setTimeout(async()=>{
  const input=elems['messaging-input-SESSION_ID'];
