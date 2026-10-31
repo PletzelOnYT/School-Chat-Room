@@ -21,6 +21,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import sys
 from pathlib import Path
 import shutil
 import tempfile
@@ -431,7 +432,10 @@ def main():
         "--mirror-readonly", action="store_true",
         help="Use mounted live chat as a read-only fixture; writes still stay local"
     )
-    args = parser.parse_args()
+    # Google Colab/Jupyter starts with -f kernel.json in sys.argv.
+    # Never treat notebook kernel arguments as stress-lab commands.
+    argv = [] if os.path.basename(sys.argv[0]).endswith("kernel_launcher.py") else None
+    args = parser.parse_args(argv)
     guardian = obtain_guardian()
     if not args.cli:
         try:
