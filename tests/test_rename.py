@@ -87,7 +87,7 @@ class RenameIntegrationTests(unittest.TestCase):
         result=self.env["submit_message"]("/rename Pletzel")
         self.assertEqual(len(json.loads(self.path.read_text())),1)
         self.assertEqual(result["messages"][0]["user"],"Guest-626")
-        self.assertTrue(any("/vf" in m for m in self.notes))
+        self.assertTrue(any("Rename is not available" in m for m in self.notes))
 
     def test_reactions_work_with_simple_messages_and_renames(self):
         self.env["submit_message"]("/vf")
