@@ -1,4 +1,39 @@
-# Messaging App v5.42
+# Messaging App v5.43
+
+## Messaging App v5.43 — Actual small desktop Chrome popup windows
+
+The v5.42 notification card inside the Colab output has been **removed**.
+The user specifically requested a real, separate browser popup window on
+their desktop, near the lower-right corner.
+
+- The terminal chat header shows **[Desktop popups OFF]**. Click it to opt
+  in and open a **355 × 165** preview as a separate Chrome popup window.
+  Click **[Desktop popups ON]** to turn off this feature.
+- New messages from other people attempt the same popup. White background,
+  Google blue accent, sender, two-line message preview and a thin progress
+  line that counts down for **6.5 seconds**, then **the window itself closes**.
+  An **×** button closes it early. Additional messages arriving before the
+  timer ends replace the preview and restart its countdown.
+- `/testpopup` (or legacy `/testtoast`) shows a sample desktop window on
+  a direct user action, without sending any message to Google Drive.
+- Initial history, own messages, private System messages and repeated
+  refreshes do not generate popups. Message content uses plain text.
+- Existing replies, reactions, private popup-command windows, terminal
+  appearance, shared chat.json and Guardian remain unchanged.
+
+**Chrome/Chromebook restriction:** Opening a test window from an explicit
+click is different from opening one automatically when a message arrives.
+Chrome ordinarily requires *transient user activation* for `window.open`;
+an automatic new-message callback may therefore be blocked. If that happens,
+the header changes to **[Desktop popups BLOCKED]**, disables automatic
+attempts and allows the user to click to retry. No code can override a
+school policy blocking popups. If the school allows it, the user may allow
+pop-ups/redirects for the Colab site in Chrome settings. Size, screen
+position and foreground focus are requested but ultimately controlled by
+ChromeOS. These are browser windows, not true native OS notifications.
+
+**Update:** Stop the previous Colab chat and rerun the same simplified
+GitHub launcher. Guardian does not need a restart.
 
 ## Messaging App v5.42 — Slim in-chat popups with countdown
 
