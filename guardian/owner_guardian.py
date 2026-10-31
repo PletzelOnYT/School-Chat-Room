@@ -1,4 +1,4 @@
-# @title Messaging App — Owner Guardian v3.0
+# @title Messaging App — Owner Guardian v3.1
 """Owner-side Google Drive watchdog. Does not run inside messaging_app.py.
 
 - Approves only allowlisted, signed NEW events and stores a durable event ledger.
@@ -33,7 +33,7 @@ import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-GUARDIAN_VERSION = "3.0"
+GUARDIAN_VERSION = "3.1"
 # Exact existing shared file; Guardian never copies the message archive.
 SHARED_CHAT_FILE_ID = '1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd'
 SHARED_CHAT_FILE_LINK = (
@@ -49,6 +49,15 @@ RATE_60_SECONDS = 45
 ROOM_RATE_60_SECONDS = 140
 REPEAT_20_SECONDS = 4
 CLOCK_SKEW_SECONDS = 300
+# Burst limits are measured at observation time; sender-provided dates are
+# neither authoritative nor suitable for rate enforcement.
+META_RATE_10_SECONDS = 18
+META_RATE_60_SECONDS = 75
+ROOM_META_RATE_60_SECONDS = 210
+ROOM_RATE_10_SECONDS = 40
+CROSS_NAME_REPEAT_20_SECONDS = 12
+VALID_CLOCK = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d")
+INVISIBLE_CONTROL = re.compile("[\u00ad\u180e\u200b\u2060\ufeff]")
 FIELDS = {
     "message": {"id","kind","sender_key","sig","issued_at","issued_at_ns",
                 "time","user","account_username","text","reply_to"},
@@ -78,7 +87,7 @@ def simple_message(event):
             set(event)=={"kind","time","user","text"} and
             event.get("kind")=="message" and
             isinstance(event.get("time"),str) and
-            re.fullmatch(r"\d{2}:\d{2}:\d{2}",event["time"]) is not None and
+            VALID_CLOCK.fullmatch(event["time"]) is not None and
             isinstance(event.get("user"),str) and
             0<len(event["user"])<=128 and
             isinstance(event.get("text"),str) and
@@ -116,7 +125,7 @@ def simple_reaction(event):
             and set(event)=={"kind","time","user","target","emoji","active"}
             and event.get("kind")=="reaction"
             and isinstance(event.get("time"),str)
-            and re.fullmatch(r"\d{2}:\d{2}:\d{2}",event["time"]) is not None
+            and VALID_CLOCK.fullmatch(event["time"]) is not None
             and isinstance(event.get("user"),str)
             and 0<len(event["user"])<=128
             and type(event.get("target")) is int
@@ -180,6 +189,32 @@ def signature_ok(event):
         return False
 
 
+def metadata_rate_limit(event, rate_log, now):
+    """Detect floods of clocks, reactions, titles and identity metadata.
+
+    Unsigned events have only a nickname. That is a rate bucket, NOT proof
+    of identity, and cannot prevent all malicious Editor-access clients.
+    """
+    kind=event.get("kind")
+    if kind not in ("clock","reaction","title","rename","profile","role"):
+        return None
+    sender=event.get("sender_key") or "display-name:"+event.get("user","").casefold()
+    observed=float(now)
+    history=rate_log.setdefault("__meta__:"+sender,[])
+    history[:]=[(ts,body) for ts,body in history if 0<=observed-ts<=60]
+    room=rate_log.setdefault("__all_metadata__",[])
+    room[:]=[(ts,body) for ts,body in room if 0<=observed-ts<=60]
+    if sum(0<=observed-ts<=10 for ts,_ in history)>=META_RATE_10_SECONDS:
+        return "metadata burst from same sender"
+    if len(history)>=META_RATE_60_SECONDS:
+        return "metadata flood from same sender"
+    if len(room)>=ROOM_META_RATE_60_SECONDS:
+        return "room-wide metadata flood"
+    history.append((observed,kind))
+    room.append((observed,kind))
+    return None
+
+
 def valid_name(value):
     if not isinstance(value,str) or not NAME_FORMAT.fullmatch(value):
         return False
@@ -202,6 +237,8 @@ def invalid_text(text):
         return "control characters"
     if SENSITIVE_CONTROL.search(text):
         return "bidi control characters"
+    if INVISIBLE_CONTROL.search(text):
+        return "invisible formatting characters"
     raw=unicodedata.normalize("NFKC",text).casefold()
     if re.search(r"(.)\1{11,}",raw,re.S):
         return "repeated-character flood"
@@ -401,7 +438,14 @@ def decode_shared_stream(raw):
         data=raw.decode('utf-8-sig')
     except UnicodeError as exc:
         raise ValueError("shared chat contains invalid UTF-8") from exc
-    decoder=json.JSONDecoder()
+    def unique_keys(pairs):
+        result={}
+        for key,value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON object key: "+str(key)[:60])
+            result[key]=value
+        return result
+    decoder=json.JSONDecoder(object_pairs_hook=unique_keys)
     skip=len(data)-len(data.lstrip(" \t\r\n"))
     try:
         history,pos=decoder.raw_decode(data,skip)
