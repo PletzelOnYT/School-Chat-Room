@@ -502,7 +502,7 @@ class GuardianTests(unittest.TestCase):
                  "user":"Alice","text":"hello"}
         self.assertFalse(guardian.simple_message(invalid))
         self.assertEqual(guardian.check_new_event(invalid,{},{}),
-                         "unknown event kind")
+                         "invalid event ID")
         self.assertEqual(guardian.invalid_text("looks\u200bnormal"),
                          "invisible formatting characters")
         self.assertIsNone(guardian.invalid_text("emoji \U0001f469\u200d\U0001f4bb works"))
