@@ -18,6 +18,7 @@ NAMES = {"is_plain_message","plain_message","display_only_message_id",
          "read_messages","append_event_in_place","write_plain_message",
          "is_title_event","is_simple_record","title_event",
          "is_rename_event","rename_event",
+         "is_simple_reaction","simple_reaction_event",
          "analyze","write_event"}
 NODES = [n for n in TREE.body if isinstance(n,ast.FunctionDef) and n.name in NAMES]
 
@@ -29,6 +30,7 @@ def setup(extra=None):
         "PLAIN_MESSAGE_FIELDS": frozenset(("kind","time","user","text")),
         "TITLE_FIELDS": frozenset(("kind","time","user","title")),
         "RENAME_FIELDS": frozenset(("kind","time","user","name")),
+        "REACTION_FIELDS": frozenset(("kind","time","user","target","emoji","active")),
         "GOOGLE_ACCOUNT_USERNAME": "Pletzel",
         "TITLE_VERIFIED": "Verified", "TITLE_NONE": "None",
         "username": "Pletzel",
