@@ -246,6 +246,33 @@ class GuardianTests(unittest.TestCase):
         self.assertFalse(guardian.simple_rename(invalid))
         self.assertIn("unknown",guardian.check_new_event(invalid,{},{}))
 
+
+    def test_guardian_accepts_valid_clock_sidecar_and_repairs_tampering(self):
+        self.assertEqual(self.mon.process(),"enrolled")
+        stamp=int(time.time())
+        message={"kind":"message",
+                 "time":time.strftime("%H:%M:%S",time.gmtime(stamp)),
+                 "user":"Pletzel","text":"date-corrected message"}
+        clock={"kind":"clock","time":message["time"],"user":"Pletzel",
+               "epoch":stamp,"message_hash":guardian.plain_message_hash(message)}
+        self.assertTrue(guardian.simple_clock(clock))
+        self.assertIsNone(guardian.check_new_event(clock,{"m":message},{}))
+        self.shared.write_text(json.dumps([self.legacy,message,clock]))
+        self.assertEqual(self.mon.process(),"healthy")
+        self.assertEqual(guardian.count_events(self.mon.db),3)
+        corrupt=dict(clock,epoch=stamp+3600)
+        self.assertFalse(guardian.simple_clock(corrupt))
+        self.shared.write_text(json.dumps([self.legacy,message,corrupt]))
+        self.assertEqual(self.mon.process(),"restored")
+        self.assertEqual(self.current()[-1],clock)
+
+    def test_guardian_rejects_unanchored_clock(self):
+        stamp=int(time.time())
+        clock={"kind":"clock","time":time.strftime("%H:%M:%S",time.gmtime(stamp)),
+               "user":"Pletzel","epoch":stamp,"message_hash":"a"*64}
+        self.assertIn("missing chat message",
+                      guardian.check_new_event(clock,{},{}))
+
     def test_guardian_reads_framed_append_only_events(self):
         self.mon.process()
         original=self.shared.read_bytes()
