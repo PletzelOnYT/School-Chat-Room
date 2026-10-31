@@ -1370,7 +1370,8 @@ def main(argv=None):
                 scan_count+=1
                 latest_status=scan_status
                 consecutive_errors=0
-                last_success=dt.datetime.now(dt.timezone.utc).isoformat()
+                if scan_status in ("healthy","enrolled","restored"):
+                    last_success=dt.datetime.now(dt.timezone.utc).isoformat()
             except Exception as exc:
                 scan_count+=1
                 consecutive_errors+=1
@@ -1415,6 +1416,21 @@ def main(argv=None):
     except KeyboardInterrupt:
         guardian.log("Stopped by owner")
     finally:
+        try:
+            write_health_status(
+                private,"stopped",
+                started_at=started_at if "started_at" in locals() else
+                dt.datetime.now(dt.timezone.utc).isoformat(),
+                scans=scan_count if "scan_count" in locals() else 0,
+                errors=consecutive_errors if
+                "consecutive_errors" in locals() else 0,
+                last_success=last_success if "last_success" in locals() else None,
+                approved=latest_approved if "latest_approved" in locals() else None,
+                bytes_on_disk=latest_bytes if "latest_bytes" in locals() else None,
+                running=False,
+                mode="AUDIT ONLY" if args.audit_only else "AUTO REPAIR")
+        except OSError:
+            guardian.log("Could not write final stopped health indicator.")
         guardian.close()
         local_temp.cleanup()
 
