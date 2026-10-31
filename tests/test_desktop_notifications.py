@@ -40,7 +40,7 @@ const document={
 };
 let interval;
 let notifications=[];
-let notificationPermission='default';
+let notificationPermission=process.argv.includes('--alreadydenied')?'denied':'default';
 function makeWindow(){
   const fields={},doc={
     open(){},write(page){this.html=page;},close(){},
@@ -107,8 +107,10 @@ async function test(){
     'permission should only be asked in popup on explicit click');
   await d.getElementById('allow').events.click();
   await sleep(10);
-  if(process.argv.includes('--denied')){
-    assert(d.getElementById('status').textContent.includes('denied'));
+  if(process.argv.includes('--denied') || process.argv.includes('--alreadydenied')){
+    const status=d.getElementById('status').textContent;
+    assert(status.includes('DENIED'),status);
+    assert(d.getElementById('diagnostics').textContent.includes('Browser permission:'));
     current.messages.push(msg('new',101,'Emma','after denial'));
     await tick();
     assert.strictEqual(notifications.length,0);
@@ -170,12 +172,19 @@ class DesktopNotificationTests(unittest.TestCase):
                             text=True,capture_output=True,timeout=20)
         self.assertEqual(res.returncode,0,res.stdout+"\n"+res.stderr)
 
+    @unittest.skipUnless(shutil.which("node"), "Node.js required")
+    def test_already_denied_permission_explains_why_no_prompt(self):
+        res=subprocess.run(["node","-e",NODE,"--","--alreadydenied"],
+                           input=JAVASCRIPT,text=True,
+                           capture_output=True,timeout=20)
+        self.assertEqual(res.returncode,0,res.stdout+"\n"+res.stderr)
+
     def test_notification_code_does_not_change_shared_drive_schema(self):
         source=SOURCE.read_text(encoding="utf-8")
         self.assertIn("desktopAlertsEnabled",source)
         self.assertIn("new API('Pletzel Chat'",source)
         self.assertIn("msg.private",source)
-        self.assertIn("CLIENT_VERSION = '5.39'",source)
+        self.assertIn("CLIENT_VERSION = '5.40'",source)
 
 
 if __name__=="__main__":
