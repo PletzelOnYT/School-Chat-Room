@@ -238,10 +238,10 @@ async function run(){
 
  // Existing reply records are still rendered inline with Discord-style
  // parent previews; there is NO thread sidebar or separate thread composer.
- state.threads=[{root:state.messages[0],replies:[
-   makeMsg(5,'Sasha','First reply',{reply_to:'m1'}),
-   makeMsg(6,'Alex','Nested reply',{reply_to:'m5'})
- ],total_replies:2}];
+ const reply5=makeMsg(5,'Sasha','First reply',{reply_to:'m1'});
+ const reply6=makeMsg(6,'Alex','Nested reply',{reply_to:'m5'});
+ state.messages.push(reply5,reply6);
+ state.threads=[{root:state.messages[0],replies:[reply5,reply6],total_replies:2}];
  polling();
  await sleep(35);
  const reply=find(transcript,n=>n.tag==='article'&&n._appMessageId==='m5');
@@ -299,7 +299,7 @@ run().catch(e=>{console.error(e);process.exitCode=1});
 class AppWindowTests(unittest.TestCase):
     def test_discord_style_only_affects_popup(self):
         source=SOURCE.read_text(encoding="utf-8")
-        self.assertIn("CLIENT_VERSION = '5.56'",source)
+        self.assertIn("CLIENT_VERSION = '5.57'",source)
         self.assertIn('font-family:monospace;font-size:13px',HTML)
         self.assertIn('height:19px',HTML)
         self.assertIn("textControl('[Open in App]',openAppWindow",SCRIPT)
