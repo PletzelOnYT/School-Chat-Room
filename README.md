@@ -3,6 +3,35 @@
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
 
+## Owner Guardian v2.2: Automatic Drive shortcut and one-cell start
+
+The **owner-only** Guardian now also mounts Drive in Colab and creates/reuses
+the same `My Drive/chat.json` shortcut to the **original shared file** if
+needed. No one has to manually paste the original Drive file ID into the
+Guardian configuration. Its approved-history ledger, incident archives and
+clock audit remain private inside the owner's
+`My Drive/.messaging_guardian/` folder; it does not copy the chat to a new
+shared file or alter link-sharing permissions.
+
+To launch from one Colab cell **in the owner's account only**:
+
+```python
+import urllib.request
+url = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/guardian_launcher.py"
+exec(compile(urllib.request.urlopen(url).read().decode("utf-8"), url, "exec"))
+```
+
+The launcher obtains the current `owner_guardian.py` from GitHub and starts
+monitoring. The owner must keep their Colab runtime running; no cloud monitor
+continues after disconnection. Do not run multiple Guardians on different
+students' accounts: they could conflict while repairing the same chat.
+
+If account restrictions prevent automatic Drive shortcut creation, use the
+manual *Add shortcut* action with the original shared file; the Guardian
+never bypasses school-account permissions. Existing approved Guardian
+backups are preserved—**do not reset the baseline** for this upgrade.
+See [Owner Guardian setup](OWNER_GUARDIAN_SETUP.md).
+
 ## v5.35: Automatically join the original shared Drive chat
 
 When a student opens the existing GitHub Colab launcher, the app mounts their Google Drive as usual. If `My Drive/chat.json` does **not** already exist, the client tries to use the **currently authorized** Google Drive API session to create a Google Drive shortcut named `chat.json` in that account's My Drive root, pointing to the single original file `1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd`.
