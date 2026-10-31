@@ -329,8 +329,41 @@ def check_new_event(event, accepted, rate_log, now=None):
     return None
 
 
+APPEND_RECORD_SEPARATOR = '\x1e'
+
+
+def decode_shared_stream(raw):
+    """Read original JSON array plus appended RS-delimited JSON records."""
+    try:
+        data=raw.decode('utf-8-sig')
+    except UnicodeError as exc:
+        raise ValueError("shared chat contains invalid UTF-8") from exc
+    decoder=json.JSONDecoder()
+    skip=len(data)-len(data.lstrip())
+    try:
+        history,pos=decoder.raw_decode(data,skip)
+    except ValueError as exc:
+        raise ValueError("shared chat does not start with JSON history") from exc
+    if not isinstance(history,list):
+        raise ValueError("chat history must begin with a JSON array")
+    events=list(history)
+    while True:
+        pos+=len(data[pos:])-len(data[pos:].lstrip())
+        if pos==len(data):
+            return events
+        if data[pos]!=APPEND_RECORD_SEPARATOR:
+            raise ValueError("unexpected bytes after chat history")
+        try:
+            event,pos=decoder.raw_decode(data,pos+1)
+        except ValueError as exc:
+            raise ValueError("incomplete append-only chat record") from exc
+        if not isinstance(event,dict):
+            raise ValueError("invalid append-only event")
+        events.append(event)
+
+
 def read_shared(path):
-    """Return bytes and events. Does not overwrite unreadable/corrupt files."""
+    """Read the original history and append-only records without changing it."""
     if not path.is_file():
         raise FileNotFoundError(str(path))
     if path.stat().st_size>MAX_FILE:
@@ -338,17 +371,12 @@ def read_shared(path):
     raw=path.read_bytes()
     if len(raw)>MAX_FILE:
         raise ValueError("shared file exceeded safety size")
-    try:
-        entries=json.loads(raw)
-    except (UnicodeDecodeError,json.JSONDecodeError) as exc:
-        raise ValueError("shared JSON is invalid") from exc
-    if not isinstance(entries,list):
-        raise ValueError("chat.json must be a JSON array")
+    entries=decode_shared_stream(raw)
     legacy_anchor=any(isinstance(x,dict) and x.get("id")==ANCHOR for x in entries)
     simplified=all(simple_message(x) or simple_title(x) or
                    simple_rename(x) or simple_reaction(x) for x in entries)
     if not legacy_anchor and not simplified:
-        raise ValueError("file is neither original history nor simplified four-field chat")
+        raise ValueError("file is neither legacy history nor simplified chat")
     return raw,entries
 
 
@@ -562,6 +590,18 @@ class Guardian:
                     self.log("Drive recovery: "+result)
                     # The shortcut may not reappear immediately after untrash.
                     return "missing"
+                # An incomplete append can be normal during Drive sync.
+                # Never clobber the entire file just because a framed record
+                # has not finished propagating between Colab sessions.
+                if self.shared.is_file():
+                    try:
+                        raw_snapshot=self.shared.read_bytes()
+                    except OSError:
+                        raw_snapshot=b""
+                    if b'\x1e' in raw_snapshot:
+                        self.log("Append-only journal unreadable; leaving shared bytes "
+                                 "untouched for next scan / manual inspection.")
+                        return "corrupt"
                 if self.repair:
                     recover_existing(self.shared,known,self.private)
                     self.log("Restored last approved chat history IN PLACE.")
