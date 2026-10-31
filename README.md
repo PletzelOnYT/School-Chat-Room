@@ -3,6 +3,17 @@
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
 
+## Owner Guardian v2.4: Google Drive REST API authorization
+
+Google Drive mounting and Drive API OAuth are separate. If Colab's default
+credentials point to its VM metadata service and refresh fails with HTTP 404,
+Guardian now asks for the owner's Google user authorization using Colab's
+supported interactive sign-in. Existing valid user credentials are reused
+without prompting. This fixes the `RefreshError` on automatic shortcut setup.
+Google Workspace/education restrictions are respected: authorization can be
+denied and the original shortcut may then need to be added manually. It never
+creates a chat copy or modifies permissions.
+
 ## Owner Guardian v2.3: Colab kernel argument fix
 
 Jupyter and Google Colab automatically add a kernel connection option such as
