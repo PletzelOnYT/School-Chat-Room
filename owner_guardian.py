@@ -1,4 +1,4 @@
-# @title Messaging App — Owner Guardian v2.3
+# @title Messaging App — Owner Guardian v2.4
 """Owner-side Google Drive watchdog. Does not run inside messaging_app.py.
 
 - Approves only allowlisted, signed NEW events and stores a durable event ledger.
@@ -33,7 +33,7 @@ import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-GUARDIAN_VERSION = "2.3"
+GUARDIAN_VERSION = "2.4"
 # Exact existing shared file; Guardian never copies the message archive.
 SHARED_CHAT_FILE_ID = '1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd'
 SHARED_CHAT_FILE_LINK = (
@@ -882,13 +882,73 @@ class Guardian:
         self.db.close()
 
 
+def guardian_user_drive_session(get_default=None, login=None,
+                                make_request=None, make_session=None,
+                                is_machine=None):
+    """Create an authorized USER Drive session, never a GCE machine session.
+
+    Drive mounting and REST API OAuth are separate in Colab. Fresh notebooks
+    can return Compute Engine ADC that fails on metadata.google.internal:404.
+    Ask the owner for Colab's supported interactive consent only if needed.
+    An injected dependency is for deterministic tests, not credential bypass.
+    """
+    if get_default is None:
+        import google.auth
+        get_default=google.auth.default
+    if make_request is None or make_session is None:
+        from google.auth.transport.requests import Request, AuthorizedSession
+        if make_request is None:
+            make_request=Request
+        if make_session is None:
+            make_session=AuthorizedSession
+    if is_machine is None:
+        from google.auth.compute_engine.credentials import Credentials as GceCredentials
+        from google.oauth2.service_account import Credentials as ServiceCredentials
+        is_machine=lambda cred: isinstance(cred,(GceCredentials,ServiceCredentials))
+
+    def load_user_credentials():
+        credentials, _ = get_default()
+        if is_machine(credentials):
+            raise RuntimeError("default credentials are not a Google user account")
+        if not credentials.valid:
+            credentials.refresh(make_request())
+        return credentials
+
+    try:
+        credentials=load_user_credentials()
+    except Exception:
+        # Only the owner running this notebook can approve a Google OAuth
+        # prompt. We never inspect private Colab tokens or work around a
+        # Google Workspace administrator's restriction.
+        print("Owner Guardian: Drive is mounted, but creating a shortcut "
+              "requires Google Drive API user authorization. "
+              "Approve Google's sign-in prompt if one appears.",flush=True)
+        try:
+            if login is None:
+                from google.colab import auth
+                auth.authenticate_user(clear_output=False)
+            else:
+                login()
+            credentials=load_user_credentials()
+        except Exception as exc:
+            raise RuntimeError(
+                "Google Drive API user authorization was unavailable or "
+                "denied ("+type(exc).__name__+"). "
+                "Use Organize > Add shortcut on the original shared chat.json "
+                "with this same Google account; then rerun Guardian. "
+                "School account permissions cannot be bypassed."
+            ) from exc
+    return make_session(credentials)
+
+
 def ensure_shared_chat_shortcut(drive_root, session=None, sleep=None,
                                 max_polls=12):
     """Join the ORIGINAL shared room by making one Drive shortcut, not a copy.
 
-    Use only credentials already authorized in Colab. A school account whose
-    Drive API access is restricted must not be prompted for extra OAuth scopes
-    or switched to an alternative account automatically.
+    Use the owner's existing Google authorization if available. If the
+    notebook has only unavailable VM credentials, ask the owner to approve
+    Colab's normal Google user authorization once. Never bypass a school's
+    restriction or switch Google accounts silently.
     """
     chat_path = os.path.join(drive_root, 'chat.json')
     if os.path.isfile(chat_path):
@@ -910,12 +970,12 @@ def ensure_shared_chat_shortcut(drive_root, session=None, sleep=None,
 
     if session is None:
         try:
-            import google.auth
-            from google.auth.transport.requests import AuthorizedSession
-            credentials, _ = google.auth.default()
-            session = AuthorizedSession(credentials)
+            session = guardian_user_drive_session()
+        except RuntimeError as exc:
+            fail(str(exc))
         except Exception as exc:
-            fail('existing Colab Drive API credentials were unavailable')
+            fail('Google Drive API authorization failed (' +
+                 type(exc).__name__ + ')')
 
     api = 'https://www.googleapis.com/drive/v3/files'
     try:
