@@ -1,4 +1,4 @@
-# @title Messaging App v5.35 — Google Drive Messenger
+# @title Messaging App v5.36 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.35'
+CLIENT_VERSION = '5.36'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1171,12 +1171,15 @@ def analyze(events):
             continue
         seconds = sum(int(x)*mult for x,mult in zip(match.groups(), (3600,60,1)))
         candidate = (anchor_epoch // 86400)*86400 + seconds
-        if candidate > anchor_epoch + 300:
+        # Drive can append two messages in an order opposite to their
+        # send time; a tiny inversion is NOT a midnight rollover.
+        if candidate > anchor_epoch + 120:
             candidate -= 86400
-        if candidate >= 946684800 and anchor_epoch - candidate <= 86400+300:
+        delta = anchor_epoch - candidate
+        if candidate >= 946684800 and -120 <= delta <= 86400+300:
             old['estimated_epoch'] = candidate
             old['time_estimated'] = True
-            anchor_epoch = candidate
+            anchor_epoch = min(anchor_epoch, candidate)
 
     return dict(verified_names=verified_names, renamed_users=renamed_users,
                 messages=messages, by_number=by_number,
@@ -1404,6 +1407,39 @@ def search_messages(query, messages):
     return results[-20:]
 
 
+def chronological_display_messages(messages, correction_window=120):
+    """Fix display-only short timestamp inversions without rewriting history.
+
+    Google Drive append order can differ from the time two clients pressed
+    Send. Only exchange near-neighbor records with known or plausibly
+    reconstructed UTC epochs within two minutes. Never modify original
+    message IDs, #numbers or reply/reaction targets.
+    """
+    ordered = list(messages)
+
+    def epoch(message):
+        value = message.get('issued_at')
+        if type(value) is not int:
+            value = message.get('estimated_epoch')
+        if type(value) is int and 946684800 <= value <= 4102444800:
+            return value
+        return None
+
+    for index in range(1, len(ordered)):
+        j = index
+        while j > 0:
+            older = epoch(ordered[j-1])
+            newer = epoch(ordered[j])
+            if older is None or newer is None:
+                break
+            difference = older - newer
+            if not 0 < difference <= correction_window:
+                break
+            ordered[j-1], ordered[j] = ordered[j], ordered[j-1]
+            j -= 1
+    return ordered
+
+
 def build_threads(messages, count, muted, cleared):
     """Group the latest N posts beneath their original parent messages.
 
@@ -1412,7 +1448,9 @@ def build_threads(messages, count, muted, cleared):
     """
     visible = [m for m in messages if m['number'] > cleared and
                m['user'].casefold() not in muted]
-    selected = visible[-count:]
+    ordered = chronological_display_messages(visible)
+    display_rank = {m['id']: rank for rank, m in enumerate(ordered)}
+    selected = ordered[-count:]
     by_id = {m['id']: m for m in messages}
     groups = {}
     for msg in selected:
@@ -1430,15 +1468,20 @@ def build_threads(messages, count, muted, cleared):
         group = groups.setdefault(root['id'], {
             'root': root, 'replies': {}, 'newest': 0,
         })
-        group['newest'] = max(group['newest'], msg['number'])
+        group['newest'] = max(group['newest'], display_rank[msg['id']])
         for part in chain[:-1]:
             group['replies'][part['id']] = part
 
     result = []
     for group in sorted(groups.values(), key=lambda g: g['newest']):
-        replies = sorted(group['replies'].values(), key=lambda m: m['number'])
+        replies = sorted(group['replies'].values(),
+                         key=lambda m: display_rank.get(m['id'], m['number']))
+        included = [group['root'], *replies]
+        items = {m['id']: dict(m, display_rank=display_rank.get(m['id'],m['number']))
+                 for m in included}
         result.append({
-            'root': group['root'], 'replies': replies,
+            'root': items[group['root']['id']],
+            'replies': [items[m['id']] for m in replies],
             'total_replies': len(replies),
         })
     return result
@@ -1638,7 +1681,7 @@ def submit_message(raw):
                 note('Messaging App v' + CLIENT_VERSION +
                      ' | timestamps: UTC storage, browser-local display; '+
                      'new messages include absolute clock metadata. '+
-                     'Older date-less messages have estimated times (without ~); '+ 
+                     'Old date-less clocks are estimated; small send-order inversions display correctly. '+ 
                      'message numbers and stored history remain unchanged.')
                 return snapshot()
             if command == '/ping':
@@ -2087,7 +2130,8 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
           children.get(parent).push(reply);
         }
         for (const childList of children.values()) {
-          childList.sort((x,y) => (x.number||0)-(y.number||0));
+          childList.sort((x,y) => (x.display_rank ?? x.number ?? 0) -
+                                      (y.display_rank ?? y.number ?? 0));
         }
         function renderDescendant(node, depth) {
           if (!node?.id || printed.has(node.id)) return;
