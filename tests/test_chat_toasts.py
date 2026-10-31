@@ -61,9 +61,13 @@ const fakeTimeout = (callback,ms) => {
   return id;
 };
 const fakeClearTimeout = id=>timers.delete(id);
+const sentCommands=[];
 const google = {colab:{kernel:{invokeFunction: async(name,args)=>{
   if(name.endsWith('.state')) return {data:{'application/json':state}};
-  if(name.endsWith('.send')) return {data:{'application/json':state}};
+  if(name.endsWith('.send')) {
+    sentCommands.push(args[0]);
+    return {data:{'application/json':state}};
+  }
   throw Error('unexpected callback');
 }}}};
 const sandbox = {
@@ -154,6 +158,19 @@ async function run() {
   close.events.click();
   assert.strictEqual(toast.style.display,'none');
   assert.strictEqual(timers.size,0);
+
+  // Local preview command must open the toast without calling the backend.
+  const input=elements['messaging-input-SESSION_ID'];
+  const form=elements['messaging-form-SESSION_ID'];
+  input.value='/testtoast';
+  form.events.submit({preventDefault(){}});
+  assert.strictEqual(input.value,'');
+  assert.strictEqual(toast.style.display,'block');
+  assert(title.textContent.includes('Preview'));
+  assert(preview.textContent.includes('sample message preview'));
+  assert.strictEqual(timers.size,1);
+  assert.strictEqual(sentCommands.length,0,'testtoast cannot touch shared history');
+  close.events.click();
 
   state.running=false;
   await refresh();
