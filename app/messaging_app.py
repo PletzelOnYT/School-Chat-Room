@@ -1,4 +1,4 @@
-# @title Messaging App v5.54 — Google Drive Messenger
+# @title Messaging App v5.55 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.54'
+CLIENT_VERSION = '5.55'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -2134,8 +2134,8 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   }
 
   function appDocument() {
-    // User messages are inserted safely as text nodes.
-    return "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>Pletzel Chat</title>\n<style>\n:root{color-scheme:dark;--rail:#1e1f22;--channels:#2b2d31;--surface:#313338;--hover:#2e3035;--composer:#383a40;--border:#232428;--text:#dbdee1;--muted:#949ba4;--blurple:#5865f2}\n*{box-sizing:border-box}html,body{height:100%;width:100%;margin:0}\nbody{font:14px/1.45 -apple-system,BlinkMacSystemFont,\"Segoe UI\",Arial,sans-serif;background:var(--surface);color:var(--text);overflow:hidden}\nbutton,input,textarea{font:inherit}\nbutton{cursor:pointer}\n.app{display:grid;grid-template-columns:72px 228px minmax(0,1fr);height:100vh;height:100dvh;min-width:0}\n.rail{background:var(--rail);display:flex;align-items:center;flex-direction:column;padding:13px 0;gap:11px}\n.rail-badge{height:48px;width:48px;display:grid;place-items:center;border-radius:17px;background:var(--blurple);color:#fff;font-size:23px;font-weight:800;position:relative}\n.rail-badge:before{content:\"\";position:absolute;left:-12px;height:34px;width:4px;border-radius:0 4px 4px 0;background:white}\n.rail-divider{height:2px;width:32px;background:#35363c;border-radius:4px}\n.rail-second{width:42px;height:42px;border-radius:50%;background:#313338;display:grid;place-items:center;color:#3ba55c;font-size:19px;font-weight:700}\n.sidebar{display:flex;flex-direction:column;min-width:0;background:var(--channels)}\n.server-title{height:50px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 15px;font-weight:750;border-bottom:1px solid #232428;box-shadow:0 1px 0 rgba(0,0,0,.08)}\n.server-sub{color:#a7acb4;font-weight:400;font-size:11px}\n.sidebar-scroll{min-height:0;overflow:auto;flex:1;padding:17px 10px}\n.section-label{font-size:11px;color:#949ba4;font-weight:750;letter-spacing:.65px;margin:0 6px 8px}\n.channel{display:flex;gap:10px;align-items:center;height:35px;padding:0 10px;border-radius:5px;background:#404249;color:#f2f3f5;font-weight:650}\n.hash{font-size:23px;color:#aeb4c0;font-weight:350;line-height:1}\n.side-note{margin:15px 9px;color:#949ba4;font-size:12px;line-height:1.5}\n.members-label{margin-top:24px}\n.recent-list{display:flex;flex-direction:column;gap:3px}\n.member{display:flex;align-items:center;gap:9px;padding:6px 8px;color:#b9bec7;border-radius:5px;font-size:13px;min-width:0}\n.member-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.member-avatar{flex:none;width:25px;height:25px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:750;color:white}\n.profile{min-height:57px;flex:none;background:#232428;display:flex;align-items:center;gap:9px;padding:9px;min-width:0}\n.profile .member-avatar{width:32px;height:32px;font-size:14px}\n.profile-text{min-width:0;display:flex;flex-direction:column}\n.profile-name{font-size:12px;font-weight:730;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:white}\n.profile-status{font-size:11px;color:#aaaeb7}\n.main{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--surface)}\n.topbar{height:50px;flex:none;display:flex;align-items:center;gap:11px;padding:0 19px;box-shadow:0 1px 0 #282a30;border-bottom:1px solid #282a30;z-index:2}\n.topbar .hash{color:#80848e}\n.channel-title{color:#f2f3f5;font-weight:750;white-space:nowrap}\n.topbar-divider{height:20px;width:1px;background:#505259}\n.channel-description{color:#949ba4;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.search{margin-left:auto;min-width:90px;width:clamp(110px,19vw,205px);height:27px;border-radius:5px;background:#1e1f22;color:#f2f3f5;padding:5px 9px;border:1px solid transparent;font-size:12px;outline:none;flex:none}\n.search:focus{border-color:#5865f2}.search::placeholder{color:#a2a6af}\n.chat-content{min-height:0;flex:1;overflow:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-color:#1e1f22 transparent;display:flex;flex-direction:column}\n#app-transcript{margin-top:auto;padding:22px 0 16px;flex:none}\n.message{position:relative;padding:3px 17px 4px 72px;min-height:48px;overflow-wrap:anywhere;white-space:normal}\n.message+.message{margin-top:5px}\n.message:hover{background:var(--hover)}\n.avatar{position:absolute;left:17px;top:5px;height:40px;width:40px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:16px;font-weight:750;user-select:none}\n.message-heading{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin-bottom:2px;min-width:0}\n.message-user{font-weight:740;font-size:15px;color:#f2f3f5}\n.message-user.mine{color:#71c4ff}.message-user.system{color:#ed9faa}\n.verified{font-size:12px;color:#8ea6ff;font-weight:750}\n.message-time{font-size:11px;color:#949ba4;margin-left:3px}\n.message-number{font-size:10px;color:#767b85}\n.message-body{font-size:14px;line-height:1.42;color:#dbdee1;white-space:pre-wrap;overflow-wrap:anywhere}\n.message.private .message-body{color:#f4b9be}\n.reply-context{color:#9da7b7;font-size:11px;margin:1px 0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.reaction-strip{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}\n.react-pill{border:1px solid #4a4e58;color:#e7e9ed;background:#373a43;border-radius:8px;padding:3px 9px;font-size:12px}\n.react-pill.mine{border-color:#5865f2;background:#414c77}\n.react-pill:hover{background:#454a56}\n.msg-tools{position:absolute;right:13px;top:-13px;border:1px solid #202127;background:#313338;border-radius:8px;box-shadow:0 3px 8px #16171b50;display:flex;opacity:0;pointer-events:none;transition:opacity .1s}\n.message:hover .msg-tools,.message:focus-within .msg-tools{opacity:1;pointer-events:auto}\n.msg-tools button{color:#b9bec7;border:0;background:transparent;font-size:12px;padding:6px 9px}\n.msg-tools button:hover{background:#41434b;color:white}\n.picker{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}\n.picker button{background:#262830;border:1px solid #464957;color:white;border-radius:7px;padding:4px 8px;font-size:16px}\n.picker button:hover{border-color:#8ea6ff}\n.empty{text-align:center;color:#949ba4;padding:60px 22px}\n.empty-title{font-size:21px;color:#f2f3f5;font-weight:800;margin-bottom:8px}\n.composer-wrap{padding:0 16px 18px;flex:none}\n.replybar{background:#2b2d31;padding:8px 12px;border-radius:8px 8px 0 0;display:none;justify-content:space-between;align-items:center;color:#c5c9d1;font-size:12px}\n.replybar button{color:#aeb4c0;background:transparent;border:0;font-size:19px;line-height:15px}\n.replybar button:hover{color:white}\n.input-shell{min-height:48px;display:flex;align-items:flex-end;gap:12px;padding:7px 10px 7px 14px;background:var(--composer);border-radius:8px}\n.input-shell:focus-within{outline:1px solid #555865}\n#app-input{flex:1;min-width:0;resize:none;outline:none;border:0;background:transparent;color:#f2f3f5;font-size:14px;line-height:22px;min-height:30px;max-height:132px;padding:4px 0;overflow-y:auto}\n#app-input::placeholder{color:#a6a8b1}\n#app-send{border:0;background:var(--blurple);color:white;border-radius:6px;width:34px;height:34px;flex:none;display:grid;place-items:center;font-size:20px;font-weight:700}\n#app-send:hover{background:#7180ff}\n#app-send:disabled{opacity:.4;cursor:not-allowed}\n.composer-hint{font-size:10px;color:#818790;margin-top:5px;margin-left:4px}\n@media(max-width:950px){.app{grid-template-columns:65px 190px minmax(0,1fr)}.rail-badge{width:43px;height:43px}.topbar{padding:0 13px}.channel-description{display:none}}\n@media(max-width:670px){.app{grid-template-columns:54px minmax(0,1fr)}.rail{padding-top:10px}.rail-badge{width:39px;height:39px;font-size:20px}.rail-divider{width:25px}.rail-second{width:35px;height:35px}.sidebar{display:none}.message{padding-left:61px;padding-right:9px}.avatar{left:11px;width:37px;height:37px}.composer-wrap{padding:0 10px 11px}.topbar{gap:8px}.search{width:105px}.msg-tools{right:8px}}\n@media(max-width:420px){.search{width:95px}.message-heading{gap:4px}.message-user{font-size:14px}.message-time{font-size:10px}.message-number{display:none}.topbar-divider{display:none}}\n@media(hover:none){.msg-tools{opacity:1;pointer-events:auto;position:static;display:inline-flex;margin-top:5px;box-shadow:none}}\n@media(prefers-reduced-motion:reduce){.msg-tools{transition:none}}\n\n/* v5.53: smooth Discord-inspired motion, focused threads and pings */\n:root{--accent:#7686ff;--subtle:#a9b2c6;--stroke:#42454f}\n.rail-badge,.rail-second,.channel,.member,.message,.react-pill,.input-shell,#app-send,.msg-tools button,.search{transition:background-color .18s ease,color .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s cubic-bezier(.2,.85,.2,1)}\n.rail-badge:hover,.rail-second:hover{border-radius:15px;transform:translateY(-2px);box-shadow:0 6px 18px #1113}\n.channel:hover,.member:hover{background:#454752;color:#fff}\n.message{border-left:3px solid transparent;padding-left:69px}\n.message:hover{border-left-color:#6772bb}\n.message.pinged{background:rgba(245,183,67,.065);border-left-color:#f0b44e}\n.message.pinged:hover{background:rgba(245,183,67,.11)}\n.message.fresh{animation:message-arrive .3s ease-out backwards}\n@keyframes message-arrive{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:translateY(0)}}\n.ping-mention{border-radius:3px;padding:0 2px;background:rgba(88,101,242,.23);color:#b9c5ff;font-weight:650}\n.ping-mention.mine{background:#735a2b;color:#ffdc8b}\n.ping-marker{font-size:10px;letter-spacing:.25px;border-radius:4px;background:#66532f;color:#ffe0a2;padding:2px 6px;margin-left:3px}\n.msg-tools{top:-16px;z-index:2;border-radius:9px}\n.msg-tools button{white-space:nowrap}\n.msg-tools button:hover{transform:translateY(-1px)}\n.msg-tools button:focus-visible,.react-pill:focus-visible,.thread-close:focus-visible,.ping-filter:focus-visible{outline:2px solid #94a5ff;outline-offset:2px}\n.reply-context{display:flex;gap:5px;align-items:center;color:#a9b4cb}\n.reply-context:before{content:\"↳\";color:#8896ff}\n.thread-link{margin:7px 0 0;padding:4px 0;background:transparent;border:0;color:#9eabff;font-size:12px;display:inline-flex;gap:6px;align-items:center}\n.thread-link:hover{text-decoration:underline;color:#c9d0ff}\n.ping-filter{flex:none;min-width:44px;height:29px;background:transparent;border:1px solid transparent;color:#b9bcc7;border-radius:7px;padding:3px 8px;font-size:12px;white-space:nowrap}\n.ping-filter:hover,.ping-filter.active{background:#434656;color:#fff}\n.ping-count{display:inline-block;padding:1px 5px;margin-left:5px;min-width:16px;border-radius:10px;background:#f2b84b;color:#252220;font-size:10px;font-weight:800}\n.input-shell{position:relative}\n.input-shell:focus-within{box-shadow:0 0 0 2px rgba(118,134,255,.22);background:#40434d}\n#app-send:enabled:hover{transform:translateY(-2px)}\n.composer-wrap{position:relative}\n.mention-picker{display:none;position:absolute;bottom:calc(100% - 2px);left:16px;right:16px;max-height:220px;overflow:auto;background:#24262d;border:1px solid #4c4e61;border-radius:10px;box-shadow:0 13px 28px #1119;padding:6px;z-index:8}\n.mention-caption{color:#9fa4bb;font-size:11px;font-weight:750;letter-spacing:.4px;padding:6px 8px}\n.mention-option{width:100%;display:flex;align-items:center;gap:10px;border:0;border-radius:6px;background:transparent;color:#dce0ef;text-align:left;padding:8px;font-size:13px}\n.mention-option.active,.mention-option:hover{background:#444c85;color:white}\n.mention-option .member-avatar{height:26px;width:26px}\n@media(max-width:670px){.mention-picker{left:10px;right:10px}.message{padding-left:57px}.msg-tools{top:0}}\n/* Desktop thread pane is a true sidebar, not a fake extra channel. */\n.thread-panel{display:none;min-width:0;min-height:0;background:#292b32;border-left:1px solid #1e1f25;flex-direction:column}\n.app.thread-open{grid-template-columns:72px 228px minmax(0,1fr) minmax(290px,350px)}\n.app.thread-open .thread-panel{display:flex;animation:thread-in .23s cubic-bezier(.2,.8,.25,1) both}\n.thread-bar{height:50px;flex:none;display:flex;align-items:center;gap:12px;padding:0 14px;border-bottom:1px solid #1f2127;color:#f2f3f5;font-weight:750}\n.thread-bar-title{flex:1;min-width:0}\n.thread-meta{font-size:11px;font-weight:450;color:#a4a9b7}\n.thread-close{height:28px;width:28px;display:grid;place-items:center;border:0;background:transparent;border-radius:6px;color:#b3b8c3;font-size:20px}\n.thread-close:hover{background:#424550;color:white}\n.thread-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-color:#191b20 transparent;padding:12px 0}\n.thread-card{padding:10px 14px;border-bottom:1px solid #3e4149}\n.thread-card.root{background:#333640;border-left:3px solid #7f8bff}\n.thread-author{font-weight:740;color:#f2f3f5;font-size:13px}\n.thread-time{color:#9a9fae;font-size:10px;margin-left:7px}\n.thread-body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;margin-top:5px}\n.thread-divider{padding:13px 14px 8px;color:#a8adbb;font-size:11px;font-weight:750}\n.thread-card.reply{padding-left:18px;border-bottom:0}\n.thread-card.reply.nested{margin-left:12px;border-left:2px solid #555b70}\n.thread-target{font-size:11px;color:#b2bfff;margin:7px 12px}\n.thread-form{flex:none;padding:12px;border-top:1px solid #1c1e24;background:#272930}\n.thread-form textarea{display:block;resize:none;min-height:64px;max-height:140px;width:100%;padding:10px;border-radius:8px;border:1px solid #515560;background:#383b45;color:#f2f3f5;outline:0;font:13px/19px sans-serif}\n.thread-form textarea:focus{border-color:#7f8bff;box-shadow:0 0 0 2px #7686ff30}\n.thread-bottom{display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:8px}\n.thread-bottom button{border:0;background:#5865f2;color:white;border-radius:6px;padding:7px 11px;font-weight:700}\n.thread-bottom button:disabled{opacity:.5}\n.thread-bottom small{color:#8d94a5;font-size:10px}\n@keyframes thread-in{from{opacity:0;transform:translateX(15px)}to{opacity:1;transform:translateX(0)}}\n@media(max-width:1110px){.app.thread-open{grid-template-columns:65px 190px minmax(0,1fr) 300px}}\n@media(max-width:900px){.app.thread-open{grid-template-columns:65px 190px minmax(0,1fr)}.app.thread-open .thread-panel{position:absolute;right:0;top:0;bottom:0;width:min(360px,calc(100vw - 70px));z-index:9;box-shadow:-12px 0 36px #0008}}\n@media(max-width:670px){.app.thread-open{grid-template-columns:54px minmax(0,1fr)}.app.thread-open .thread-panel{width:calc(100vw - 54px);max-width:420px}}\n@media(prefers-reduced-motion:reduce){.message.fresh,.app.thread-open .thread-panel{animation:none}.rail-badge,.rail-second,.channel,.member,.message,.react-pill,.input-shell,#app-send,.msg-tools button,.search{transition:none}}\n\n/* Discord-inspired inline reply previews, connected reply composition */\n.message.has-reply{padding-top:0}\n.reply-reference{position:relative;margin:0 0 3px -31px;display:flex;align-items:center;\n  width:calc(100% + 31px);max-width:100%;height:23px;gap:7px;padding:0 5px 0 31px;\n  color:#aab2c4;background:transparent;border:0;border-radius:5px;\n  cursor:pointer;text-align:left;font-size:12px;overflow:hidden}\n.reply-reference:before{content:\"\";position:absolute;left:11px;top:10px;width:17px;height:13px;\n  border-left:2px solid #727783;border-top:2px solid #727783;border-radius:8px 0 0 0}\n.reply-reference:hover{color:#e3e7f3}\n.reply-reference:hover .reply-preview-text{text-decoration:underline}\n.reply-mini-avatar{height:17px;width:17px;min-width:17px;display:grid;place-items:center;\n  border-radius:50%;color:#fff;font-size:9px;font-weight:750}\n.reply-preview-author{font-weight:750;color:#e2e5f1;flex:none;max-width:31%;overflow:hidden;text-overflow:ellipsis}\n.reply-preview-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;color:#9da4b6}\n.reply-reference.is-missing{cursor:default;color:#89919e}\n.reply-reference.is-missing:hover .reply-preview-text{text-decoration:none}\n.reply-focus{background:rgba(88,101,242,.21)!important;border-left-color:#8995ff!important;\n  animation:reply-highlight 1.4s ease-out}\n@keyframes reply-highlight{0%{background:rgba(126,143,255,.34)}\n  100%{background:transparent}}\n.verified{display:inline-grid;place-items:center;width:16px;height:16px;line-height:16px;\n  border-radius:50%;background:#5a93fb;color:#fff;font:800 11px/16px sans-serif;\n  flex:none;vertical-align:middle;box-shadow:0 0 0 1px #24262a}\n.replybar{padding:9px 12px 10px 17px;gap:9px;background:#272930;\n  border-left:3px solid #7b8aff;border-radius:9px 9px 0 0;min-width:0}\n.replybar-info{min-width:0;display:flex;flex-direction:column;gap:3px;flex:1}\n.replybar-label{font-size:12px;color:#bbc0ce}\n.replybar-label b{color:#f2f4ff}\n.replybar-preview{color:#929aaf;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.replybar .reply-cancel{flex:none;align-self:center;border-radius:6px;width:26px;height:26px}\n.replybar .reply-cancel:hover{background:#3d414d}\n.thread-card .reply-reference{margin:4px 0 6px 0;width:100%;max-width:100%;padding-left:27px}\n.thread-card .reply-reference:before{left:5px}\n@media(max-width:670px){.reply-reference{gap:5px}.reply-preview-author{max-width:38%}}\n@media(prefers-reduced-motion:reduce){.reply-focus{animation:none}}\n</style></head><body>\n<div id=\"app-layout\" class=\"app\">\n<aside class=\"rail\" aria-label=\"Server rail\"><div class=\"rail-badge\" title=\"Pletzel Chat\">P</div><div class=\"rail-divider\"></div><div class=\"rail-second\" title=\"Shared chat\">#</div></aside>\n<aside class=\"sidebar\" aria-label=\"Channels and recent people\">\n<div class=\"server-title\"><span>Pletzel Chat</span><span class=\"server-sub\">⌄</span></div>\n<div class=\"sidebar-scroll\">\n<div class=\"section-label\">TEXT CHANNELS</div>\n<div class=\"channel\"><span class=\"hash\">#</span><span>general</span></div>\n<div class=\"side-note\">One shared chat room.<br>Messages sync through your Colab session.</div>\n<div class=\"section-label members-label\">RECENT PARTICIPANTS</div>\n<div id=\"app-people\" class=\"recent-list\"></div><div class=\"section-label members-label\">ACTIVE THREADS</div><div id=\"app-threads-nav\" class=\"recent-list\"></div></div>\n<div class=\"profile\"><div id=\"app-profile-avatar\" class=\"member-avatar\">P</div><div class=\"profile-text\"><span id=\"app-profile-name\" class=\"profile-name\">Connecting</span><span id=\"app-profile-status\" class=\"profile-status\">Colab session</span></div></div>\n</aside>\n<section class=\"main\">\n<header class=\"topbar\"><span class=\"hash\">#</span><span class=\"channel-title\">general</span><span class=\"topbar-divider\"></span><span class=\"channel-description\">Pletzel Chat · Shared room</span><input id=\"app-search\" class=\"search\" aria-label=\"Search recent messages\" placeholder=\"⌕ Search recent\"><button id=\"app-pings\" class=\"ping-filter\" type=\"button\" title=\"Show messages that mention you\">@ Mentions<span id=\"app-ping-count\" class=\"ping-count\" style=\"display:none\"></span></button></header>\n<main id=\"app-messages\" class=\"chat-content\" role=\"log\" aria-label=\"Chat messages\"><div id=\"app-transcript\"></div></main>\n<div class=\"composer-wrap\"><div id=\"app-mention-list\" class=\"mention-picker\" role=\"listbox\" aria-label=\"Mention suggestions\"></div>\n<div id=\"app-replybar\" class=\"replybar\"><div class=\"replybar-info\"><span id=\"app-replyname\" class=\"replybar-label\"></span><span id=\"app-replydetail\" class=\"replybar-preview\"></span></div><button id=\"app-replycancel\" class=\"reply-cancel\" type=\"button\" aria-label=\"Cancel reply\">×</button></div>\n<form id=\"app-form\" autocomplete=\"off\"><div class=\"input-shell\"><textarea id=\"app-input\" aria-label=\"Chat message\" rows=\"1\" maxlength=\"1000\" placeholder=\"Message #general\"></textarea><button id=\"app-send\" type=\"submit\" aria-label=\"Send message\">↑</button></div></form>\n<div class=\"composer-hint\">Enter to send · Shift+Enter for a new line</div>\n</div>\n</section><aside id=\"app-thread-panel\" class=\"thread-panel\" aria-label=\"Thread details\">\n<div class=\"thread-bar\"><div class=\"thread-bar-title\">Thread<div id=\"app-thread-meta\" class=\"thread-meta\">Replies</div></div><button id=\"app-thread-close\" type=\"button\" class=\"thread-close\" aria-label=\"Close thread\">×</button></div>\n<div id=\"app-thread-scroll\" class=\"thread-scroll\"><div id=\"app-thread-body\"></div></div>\n<div id=\"app-thread-target\" class=\"thread-target\"></div>\n<form id=\"app-thread-form\" class=\"thread-form\"><textarea id=\"app-thread-input\" aria-label=\"Reply to thread\" rows=\"2\" placeholder=\"Reply in thread…\" maxlength=\"1000\"></textarea><div class=\"thread-bottom\"><small>Enter to send · Shift+Enter new line</small><button id=\"app-thread-send\" type=\"submit\">Send reply</button></div></form></aside></div></body></html>";
+    // Discord-style popup; replies stay inline without a separate thread UI.
+    return "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>Pletzel Chat</title>\n<style>\n:root{color-scheme:dark;--rail:#1e1f22;--channels:#2b2d31;--surface:#313338;--hover:#2e3035;--composer:#383a40;--border:#232428;--text:#dbdee1;--muted:#949ba4;--blurple:#5865f2}\n*{box-sizing:border-box}html,body{height:100%;width:100%;margin:0}\nbody{font:14px/1.45 -apple-system,BlinkMacSystemFont,\"Segoe UI\",Arial,sans-serif;background:var(--surface);color:var(--text);overflow:hidden}\nbutton,input,textarea{font:inherit}\nbutton{cursor:pointer}\n.app{display:grid;grid-template-columns:72px 228px minmax(0,1fr);height:100vh;height:100dvh;min-width:0}\n.rail{background:var(--rail);display:flex;align-items:center;flex-direction:column;padding:13px 0;gap:11px}\n.rail-badge{height:48px;width:48px;display:grid;place-items:center;border-radius:17px;background:var(--blurple);color:#fff;font-size:23px;font-weight:800;position:relative}\n.rail-badge:before{content:\"\";position:absolute;left:-12px;height:34px;width:4px;border-radius:0 4px 4px 0;background:white}\n.rail-divider{height:2px;width:32px;background:#35363c;border-radius:4px}\n.rail-second{width:42px;height:42px;border-radius:50%;background:#313338;display:grid;place-items:center;color:#3ba55c;font-size:19px;font-weight:700}\n.sidebar{display:flex;flex-direction:column;min-width:0;background:var(--channels)}\n.server-title{height:50px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 15px;font-weight:750;border-bottom:1px solid #232428;box-shadow:0 1px 0 rgba(0,0,0,.08)}\n.server-sub{color:#a7acb4;font-weight:400;font-size:11px}\n.sidebar-scroll{min-height:0;overflow:auto;flex:1;padding:17px 10px}\n.section-label{font-size:11px;color:#949ba4;font-weight:750;letter-spacing:.65px;margin:0 6px 8px}\n.channel{display:flex;gap:10px;align-items:center;height:35px;padding:0 10px;border-radius:5px;background:#404249;color:#f2f3f5;font-weight:650}\n.hash{font-size:23px;color:#aeb4c0;font-weight:350;line-height:1}\n.side-note{margin:15px 9px;color:#949ba4;font-size:12px;line-height:1.5}\n.members-label{margin-top:24px}\n.recent-list{display:flex;flex-direction:column;gap:3px}\n.member{display:flex;align-items:center;gap:9px;padding:6px 8px;color:#b9bec7;border-radius:5px;font-size:13px;min-width:0}\n.member-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.member-avatar{flex:none;width:25px;height:25px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:750;color:white}\n.profile{min-height:57px;flex:none;background:#232428;display:flex;align-items:center;gap:9px;padding:9px;min-width:0}\n.profile .member-avatar{width:32px;height:32px;font-size:14px}\n.profile-text{min-width:0;display:flex;flex-direction:column}\n.profile-name{font-size:12px;font-weight:730;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:white}\n.profile-status{font-size:11px;color:#aaaeb7}\n.main{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--surface)}\n.topbar{height:50px;flex:none;display:flex;align-items:center;gap:11px;padding:0 19px;box-shadow:0 1px 0 #282a30;border-bottom:1px solid #282a30;z-index:2}\n.topbar .hash{color:#80848e}\n.channel-title{color:#f2f3f5;font-weight:750;white-space:nowrap}\n.topbar-divider{height:20px;width:1px;background:#505259}\n.channel-description{color:#949ba4;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.search{margin-left:auto;min-width:90px;width:clamp(110px,19vw,205px);height:27px;border-radius:5px;background:#1e1f22;color:#f2f3f5;padding:5px 9px;border:1px solid transparent;font-size:12px;outline:none;flex:none}\n.search:focus{border-color:#5865f2}.search::placeholder{color:#a2a6af}\n.chat-content{min-height:0;flex:1;overflow:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-color:#1e1f22 transparent;display:flex;flex-direction:column}\n#app-transcript{margin-top:auto;padding:22px 0 16px;flex:none}\n.message{position:relative;padding:3px 17px 4px 72px;min-height:48px;overflow-wrap:anywhere;white-space:normal}\n.message+.message{margin-top:5px}\n.message:hover{background:var(--hover)}\n.avatar{position:absolute;left:17px;top:5px;height:40px;width:40px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:16px;font-weight:750;user-select:none}\n.message-heading{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin-bottom:2px;min-width:0}\n.message-user{font-weight:740;font-size:15px;color:#f2f3f5}\n.message-user.mine{color:#71c4ff}.message-user.system{color:#ed9faa}\n.verified{font-size:12px;color:#8ea6ff;font-weight:750}\n.message-time{font-size:11px;color:#949ba4;margin-left:3px}\n.message-number{font-size:10px;color:#767b85}\n.message-body{font-size:14px;line-height:1.42;color:#dbdee1;white-space:pre-wrap;overflow-wrap:anywhere}\n.message.private .message-body{color:#f4b9be}\n.reply-context{color:#9da7b7;font-size:11px;margin:1px 0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n.reaction-strip{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}\n.react-pill{border:1px solid #4a4e58;color:#e7e9ed;background:#373a43;border-radius:8px;padding:3px 9px;font-size:12px}\n.react-pill.mine{border-color:#5865f2;background:#414c77}\n.react-pill:hover{background:#454a56}\n.msg-tools{position:absolute;right:13px;top:-13px;border:1px solid #202127;background:#313338;border-radius:8px;box-shadow:0 3px 8px #16171b50;display:flex;opacity:0;pointer-events:none;transition:opacity .1s}\n.message:hover .msg-tools,.message:focus-within .msg-tools{opacity:1;pointer-events:auto}\n.msg-tools button{color:#b9bec7;border:0;background:transparent;font-size:12px;padding:6px 9px}\n.msg-tools button:hover{background:#41434b;color:white}\n.picker{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}\n.picker button{background:#262830;border:1px solid #464957;color:white;border-radius:7px;padding:4px 8px;font-size:16px}\n.picker button:hover{border-color:#8ea6ff}\n.empty{text-align:center;color:#949ba4;padding:60px 22px}\n.empty-title{font-size:21px;color:#f2f3f5;font-weight:800;margin-bottom:8px}\n.composer-wrap{padding:0 16px 18px;flex:none}\n.replybar{background:#2b2d31;padding:8px 12px;border-radius:8px 8px 0 0;display:none;justify-content:space-between;align-items:center;color:#c5c9d1;font-size:12px}\n.replybar button{color:#aeb4c0;background:transparent;border:0;font-size:19px;line-height:15px}\n.replybar button:hover{color:white}\n.input-shell{min-height:48px;display:flex;align-items:flex-end;gap:12px;padding:7px 10px 7px 14px;background:var(--composer);border-radius:8px}\n.input-shell:focus-within{outline:1px solid #555865}\n#app-input{flex:1;min-width:0;resize:none;outline:none;border:0;background:transparent;color:#f2f3f5;font-size:14px;line-height:22px;min-height:30px;max-height:132px;padding:4px 0;overflow-y:auto}\n#app-input::placeholder{color:#a6a8b1}\n#app-send{border:0;background:var(--blurple);color:white;border-radius:6px;width:34px;height:34px;flex:none;display:grid;place-items:center;font-size:20px;font-weight:700}\n#app-send:hover{background:#7180ff}\n#app-send:disabled{opacity:.4;cursor:not-allowed}\n.composer-hint{font-size:10px;color:#818790;margin-top:5px;margin-left:4px}\n@media(max-width:950px){.app{grid-template-columns:65px 190px minmax(0,1fr)}.rail-badge{width:43px;height:43px}.topbar{padding:0 13px}.channel-description{display:none}}\n@media(max-width:670px){.app{grid-template-columns:54px minmax(0,1fr)}.rail{padding-top:10px}.rail-badge{width:39px;height:39px;font-size:20px}.rail-divider{width:25px}.rail-second{width:35px;height:35px}.sidebar{display:none}.message{padding-left:61px;padding-right:9px}.avatar{left:11px;width:37px;height:37px}.composer-wrap{padding:0 10px 11px}.topbar{gap:8px}.search{width:105px}.msg-tools{right:8px}}\n@media(max-width:420px){.search{width:95px}.message-heading{gap:4px}.message-user{font-size:14px}.message-time{font-size:10px}.message-number{display:none}.topbar-divider{display:none}}\n@media(hover:none){.msg-tools{opacity:1;pointer-events:auto;position:static;display:inline-flex;margin-top:5px;box-shadow:none}}\n@media(prefers-reduced-motion:reduce){.msg-tools{transition:none}}\n\n/* v5.53: smooth Discord-inspired motion, focused threads and pings */\n:root{--accent:#7686ff;--subtle:#a9b2c6;--stroke:#42454f}\n.rail-badge,.rail-second,.channel,.member,.message,.react-pill,.input-shell,#app-send,.msg-tools button,.search{transition:background-color .18s ease,color .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s cubic-bezier(.2,.85,.2,1)}\n.rail-badge:hover,.rail-second:hover{border-radius:15px;transform:translateY(-2px);box-shadow:0 6px 18px #1113}\n.channel:hover,.member:hover{background:#454752;color:#fff}\n.message{border-left:3px solid transparent;padding-left:69px}\n.message:hover{border-left-color:#6772bb}\n.message.pinged{background:rgba(245,183,67,.065);border-left-color:#f0b44e}\n.message.pinged:hover{background:rgba(245,183,67,.11)}\n.message.fresh{animation:message-arrive .3s ease-out backwards}\n@keyframes message-arrive{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:translateY(0)}}\n.ping-mention{border-radius:3px;padding:0 2px;background:rgba(88,101,242,.23);color:#b9c5ff;font-weight:650}\n.ping-mention.mine{background:#735a2b;color:#ffdc8b}\n.ping-marker{font-size:10px;letter-spacing:.25px;border-radius:4px;background:#66532f;color:#ffe0a2;padding:2px 6px;margin-left:3px}\n.msg-tools{top:-16px;z-index:2;border-radius:9px}\n.msg-tools button{white-space:nowrap}\n.msg-tools button:hover{transform:translateY(-1px)}\n.msg-tools button:focus-visible,.react-pill:focus-visible,.thread-close:focus-visible,.ping-filter:focus-visible{outline:2px solid #94a5ff;outline-offset:2px}\n.reply-context{display:flex;gap:5px;align-items:center;color:#a9b4cb}\n.reply-context:before{content:\"↳\";color:#8896ff}\n.ping-filter{flex:none;min-width:44px;height:29px;background:transparent;border:1px solid transparent;color:#b9bcc7;border-radius:7px;padding:3px 8px;font-size:12px;white-space:nowrap}\n.ping-filter:hover,.ping-filter.active{background:#434656;color:#fff}\n.ping-count{display:inline-block;padding:1px 5px;margin-left:5px;min-width:16px;border-radius:10px;background:#f2b84b;color:#252220;font-size:10px;font-weight:800}\n.input-shell{position:relative}\n.input-shell:focus-within{box-shadow:0 0 0 2px rgba(118,134,255,.22);background:#40434d}\n#app-send:enabled:hover{transform:translateY(-2px)}\n.composer-wrap{position:relative}\n.mention-picker{display:none;position:absolute;bottom:calc(100% - 2px);left:16px;right:16px;max-height:220px;overflow:auto;background:#24262d;border:1px solid #4c4e61;border-radius:10px;box-shadow:0 13px 28px #1119;padding:6px;z-index:8}\n.mention-caption{color:#9fa4bb;font-size:11px;font-weight:750;letter-spacing:.4px;padding:6px 8px}\n.mention-option{width:100%;display:flex;align-items:center;gap:10px;border:0;border-radius:6px;background:transparent;color:#dce0ef;text-align:left;padding:8px;font-size:13px}\n.mention-option.active,.mention-option:hover{background:#444c85;color:white}\n.mention-option .member-avatar{height:26px;width:26px}\n@media(max-width:670px){.mention-picker{left:10px;right:10px}.message{padding-left:57px}.msg-tools{top:0}}\n@media(prefers-reduced-motion:reduce){.message.fresh{animation:none}.rail-badge,.rail-second,.channel,.member,.message,.react-pill,.input-shell,#app-send,.msg-tools button,.search{transition:none}}\n/* Discord-inspired inline reply previews, connected reply composition */\n.message.has-reply{padding-top:0}\n.reply-reference{position:relative;margin:0 0 3px -31px;display:flex;align-items:center;\n  width:calc(100% + 31px);max-width:100%;height:23px;gap:7px;padding:0 5px 0 31px;\n  color:#aab2c4;background:transparent;border:0;border-radius:5px;\n  cursor:pointer;text-align:left;font-size:12px;overflow:hidden}\n.reply-reference:before{content:\"\";position:absolute;left:11px;top:10px;width:17px;height:13px;\n  border-left:2px solid #727783;border-top:2px solid #727783;border-radius:8px 0 0 0}\n.reply-reference:hover{color:#e3e7f3}\n.reply-reference:hover .reply-preview-text{text-decoration:underline}\n.reply-mini-avatar{height:17px;width:17px;min-width:17px;display:grid;place-items:center;\n  border-radius:50%;color:#fff;font-size:9px;font-weight:750}\n.reply-preview-author{font-weight:750;color:#e2e5f1;flex:none;max-width:31%;overflow:hidden;text-overflow:ellipsis}\n.reply-preview-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;color:#9da4b6}\n.reply-reference.is-missing{cursor:default;color:#89919e}\n.reply-reference.is-missing:hover .reply-preview-text{text-decoration:none}\n.reply-focus{background:rgba(88,101,242,.21)!important;border-left-color:#8995ff!important;\n  animation:reply-highlight 1.4s ease-out}\n@keyframes reply-highlight{0%{background:rgba(126,143,255,.34)}\n  100%{background:transparent}}\n.verified{display:inline-grid;place-items:center;width:16px;height:16px;line-height:16px;\n  border-radius:50%;background:#5a93fb;color:#fff;font:800 11px/16px sans-serif;\n  flex:none;vertical-align:middle;box-shadow:0 0 0 1px #24262a}\n.replybar{padding:9px 12px 10px 17px;gap:9px;background:#272930;\n  border-left:3px solid #7b8aff;border-radius:9px 9px 0 0;min-width:0}\n.replybar-info{min-width:0;display:flex;flex-direction:column;gap:3px;flex:1}\n.replybar-label{font-size:12px;color:#bbc0ce}\n.replybar-label b{color:#f2f4ff}\n.replybar-preview{color:#929aaf;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n.replybar .reply-cancel{flex:none;align-self:center;border-radius:6px;width:26px;height:26px}\n.replybar .reply-cancel:hover{background:#3d414d}\n@media(max-width:670px){.reply-reference{gap:5px}.reply-preview-author{max-width:38%}}\n@media(prefers-reduced-motion:reduce){.reply-focus{animation:none}}\n</style></head><body>\n<div id=\"app-layout\" class=\"app\">\n<aside class=\"rail\" aria-label=\"Server rail\"><div class=\"rail-badge\" title=\"Pletzel Chat\">P</div><div class=\"rail-divider\"></div><div class=\"rail-second\" title=\"Shared chat\">#</div></aside>\n<aside class=\"sidebar\" aria-label=\"Channels and recent people\">\n<div class=\"server-title\"><span>Pletzel Chat</span><span class=\"server-sub\">⌄</span></div>\n<div class=\"sidebar-scroll\">\n<div class=\"section-label\">TEXT CHANNELS</div>\n<div class=\"channel\"><span class=\"hash\">#</span><span>general</span></div>\n<div class=\"side-note\">One shared chat room.<br>Messages sync through your Colab session.</div>\n<div class=\"section-label members-label\">RECENT PARTICIPANTS</div>\n<div id=\"app-people\" class=\"recent-list\"></div></div>\n<div class=\"profile\"><div id=\"app-profile-avatar\" class=\"member-avatar\">P</div><div class=\"profile-text\"><span id=\"app-profile-name\" class=\"profile-name\">Connecting</span><span id=\"app-profile-status\" class=\"profile-status\">Colab session</span></div></div>\n</aside>\n<section class=\"main\">\n<header class=\"topbar\"><span class=\"hash\">#</span><span class=\"channel-title\">general</span><span class=\"topbar-divider\"></span><span class=\"channel-description\">Pletzel Chat · Shared room</span><input id=\"app-search\" class=\"search\" aria-label=\"Search recent messages\" placeholder=\"⌕ Search recent\"><button id=\"app-pings\" class=\"ping-filter\" type=\"button\" title=\"Show messages that mention you\">@ Mentions<span id=\"app-ping-count\" class=\"ping-count\" style=\"display:none\"></span></button></header>\n<main id=\"app-messages\" class=\"chat-content\" role=\"log\" aria-label=\"Chat messages\"><div id=\"app-transcript\"></div></main>\n<div class=\"composer-wrap\"><div id=\"app-mention-list\" class=\"mention-picker\" role=\"listbox\" aria-label=\"Mention suggestions\"></div>\n<div id=\"app-replybar\" class=\"replybar\"><div class=\"replybar-info\"><span id=\"app-replyname\" class=\"replybar-label\"></span><span id=\"app-replydetail\" class=\"replybar-preview\"></span></div><button id=\"app-replycancel\" class=\"reply-cancel\" type=\"button\" aria-label=\"Cancel reply\">×</button></div>\n<form id=\"app-form\" autocomplete=\"off\"><div class=\"input-shell\"><textarea id=\"app-input\" aria-label=\"Chat message\" rows=\"1\" maxlength=\"1000\" placeholder=\"Message #general\"></textarea><button id=\"app-send\" type=\"submit\" aria-label=\"Send message\">↑</button></div></form>\n<div class=\"composer-hint\">Enter to send · Shift+Enter for a new line</div>\n</div>\n</section></div></body></html>";
   }
 
   function appTimeline(state) {
@@ -2191,8 +2191,6 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   let appPickerMessageId = null;
   let appSearchTerm = '';
   let appRenderedSignature = null;
-  let appThreadRootId = null;
-  let appThreadTarget = null;
   let appPingOnly = false;
   let appUnreadPings = 0;
   let appKnownIds = new Set();
@@ -2282,11 +2280,9 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       setTimeout(()=>{
         target.className=String(target.className||'').replace(/\s*reply-focus/g,'');
       },1400);
-    }else {
-      // A parent can be outside the recent-message window. Show its thread
-      // without fabricating older history or extra stored messages.
-      appOpenThread(id);
     }
+    // Older parents may be outside the visible-history window. The inline
+    // preview still shows their text; never open a separate thread view.
   }
 
   function showAppReply() {
@@ -2325,97 +2321,6 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       offset=hit.index+hit[0].length;
     }
     target.appendChild(doc.createTextNode(value.slice(offset)));
-  }
-
-  function appThreadGroup(messageId,state=latestState) {
-    return (state?.threads||[]).find(group =>
-      group.root?.id===messageId ||
-      (group.replies||[]).some(item=>item.id===messageId))||null;
-  }
-
-  function appOpenThread(messageId) {
-    if(!appElements)return;
-    const group=appThreadGroup(messageId);
-    if(!group)return;
-    appThreadRootId=group.root.id;
-    appThreadTarget=group.root;
-    appElements.layout.className='app thread-open';
-    appRenderThread(latestState);
-    try{appElements.threadInput.focus();}catch(error){/* optional */}
-  }
-
-  function appCloseThread() {
-    appThreadRootId=null;
-    appThreadTarget=null;
-    if(!appElements)return;
-    appElements.layout.className='app';
-    appElements.threadBody.replaceChildren();
-    try{appElements.input.focus();}catch(error){/* optional */}
-  }
-
-  function appRenderThread(state) {
-    if(!appElements || !appThreadRootId)return;
-    const group=appThreadGroup(appThreadRootId,state);
-    if(!group){appCloseThread();return;}
-    const el=appElements,doc=appWindow.document,body=el.threadBody,scroll=el.threadScroll;
-    const bottom=scroll.scrollHeight-scroll.scrollTop-scroll.clientHeight<80;
-    const top=scroll.scrollTop;
-    const previousValue=el.threadInput.value;
-    const replies=group.replies||[];
-    const parents=appMessageMap(state);
-    el.threadMeta.textContent=replies.length+' '+(replies.length===1?'reply':'replies');
-    body.replaceChildren();
-
-    function card(message,root=false) {
-      const item=doc.createElement('div');
-      item.className='thread-card '+(root?'root':'reply')+
-        (!root && message.reply_to!==group.root.id?' nested':'');
-      const author=doc.createElement('span');
-      author.className='thread-author';
-      author.textContent=String(message.user||'Unknown');
-      item.appendChild(author);
-      const time=doc.createElement('span');
-      time.className='thread-time';
-      time.textContent=displayedTime(message);
-      item.appendChild(time);
-      if(message.reply_to){
-        const parent=parents.get(message.reply_to)||null;
-        item.appendChild(appReplyPreview(doc,parent,parent?.number,
-          ()=>appJumpToMessage(message.reply_to)));
-      }
-      if(message.verified){
-        const badge=doc.createElement('span');
-        badge.className='verified';
-        badge.textContent='✓';
-        badge.title='Verified badge';
-        badge.setAttribute('aria-label','Verified badge');
-        badge.style.marginLeft='6px';
-        item.appendChild(badge);
-      }
-      const content=doc.createElement('div');
-      content.className='thread-body';
-      appTextWithPings(doc,message.text,state.username,appKnownNames,content);
-      item.appendChild(content);
-      if(Number.isSafeInteger(message.number)){
-        item.appendChild(appButton(doc,'↳ Reply',()=>{
-          appThreadTarget=message;
-          appRenderThread(latestState);
-          el.threadInput.focus();
-        },'thread-link'));
-      }
-      body.appendChild(item);
-    }
-    card(group.root,true);
-    const divider=doc.createElement('div');
-    divider.className='thread-divider';
-    divider.textContent=replies.length+' '+(replies.length===1?'REPLY':'REPLIES');
-    body.appendChild(divider);
-    for(const reply of replies) card(reply);
-    const threadParent=appThreadTarget||group.root;
-    el.threadTarget.textContent='Replying to '+String(threadParent.user||'Unknown')+
-      ' · '+String(threadParent.text||'').replace(/\s+/g,' ').slice(0,90);
-    el.threadInput.value=previousValue;
-    scroll.scrollTop=bottom?scroll.scrollHeight:top;
   }
 
   function appDismissMentions() {
@@ -2485,7 +2390,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       const rows=appTimeline(state);
       const replyMap=appMessageMap(state);
       const signature=JSON.stringify([state.username,state.my_verified,state.running,
-        state.messages,state.threads,appSearchTerm,appPickerMessageId,appPingOnly,appThreadRootId]);
+        state.messages,state.threads,appSearchTerm,appPickerMessageId,appPingOnly]);
       el.profileName.textContent=String(state.username || 'Guest');
       el.profileStatus.textContent=state.running ? 'Connected via Colab' : 'Disconnected';
       el.profileAvatar.textContent=Array.from(String(state.username || '?'))[0]?.toUpperCase() || '?';
@@ -2542,13 +2447,6 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         });
         el.people.appendChild(member);
       }
-      el.threadsNav.replaceChildren();
-      for(const group of (state.threads||[]).filter(g=>g.root && (g.replies||[]).length).slice(-5).reverse()) {
-        el.threadsNav.appendChild(appButton(doc,'↳ #'+group.root.number+' · '+
-          (group.replies||[]).length+' replies',()=>appOpenThread(group.root.id),
-          'member thread-nav-item'));
-      }
-
       el.transcript.replaceChildren();
       let visible=0;
       for(const {msg,depth} of rows) {
@@ -2631,18 +2529,11 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
             appReplyTarget={number:msg.number,user:author,text:body,id:msg.id};
             showAppReply();el.input.focus();
           }));
-          tools.appendChild(appButton(doc,'▤ Thread',()=>appOpenThread(msg.id)));
           tools.appendChild(appButton(doc,'☺ React',() => {
             appPickerMessageId=appPickerMessageId===msg.id ? null : msg.id;
             renderApp(latestState,true);
           }));
           message.appendChild(tools);
-          const threadGroup=appThreadGroup(msg.id,state);
-          if(threadGroup?.root?.id===msg.id && (threadGroup.replies||[]).length){
-            message.appendChild(appButton(doc,'↳ '+threadGroup.replies.length+
-              (threadGroup.replies.length===1?' reply · View thread':' replies · View thread'),
-              ()=>appOpenThread(msg.id),'thread-link'));
-          }
           if(appPickerMessageId===msg.id){
             const picker=doc.createElement('div');
             picker.className='picker';
@@ -2673,7 +2564,6 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         el.transcript.appendChild(empty);
       }
       view.scrollTop=atBottom?view.scrollHeight:previousTop;
-      if(appThreadRootId)appRenderThread(state);
       showAppReply();
     }catch(error){
       console.debug('App rendering failed:',error);
@@ -2713,14 +2603,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         pings:doc.getElementById('app-pings'),
         pingCount:doc.getElementById('app-ping-count'),
         mentionList:doc.getElementById('app-mention-list'),
-        threadsNav:doc.getElementById('app-threads-nav'),
-        threadPanel:doc.getElementById('app-thread-panel'),
-        threadBody:doc.getElementById('app-thread-body'),
-        threadScroll:doc.getElementById('app-thread-scroll'),
-        threadMeta:doc.getElementById('app-thread-meta'),
-        threadTarget:doc.getElementById('app-thread-target'),
-        threadInput:doc.getElementById('app-thread-input'),
-        threadSend:doc.getElementById('app-thread-send')
+        // Replying uses the main composer; no separate thread drawer.
       };
       doc.getElementById('app-replycancel').addEventListener('click',() => {
         appReplyTarget=null;showAppReply();elements.input.focus();
@@ -2734,25 +2617,6 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         if(appPingOnly)appUnreadPings=0;
         appUpdatePingBadge();
         renderApp(latestState,true);
-      });
-      doc.getElementById('app-thread-close').addEventListener('click',appCloseThread);
-      const threadForm=doc.getElementById('app-thread-form');
-      function submitThread(event) {
-        if(event)event.preventDefault();
-        if(stopped || !root.isConnected || win.closed || !appThreadRootId)return;
-        const text=elements.threadInput.value;
-        if(!text.trim())return;
-        const target=appThreadTarget||appThreadGroup(appThreadRootId)?.root;
-        if(!target || !Number.isSafeInteger(target.number))return;
-        elements.threadInput.value='';
-        sendInline('/reply '+target.number+' '+text,elements.threadInput);
-      }
-      threadForm.addEventListener('submit',submitThread);
-      elements.threadInput.addEventListener('keydown',event=>{
-        if(event.key==='Enter' && !event.shiftKey && !event.isComposing && !event.repeat){
-          event.preventDefault();submitThread();
-        }
-        if(event.key==='Escape'){event.preventDefault();appCloseThread();}
       });
       const form=doc.getElementById('app-form');
       function resizeInput(){
@@ -2811,7 +2675,6 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         appUpdateMentions();
       });
       doc.addEventListener?.('keydown',event=>{
-        if(event.key==='Escape' && appThreadRootId)appCloseThread();
         if((event.ctrlKey||event.metaKey) && event.key.toLowerCase()==='k'){
           event.preventDefault();elements.search.focus();
         }
@@ -2827,8 +2690,6 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       appUnreadPings=0;
       appBootstrapped=false;
       appKnownIds=new Set();
-      appThreadRootId=null;
-      appThreadTarget=null;
       appKnownNames=[];
       appMentionChoices=[];
       appMentionIndex=-1;
