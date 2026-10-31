@@ -1,4 +1,17 @@
-# Messaging App v5.43
+# Messaging App v5.44
+
+## Messaging App v5.44 — Slim desktop notification banner
+
+Adjusted the separate Chrome popup from **355 × 165** requested outer
+dimensions to **330 × 112**, with a compact horizontal notification layout:
+small blue icon, sender, one-line truncated message preview, × to dismiss,
+and a thin 2px blue countdown bar. The 6.5-second auto-close behavior,
+opt-in button, incoming-message suppression and /testpopup remain unchanged.
+
+**Browser limit:** Chrome/ChromeOS may enforce a larger minimum window size
+and display its own title/address bar. A normal `window.open` popup cannot
+reproduce a borderless operating-system toast or force its window frame size.
+The chat requests the smaller size but cannot override that decision.
 
 ## Messaging App v5.43 — Actual small desktop Chrome popup windows
 
