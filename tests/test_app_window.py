@@ -122,8 +122,14 @@ async function run(){
   assert(app.win.document.html.includes('@media(max-width:540px)'));
   assert(app.win.document.html.includes('id="app-input"'));
   assert(app.win.document.html.includes('font-family:monospace;font-size:13px'));
-  assert(app.win.document.html.includes('height:19px'));
+  assert(app.win.document.html.includes('height:40px'));
   assert(app.win.document.html.includes('width:min(INPUTPXpx,100%)'));
+  assert(app.win.document.html.includes('class="input-shell"'));
+  assert(app.win.document.html.includes('border-radius:11px'));
+  assert(app.win.document.html.includes('.input-shell:focus-within'));
+  assert(app.win.document.html.includes('placeholder="Type a message…"'));
+  assert(app.win.document.html.includes('Enter ↵'));
+  assert(app.win.document.html.includes('@media(prefers-reduced-motion:reduce)'));
   assert(app.win.document.html.includes('max-width:WRAPCHch'));
   assert(app.win.document.html.includes('white-space:pre-wrap;overflow-wrap:anywhere'));
   assert(!app.win.document.html.includes('class="message"'),
@@ -193,7 +199,7 @@ run().catch(error=>{console.error(error);process.exitCode=1;});
 
 class AppWindowTests(unittest.TestCase):
     def test_layout_and_safe_app_bridge_are_present(self):
-        self.assertIn("CLIENT_VERSION = '5.49'", SOURCE.read_text(encoding="utf-8"))
+        self.assertIn("CLIENT_VERSION = '5.50'", SOURCE.read_text(encoding="utf-8"))
         self.assertIn("textControl('[Open in App]',openAppWindow", SCRIPT)
         self.assertIn("function appWindowFeatures()", SCRIPT)
         self.assertIn("function renderApp(state)", SCRIPT)
