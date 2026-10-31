@@ -3,6 +3,18 @@
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
 
+## Stress Lab Colab loader fix (Guardian version)
+
+If the stress panel previously crashed with
+`RuntimeError: Guardian v2.7 or later is required for this lab`, an outdated
+local `owner_guardian.py` could be selected instead of the latest one.
+The lab now chooses a current Guardian, ignores stray local copies in Colab,
+and falls back to GitHub's Contents API if its raw file download is stale.
+It prints the actual Guardian version and origin before opening the panel.
+Rerun the original cache-busted one-cell lab launcher below; restarting or
+resetting the real Guardian database is **not** required. Only isolated
+temporary test copies are written.
+
 ## Owner-only modified-client attack stress lab (reversible)
 
 `guardian_stress_lab.py` is a **separate red-team test panel**. It imports
