@@ -2262,6 +2262,24 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       win.document.write(appDocument());
       win.document.close();
       const doc = win.document;
+      // Inherit the actual Colab output background/text colors, including
+      // dark mode, instead of imposing a new light or dark app theme.
+      try {
+        if (typeof window.getComputedStyle === 'function' && doc.body) {
+          const foreground = window.getComputedStyle(root).color;
+          if (foreground) doc.body.style.color = foreground;
+          let node = root;
+          while (node) {
+            const background = window.getComputedStyle(node).backgroundColor;
+            if (background && background !== 'transparent' &&
+                !/^rgba?\\([^)]*,\\s*0(?:\\.0+)?\\)$/.test(background)) {
+              doc.body.style.backgroundColor = background;
+              break;
+            }
+            node = node.parentElement;
+          }
+        }
+      } catch(error) { /* keep safe default if browser restricts styles */ }
       const elements = {
         messages:doc.getElementById('app-messages'),
         input:doc.getElementById('app-input')
