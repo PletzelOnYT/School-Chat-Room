@@ -90,7 +90,7 @@ class TitleBadgeTests(unittest.TestCase):
         records = self.env["read_messages"]()
         records.append({"kind":"message", "time":"04:15:52",
                         "user":"Emma Marie", "text":"Here"})
-        self.path.write_text(json.dumps(records, indent=2)+"\\n")
+        self.path.write_text(json.dumps(records, indent=2)+"\n")
         state = self.env["submit_message"]("/vf @Emma Marie")
         self.assertIn("emma marie", state["verified_names"])
         self.assertTrue(state["messages"][-1]["verified"])
