@@ -1,4 +1,4 @@
-# @title Messaging App v5.49 — Google Drive Messenger
+# @title Messaging App v5.50 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.49'
+CLIENT_VERSION = '5.50'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -2134,8 +2134,8 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   }
 
   function appDocument() {
-    // Same terminal-style HTML and exact input dimensions as CHAT_HTML.
-    // The only additions are a resizable viewport and an internal scroll area.
+    // Preserve the original terminal chat. Only the separate window's composer
+    // gets a polished input; no message formatting or controls are changed.
     // Message content is never interpolated into this document.
     return '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
       '<meta name="viewport" content="width=device-width,initial-scale=1">' +
@@ -2145,16 +2145,35 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       '#app-shell{height:100vh;height:100dvh;min-height:0;display:flex;flex-direction:column;}' +
       '#app-messages{white-space:pre-wrap;overflow-wrap:anywhere;max-width:WRAPCHch;' +
       'line-height:normal;margin:0;flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;}' +
-      '#app-form{margin:0;padding:0;flex:none;}' +
-      '#app-input{display:block;box-sizing:border-box;width:min(INPUTPXpx,100%);' +
-      'height:19px;margin:0;padding:1px 2px;' +
-      'background:white;border:1px solid #999;border-radius:0;color:black;' +
-      'font-family:monospace;font-size:13px;outline:auto;outline-width:0;}' +
-      '@media(max-width:540px){#app-messages{max-width:100%;}}' +
+      '#app-form{margin:0;padding:0 0 6px;flex:none;}' +
+      '.input-shell{box-sizing:border-box;display:flex;align-items:center;gap:9px;' +
+      'width:min(INPUTPXpx,100%);min-height:42px;border:1px solid #b8c5d5;' +
+      'border-radius:11px;background:#fff;color:#1c2736;' +
+      'box-shadow:0 2px 9px rgba(22,35,55,.07);' +
+      'transition:border-color .16s ease,box-shadow .16s ease;}' +
+      '.input-shell:focus-within{border-color:#3687e8;' +
+      'box-shadow:0 0 0 3px rgba(54,135,232,.16),0 3px 11px rgba(22,35,55,.07);}' +
+      '.input-prompt{padding-left:12px;color:#3687e8;font:bold 19px monospace;' +
+      'user-select:none;line-height:1;}' +
+      '#app-input{display:block;box-sizing:border-box;flex:1;min-width:0;' +
+      'height:40px;margin:0;padding:0;background:transparent;border:0;' +
+      'outline:none;color:inherit;font-family:monospace;font-size:13px;}' +
+      '#app-input::placeholder{color:#7e8ca0;opacity:1;}' +
+      '#app-input:disabled{cursor:not-allowed;opacity:.65;}' +
+      '.enter-hint{flex:none;margin-right:9px;border:1px solid #dce3ed;' +
+      'border-radius:5px;padding:3px 6px;background:#f5f7fa;color:#63748a;' +
+      'font:11px monospace;user-select:none;}' +
+      '@media(max-width:540px){#app-messages{max-width:100%;}' +
+      '.input-shell{border-radius:9px;}.enter-hint{display:none;}}' +
+      '@media(prefers-reduced-motion:reduce){.input-shell{transition:none;}}' +
       '</style></head><body><div id="app-shell">' +
       '<div id="app-messages" role="log" aria-label="Chat messages"></div>' +
       '<form id="app-form" autocomplete="off">' +
-      '<input id="app-input" type="text" aria-label="Chat message" /></form>' +
+      '<div class="input-shell"><span class="input-prompt" aria-hidden="true">›</span>' +
+      '<input id="app-input" type="text" aria-label="Chat message" ' +
+      'placeholder="Type a message…" maxlength="1000" />' +
+      '<span class="enter-hint" aria-hidden="true">Enter ↵</span>' +
+      '</div></form>' +
       '</div></body></html>';
   }
 
