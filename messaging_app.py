@@ -1,4 +1,4 @@
-# @title Messaging App v5.32 — Google Drive Messenger
+# @title Messaging App v5.33 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.32'
+CLIENT_VERSION = '5.33'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1033,6 +1033,31 @@ def analyze(events):
                            bool(sender and sender in verified))
     if username.casefold() in verified_names:
         verified.add(identity_public)
+
+    # Recover an approximate UTC date for old time-only posts, using the
+    # latest absolute timestamp as an anchor and preserving append order.
+    # This is only a display annotation; never mutate the shared chat log,
+    # message numbers or reply/reaction targets.
+    anchor_epoch = int(time.time()) + 300
+    for old in reversed(messages):
+        verified_epoch = old.get('issued_at')
+        if type(verified_epoch) is int and 946684800 <= verified_epoch <= 4102444800:
+            anchor_epoch = verified_epoch
+            old['time_estimated'] = False
+            continue
+        raw_clock = old.get('time', '')
+        match = re.fullmatch(r'([01]\\d|2[0-3]):([0-5]\\d):([0-5]\\d)', raw_clock)
+        if match is None:
+            continue
+        seconds = sum(int(x)*mult for x,mult in zip(match.groups(), (3600,60,1)))
+        candidate = (anchor_epoch // 86400)*86400 + seconds
+        if candidate > anchor_epoch + 300:
+            candidate -= 86400
+        if candidate >= 946684800 and anchor_epoch - candidate <= 86400+300:
+            old['estimated_epoch'] = candidate
+            old['time_estimated'] = True
+            anchor_epoch = candidate
+
     return dict(verified_names=verified_names, renamed_users=renamed_users,
                 messages=messages, by_number=by_number,
                 identities=identities, seen_aliases=seen_aliases, display_names=display_names,
@@ -1493,7 +1518,8 @@ def submit_message(raw):
                 note('Messaging App v' + CLIENT_VERSION +
                      ' | timestamps: UTC storage, browser-local display; '+
                      'new messages include absolute clock metadata. '+
-                     'Older messages without dates may remain approximate.')
+                     'Older date-less messages have inferred (~) clock times; '+ 
+                     'message numbers and stored history remain unchanged.')
                 return snapshot()
             if command == '/ping':
                 t = time.monotonic()
@@ -1807,7 +1833,8 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   function displayedTime(msg) {
     const raw = String(msg.time || '');
     let moment = null;
-    const epoch = msg.issued_at;
+    const epoch = (typeof msg.issued_at === 'number' ? msg.issued_at :
+                   msg.estimated_epoch);
     if (typeof epoch === 'number' && Number.isFinite(epoch) &&
         epoch >= 946684800 && epoch <= 4102444800) {
       moment = new Date(epoch * 1000);
@@ -1825,7 +1852,8 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     }
     if (!Number.isFinite(moment.getTime())) return raw;
     const two = n => String(n).padStart(2, '0');
-    return two(moment.getHours()) + ':' +
+    return (msg.time_estimated ? '~' : '') +
+      two(moment.getHours()) + ':' +
       two(moment.getMinutes()) + ':' + two(moment.getSeconds());
   }
 
