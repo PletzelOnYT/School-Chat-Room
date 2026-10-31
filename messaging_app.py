@@ -122,14 +122,16 @@ def ensure_shared_chat_shortcut(drive_root, session=None, sleep=None,
                 break
         if cursor:
             fail('Drive shortcut search was incomplete')
-        correct = any(
-            f.get('mimeType') == 'application/vnd.google-apps.shortcut'
-            and (f.get('shortcutDetails') or {}).get('targetId')
-            == SHARED_CHAT_FILE_ID for f in existing
-        )
-        if existing and not correct:
+        def is_target_shortcut(item):
+            return (item.get('mimeType') == 'application/vnd.google-apps.shortcut'
+                    and (item.get('shortcutDetails') or {}).get('targetId')
+                    == SHARED_CHAT_FILE_ID)
+        # Refuse even ONE colliding chat.json; a Drive mount could expose the
+        # wrong item when multiple files have an identical display name.
+        if any(not is_target_shortcut(item) for item in existing):
             fail('a different chat.json already exists in My Drive; '
                  'it must not be replaced')
+        correct = any(is_target_shortcut(item) for item in existing)
         if not correct:
             # Confirm the target is accessible; permissions are never edited.
             target = session.get(
