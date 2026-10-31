@@ -14,160 +14,24 @@ School-Chat-Room/
 ├── guardian/
 │   ├── owner_guardian.py           Owner-only monitor and recovery engine
 │   └── guardian_launcher.py        Current Guardian Colab launcher
-├── tools/
-│   └── guardian_stress_lab.py      Isolated security stress tests + rollback
 ├── docs/
 │   └── OWNER_GUARDIAN_SETUP.md     Owner Guardian setup instructions
 ├── tests/                          Automated Python/browser regression tests
 ├── .github/workflows/             Continuous integration
-├── school_chat.py                  Public Colab chat launcher (legacy URL)
 ├── messaging_app.py                Compatibility loader for app/
 ├── guardian_launcher.py           Compatibility loader for guardian/
 ├── owner_guardian.py              Compatibility loader for guardian/
-├── guardian_stress_lab.py          Compatibility loader for tools/
 └── OWNER_GUARDIAN_SETUP.md         Documentation redirect for old links
 ```
 
 **Important:** Run one owner Guardian in its separate Colab notebook. Do not
-run the Guardian or test attacks in every participant's chat session.
+run the Guardian in every participant's chat session.
 Neither reorganization nor compatibility loading changes the original
 shared Drive file, the private Guardian database, or any account permissions.
 
 
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
-
-## Stress Lab Colab loader fix (Guardian version)
-
-If the stress panel previously crashed with
-`RuntimeError: Guardian v2.7 or later is required for this lab`, an outdated
-local `owner_guardian.py` could be selected instead of the latest one.
-The lab now chooses a current Guardian, ignores stray local copies in Colab,
-and falls back to GitHub's Contents API if its raw file download is stale.
-It prints the actual Guardian version and origin before opening the panel.
-Rerun the original cache-busted one-cell lab launcher below; restarting or
-resetting the real Guardian database is **not** required. Only isolated
-temporary test copies are written.
-
-## Live-attached mod menu (safe mode)
-
-The Stress Lab now provides a **MOD MENU — attach to actual chat** checkbox.
-When enabled in the owner's Colab, it reads the currently mounted original
-`MyDrive/chat.json`, takes a private snapshot in the notebook's temporary
-directory, and shows the **real current messages** alongside a modded local
-view. Attaching also seeds the full 59-case Guardian attack suite from an
-**isolated copy of that actual room snapshot**. Every malicious write stays
-inside the temporary test copy, not the shared Drive file.
-The interface includes a selection of visual hacks (rainbow nickname,
-mock owner/verified badges, name replacement, local fake reaction, mock
-timestamp, ghost message, message highlighting, hiding, and order changes).
-**Apply to live view** modifies only what this notebook displays.
-**Refresh real chat** rereads recent actual messages without changing them.
-
-The red **REVERT ALL TEST CHANGES** button clears these local hacks,
-re-reads the current original file, and deletes the isolated stress-test
-attack copies. This protects new messages from other users; **it does not
-replace or rewind the original shared chat**. The snapshot is a private
-rollback reference for the local overlay. Disconnecting the live view
-destroys its temporary snapshot. No persistent room copy is uploaded.
-
-Why live destructive attacks aren't in this mode: full-file rollback on a
-shared Anyone-Editor Google Drive file would remove messages appended by
-other users after the backup, and may conflict with the owner's Guardian
-approval ledger. A reliable destructive live stress test requires an
-exclusive testing room/maintenance window and a transactional server-side
-authorization/restore scheme. Continue using the full isolated attack
-suite for malicious role/identity, spam, history corruption and flooding.
-
-## Interactive stress lab: chat preview and 59 attack scenarios
-
-The owner-only `tools/guardian_stress_lab.py` panel now shows a three-column
-**read-only chat preview** for each simulation:
-
-- **BEFORE:** The unmodified sandbox history.
-- **ATTACK:** What the modified client actually wrote into its temporary copy,
-  including spoofed titles/names, chat text, malformed records, and colors.
-- **AFTER:** The cloned chat after the real Guardian's `process()` scan.
-
-The preview is intentionally *terminal-like* instead of running the full
-student chat client: it escapes all user-supplied HTML, CSS, and script tags,
-so injection tests cannot execute in the notebook preview. A category filter
-groups **59 scenarios** across identity and badges, formatting and colors,
-spam and rate limits, clock and reactions, and file integrity. Run one case,
-a category, or all cases, then choose any completed case in **Inspect** to
-compare the snapshots. The red **REVERT ALL TEST CHANGES** control still
-restores and deletes the isolated test files; it never changes live Drive.
-
-Outcomes distinguish **BLOCKED** (automatically restored), **DETECTED ONLY**
-(flagged but not restored), **SECURITY GAP** (unauthorized/untrusted accepted
-or otherwise unprotected), **ALLOWED TEXT** (ordinary text is legal; not
-evidence of script execution), and **PASS** (valid-message positive control).
-For example, the chat's unsigned title/rename/reaction records are still
-not strong identity proofs; the lab reports the limitation rather than
-claiming prevention.
-
-To run the current panel in Colab, use the same supported public root URL
-(compatibility launcher) with a cache-busting query:
-
-```python
-import time, urllib.request
-url = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/guardian_stress_lab.py"
-exec(compile(
-    urllib.request.urlopen(url + "?v=" + str(time.time_ns()))
-        .read().decode("utf-8"), url, "exec"
-))
-```
-
-Select **Use real chat as a read-only reference** only if the owner wants
-the preview to show copied recent chat contents; the test never injects into
-that original. A local simulation tests Guardian's parser and recovery
-logic, **not** true cross-user Google Drive synchronization, server-side
-permissions, or resistance to copying the public client source.
-
-## Owner-only modified-client attack stress lab (reversible)
-
-`guardian_stress_lab.py` is a **separate red-team test panel**. It imports
-the production `owner_guardian.py` and simulates a modified client that
-writes forbidden JSON records **only to private, temporary test copies** of
-`chat.json`. It never uploads attack payloads, writes to your real shared
-Drive file, changes sharing permissions, or resets the live Guardian.
-
-To open the test panel inside **the owner's Colab notebook**, run:
-
-```python
-import time, urllib.request
-url = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/guardian_stress_lab.py"
-exec(compile(urllib.request.urlopen(url + "?v=" + str(time.time_ns())).read().decode("utf-8"), url, "exec"))
-```
-
-The panel provides a choice of attacks, **Run full stress test**, and a large
-red **REVERT ALL TEST CHANGES** button. The red button restores the bytes of
-every test copy to its initial snapshot and then deletes temporary scenarios
-and their test-only incident logs. Even if a simulated attack successfully
-bypasses the Guardian, the **original shared chat never changes**.
-
-It exercises direct unauthorized title and nickname claims, owner-role
-spooﬁng, impersonation, ANSI/HTML/CSS/bidirectional Unicode color tricks,
-invalid timestamps and sidecars, extra fields, invalid reactions, anti-spam
-limits, historical edits, deletion, reordering and JSON corruption. The
-positive control is one legitimate four-field message. A separate checkbox
-can **read** the actual mounted `MyDrive/chat.json` once to seed a local
-sandbox; it never writes to that file. No one needs to run the attack suite
-in every student's Colab.
-
-**Important security limitation:** The chat's current four-field message,
-title and rename events have no cryptographic user identity, and the
-original Drive file permits Editors to modify its contents. A watchdog that
-checks every few seconds cannot prevent all unauthorized writes or prove
-who made one, and cannot stop someone copying code from a public GitHub
-repository. The panel reports these cases as **SECURITY GAP**, not as
-successes. Reliable prevention requires a server-side identity and
-authorization boundary or restricted Drive write permissions, not just
-obfuscated client commands.
-
-Run local automated tests with `python tools/guardian_stress_lab.py --cli`.
-For inspection without writing any local attack payloads to Drive, leave the
-live-file checkbox off (the default).
 
 ## v5.36 / Guardian v2.7: Live timestamp ordering and monitoring
 
@@ -414,7 +278,7 @@ Emoji reactions also work with small metadata records:
 
 1. Stop all older Colab chat cells; older versions can write incompatible records.
 2. The launcher automatically attempts to add a shortcut to the original shared `chat.json` in each participant's My Drive root. Existing correct shortcuts continue working; if the school account restricts the Drive API, use the link and add the original shortcut manually.
-3. Rerun the existing GitHub launcher (old `school_chat.py` path still loads `messaging_app.py`).
+3. Rerun the current `messaging_app.py` launcher from GitHub.
 4. **Stop any older Owner Guardian before anyone starts v5.32.** An older Guardian will treat the appended records as broken JSON and could overwrite them. Download the latest `owner_guardian.py` and restart it. **Do not reset an existing healthy Guardian database** solely for this upgrade; a reset would discard the prior verified backup history. Run a temporary `--audit-only` check first.
 
 ## Supported features and trade-offs
