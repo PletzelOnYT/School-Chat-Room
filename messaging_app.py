@@ -269,6 +269,7 @@ def valid_signature(event):
 PLAIN_MESSAGE_FIELDS = frozenset(('kind','time','user','text'))
 TITLE_FIELDS = frozenset(('kind','time','user','title'))
 RENAME_FIELDS = frozenset(('kind','time','user','name'))
+REACTION_FIELDS = frozenset(('kind','time','user','target','emoji','active'))
 TITLE_VERIFIED = 'Verified'
 TITLE_NONE = 'None'
 REPLY_TEXT_RE = re.compile(r'^↳ \[reply:#(\d+)\] (.+)$', re.DOTALL)
@@ -317,6 +318,27 @@ def rename_event(new_name):
             'name': new_name}
 
 
+def is_simple_reaction(event):
+    """Unsigned reaction change referencing a stable message sequence number."""
+    return (isinstance(event,dict) and set(event) == REACTION_FIELDS
+            and event.get('kind') == 'reaction'
+            and isinstance(event.get('time'),str)
+            and re.fullmatch(r'\d{2}:\d{2}:\d{2}',event['time']) is not None
+            and isinstance(event.get('user'),str)
+            and 0 < len(event['user']) <= 128
+            and type(event.get('target')) is int
+            and 1 <= event['target'] <= 10000000
+            and is_valid_emoji(event.get('emoji', ''))
+            and type(event.get('active')) is bool)
+
+
+def simple_reaction_event(number, emoji, active):
+    return {'kind':'reaction',
+            'time':time.strftime('%H:%M:%S',time.localtime()),
+            'user':username, 'target':number,
+            'emoji':emoji, 'active':active}
+
+
 def title_event(target, enabled):
     return {'kind': 'title',
             'time': time.strftime('%H:%M:%S', time.localtime()),
@@ -326,7 +348,7 @@ def title_event(target, enabled):
 
 def is_simple_record(event):
     return (is_plain_message(event) or is_title_event(event) or
-            is_rename_event(event))
+            is_rename_event(event) or is_simple_reaction(event))
 
 
 def plain_message(text):
@@ -670,6 +692,7 @@ def analyze(events):
     seen_ids = set()
     post_number = 0
     reaction_state = {}
+    simple_reactions = {}
     rate_history = {}
     seen_any_signed_event = False
     claim_order = {}  # (identity, normalized name) -> first signed appearance
@@ -700,6 +723,9 @@ def analyze(events):
             aliases_by_base.setdefault(base, set()).update(
                 (base, e['name'].casefold()))
             renamed_users[base] = e['name']
+            continue
+        if kind == 'reaction' and is_simple_reaction(e):
+            simple_reactions[(e['target'], e['user'].casefold(), e['emoji'])] = e['active']
             continue
         signed = valid_signature(e)
         if signed:
@@ -927,7 +953,25 @@ def analyze(events):
         if base in renamed_users:
             msg['user'] = renamed_users[base]
 
+    # The same name remains the actor after /rename. Exact attribution is
+    # impossible with intentionally unsigned chat messages.
+    current_reactions = {}
+    for (number, user_key, emoji), enabled in simple_reactions.items():
+        base = aliases_to_base.get(user_key,user_key)
+        current_reactions[(number,base,emoji)] = enabled
     reaction_totals = {}
+    by_numeric = {m['number']: m for m in messages}
+    my_reacted = {}
+    local_base = aliases_to_base.get(
+        GOOGLE_ACCOUNT_USERNAME.casefold(), GOOGLE_ACCOUNT_USERNAME.casefold())
+    for (number, user_key, emoji), enabled in current_reactions.items():
+        target_message = by_numeric.get(number)
+        if not enabled or target_message is None:
+            continue
+        counts = reaction_totals.setdefault(target_message['id'], {})
+        counts[emoji] = counts.get(emoji,0)+1
+        if user_key == local_base:
+            my_reacted.setdefault(target_message['id'],[]).append(emoji)
     valid_message_ids = {m['id'] for m in messages}
     for (target, reacting_pub, emoji), active in reaction_state.items():
         if active and target in valid_message_ids:
@@ -935,7 +979,7 @@ def analyze(events):
             counts[emoji] = counts.get(emoji, 0) + 1
     for msg in messages:
         msg['reactions'] = reaction_totals.get(msg['id'], {})
-        msg['my_reactions'] = [
+        msg['my_reactions'] = my_reacted.get(msg['id'], []) + [
             emoji for (target, user, emoji), enabled in reaction_state.items()
             if target == msg['id'] and user == identity_public and enabled
         ]
@@ -1459,7 +1503,7 @@ def submit_message(raw):
                     note('Usage: /react <message#> <emoji>  or  /unreact <message#> <emoji>')
                     return snapshot()
                 active = command != '/unreact'
-                evt = event_now('reaction', message_id=target['id'], emoji=emoji, active=active)
+                evt = simple_reaction_event(target['number'], emoji, active)
                 ok = write_event(evt)
                 if not ok:
                     note('Reaction could not be confirmed. Try again.')
