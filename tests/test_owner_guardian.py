@@ -294,6 +294,36 @@ class GuardianTests(unittest.TestCase):
         self.assertTrue(rows[0]["epoch"]<rows[1]["epoch"]<rows[2]["epoch"])
         self.assertEqual(initial[0],old)
 
+    def test_live_exact_clock_sidecars_detect_out_of_order_posts_without_rewriting(self):
+        # Real shared chat can have 02:57:37 appended before 02:57:35.
+        older={"kind":"message","time":"02:57:37","user":"Sasha","text":"hi"}
+        newer={"kind":"message","time":"02:57:35","user":"Pletzel","text":"test"}
+        def sidecar(message,epoch):
+            return {"kind":"clock","time":message["time"],
+                    "user":message["user"],"epoch":epoch,
+                    "message_hash":guardian.plain_message_hash(message)}
+        live=[older,sidecar(older,1793415457),
+              newer,sidecar(newer,1793415455)]
+        frozen=json.dumps(live)
+        report=guardian.historical_clock_audit(live,now=1793415457)
+        self.assertEqual(report["near_order_inversions"],[{
+            "previous_position":0,"next_position":2,
+            "seconds":2,"confidence":"exact"}])
+        self.assertEqual(json.dumps(live),frozen)
+
+    def test_legacy_short_clock_inversion_is_not_converted_to_one_day(self):
+        earlier={"kind":"message","time":"02:09:28","user":"Sasha","text":"test"}
+        later={"kind":"message","time":"02:09:25","user":"Pletzel","text":"hi"}
+        anchored={"kind":"message","time":"02:57:37","user":"Sasha","text":"known"}
+        proof={"kind":"clock","time":"02:57:37","user":"Sasha",
+               "epoch":1793415457,
+               "message_hash":guardian.plain_message_hash(anchored)}
+        report=guardian.historical_clock_audit(
+            [earlier,later,anchored,proof],now=1793415457)
+        times=report["messages"]
+        self.assertEqual(times[0]["epoch"]-times[1]["epoch"],3)
+        self.assertEqual(report["near_order_inversions"][0]["confidence"],"inferred")
+
     def test_guardian_writes_private_clock_audit_without_rewriting_chat(self):
         original=self.shared.read_bytes()
         self.assertEqual(self.mon.process(),"enrolled")
