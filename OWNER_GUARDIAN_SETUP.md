@@ -1,4 +1,4 @@
-# Messaging App — Owner Guardian v2.5
+# Messaging App — Owner Guardian v2.6
 
 The owner runs a **separate Python program** (`owner_guardian.py`) in their own Google Colab notebook. The chat itself, including the original terminal UI and `chat.json`, remains unchanged. No Vercel, Redis, or additional shared folder is required.
 
@@ -27,6 +27,23 @@ because the app switched to append-only writes.
 - If messages disappear, are modified, or are reordered, repairs the existing shared file using the approved history.
 - If the file is empty, corrupted, or truncated, attempts to restore the approved history **in place**.
 - If the original Drive object is in Trash, it optionally attempts to **untrash the original file ID** using a Google token already available in the session.
+
+## Guardian v2.6: Correct handling of Colab user credentials
+
+In some Colab runtimes, Google's **ephemeral user authorization**
+(`USE_AUTH_EPHEM=1`) is represented by the same Python credential class as
+Compute Engine credentials. The prior Guardian rejected that class after
+successful user consent. v2.6 accepts this specific Colab configuration
+**only when the credential can refresh successfully**, and continues to
+reject ordinary unauthenticated VM and service-account credentials.
+
+In standard Colab user authorization, an authorized credential file can be
+stored as `/content/.adc/adc.json`. If the default lookup still returns a
+VM identity, Guardian checks that Colab-managed user file and validates its
+OAuth credentials instead. Credentials and tokens are never printed or
+placed in the chat log, GitHub, or shared Drive. A school policy may still
+block authorization, in which case add a shortcut to the original file
+manually using the same Google account; no policy is bypassed.
 
 ## Guardian v2.5: Fix recurring Colab VM credential RefreshError
 
