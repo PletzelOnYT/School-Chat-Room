@@ -208,6 +208,25 @@ class GuardianTests(unittest.TestCase):
         self.assertEqual(self.mon.process(),"restored")
         self.assertEqual(json.loads(self.shared.read_text())[-1],simple)
 
+    def test_accept_restore_title_badges_without_message_ids(self):
+        self.mon.process()
+        title={"kind":"title","time":"04:15:50","user":"Pletzel",
+               "title":"Verified"}
+        self.assertTrue(guardian.simple_title(title))
+        self.assertIsNone(guardian.check_new_event(title,{},{}))
+        self.shared.write_text(json.dumps([self.legacy,title]))
+        self.assertEqual(self.mon.process(),"healthy")
+        self.assertEqual(guardian.count_events(self.mon.db),2)
+        self.shared.write_text(json.dumps([self.legacy]))
+        self.assertEqual(self.mon.process(),"restored")
+        self.assertEqual(json.loads(self.shared.read_text())[-1],title)
+
+    def test_guardian_rejects_fake_owner_title(self):
+        invalid={"kind":"title","time":"04:15:50","user":"Pletzel",
+                 "title":"Owner"}
+        self.assertFalse(guardian.simple_title(invalid))
+        self.assertIn("unknown",guardian.check_new_event(invalid,{},{}))
+
     def test_tampered_approved_text_restored(self):
         self.mon.process()
         e=self.event("safely signed text")
