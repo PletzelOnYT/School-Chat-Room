@@ -1,7 +1,19 @@
-# Messaging App v5.34
+# Messaging App v5.35
 
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
+
+## v5.35: Automatically join the original shared Drive chat
+
+When a student opens the existing GitHub Colab launcher, the app mounts their Google Drive as usual. If `My Drive/chat.json` does **not** already exist, the client tries to use the **currently authorized** Google Drive API session to create a Google Drive shortcut named `chat.json` in that account's My Drive root, pointing to the single original file `1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd`.
+
+- **No data copy and no room split:** A shortcut references the original file; the app never uploads the attached snapshot or creates another chat log.
+- **No sharing changes:** The owner already shared the file via its link. Automatic shortcut creation does not grant others permissions or change the existing permissions.
+- **Idempotent and cautious:** Existing mounted `chat.json` is reused; an existing matching shortcut is not recreated. A different item named `chat.json` blocks setup rather than being overwritten.
+- **Permission-aware:** The launcher uses existing Google credentials; it never forces an additional Google sign-in, bypasses a school-account restriction, or obtains new OAuth scopes without approval. If Google refuses the API call, users must open the shared link in their own account and use *Organize → Add shortcut* manually, placing it at the root of My Drive.
+- **Drive mount synchronization:** A newly created shortcut may not immediately appear in Colab's mounted filesystem. If the launcher asks, remount Drive and rerun the launcher. Keep the same original shortcut, not a downloaded copy.
+
+**Important security trade-off:** The original file currently allows anyone with its link to edit its contents, including existing chat history. Neither a shortcut nor Owner Guardian can make that fully safe. A safer chat requires authenticated per-message server writes and read-only history access for ordinary participants.
 
 ## v5.34: Clean timestamp display
 
@@ -99,7 +111,7 @@ Emoji reactions also work with small metadata records:
 ## Starting the app
 
 1. Stop all older Colab chat cells; older versions can write incompatible records.
-2. Keep the original `chat.json` shortcut in the root of each participant's My Drive.
+2. The launcher automatically attempts to add a shortcut to the original shared `chat.json` in each participant's My Drive root. Existing correct shortcuts continue working; if the school account restricts the Drive API, use the link and add the original shortcut manually.
 3. Rerun the existing GitHub launcher (old `school_chat.py` path still loads `messaging_app.py`).
 4. **Stop any older Owner Guardian before anyone starts v5.32.** An older Guardian will treat the appended records as broken JSON and could overwrite them. Download the latest `owner_guardian.py` and restart it. **Do not reset an existing healthy Guardian database** solely for this upgrade; a reset would discard the prior verified backup history. Run a temporary `--audit-only` check first.
 
