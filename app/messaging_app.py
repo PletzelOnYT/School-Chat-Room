@@ -1981,7 +1981,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     if (stopped || !root.isConnected) return;
     dismissToast();
     const sender = String(author || 'Someone').slice(0,50);
-    const preview = String(message || '').replace(/\\s+/g, ' ').trim().slice(0,170);
+    const preview = String(message || '').replace(/\s+/g, ' ').trim().slice(0,170);
     toastTitle.textContent = count > 1
       ? 'Pletzel Chat · ' + count + ' new messages'
       : 'Pletzel Chat · ' + sender;
