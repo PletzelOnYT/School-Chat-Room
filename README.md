@@ -1,4 +1,43 @@
-# Messaging App v5.40
+# Messaging App v5.42
+
+## Messaging App v5.42 — Slim in-chat popups with countdown
+
+The old v5.39–v5.40 experimental system notification permission feature was
+**replaced**. Colab's embedded iframe and school-managed Chromebooks can
+block system-notification prompts. The chat now uses an automatic,
+permission-free **Colab-style floating toast inside the chat output**.
+
+- A white, slim card floats at the **lower-right corner of the embedded
+  chat view**, with subtle grey borders, Google's blue accent, the sender,
+  and a two-line message preview.
+- A thin blue progress line shrinks over **6.5 seconds**. The popup
+  disappears automatically; **×** dismisses it immediately.
+- New messages from other chat users trigger toasts. Existing messages
+  at startup, your own messages, private System output and repeated
+  polling do not trigger alerts. Multiple messages arriving at once are
+  summarized in one card; a newer message replaces the previous toast
+  and restarts its countdown.
+- All content is rendered as plain text. No permissions, browser
+  Notification API, Chrome extensions, extra Google Drive records,
+  independent windows or downloaded programs are needed.
+- Existing terminal chat rendering, command-result popup windows,
+  reactions, replies and Guardian stay unchanged.
+
+**Scope:** This is a visually floating **in-page** popup, not an operating
+system notification. It only appears inside the Colab chat output while
+the chat is connected/running. It cannot notify classmates when Colab
+is closed, or appear over unrelated Chromebook apps or tabs. Showing
+actual system notifications outside Colab requires an allowed standalone
+HTTPS origin with browser notification permission.
+
+**Update:** Restart your Colab chat cell to load v5.42 from the same
+GitHub launcher; the Guardian doesn't need restarting.
+
+## Messaging App v5.41 — Startup reaction validation fix
+
+Moved `is_valid_emoji` before the first `read_messages()` call. Existing
+shared chat histories containing emoji reaction records previously could
+raise a `NameError` on launch. No shared history or identity is changed.
 
 ## Messaging App v5.40 — Why Chrome did not show a permission prompt
 
