@@ -1,4 +1,4 @@
-# @title Messaging App v5.34 — Google Drive Messenger
+# @title Messaging App v5.35 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,11 +40,16 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.34'
+CLIENT_VERSION = '5.35'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
     'School-Chat-Room/main/messaging_app.py')
+# One exact, already-shared Drive file; NEVER upload a copy for another user.
+SHARED_CHAT_FILE_ID = '1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd'
+SHARED_CHAT_FILE_LINK = (
+    'https://drive.google.com/file/d/'
+    '1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd/view')
 # Anchor from the original school chat. Prevent accidentally splitting the room.
 ORIGINAL_HISTORY_ANCHOR = '081cad07-8430-4c0e-8000-f3a4a379536a'
 
@@ -56,12 +61,122 @@ DRIVE_ROOT = next((p for p in ('/content/drive/MyDrive', '/content/drive/My Driv
 if not DRIVE_ROOT:
     raise RuntimeError('Your Google Drive is not mounted.')
 
-CHAT_FILE_PATH = os.path.join(DRIVE_ROOT, 'chat.json')
-if not os.path.isfile(CHAT_FILE_PATH):
-    raise FileNotFoundError(
-        'Shared chat.json not found. Add a SHORTCUT to the original shared '
-        'chat.json in the ROOT of your own My Drive. Do not copy it.'
-    )
+def ensure_shared_chat_shortcut(drive_root, session=None, sleep=None,
+                                max_polls=12):
+    """Join the ORIGINAL shared room by making one Drive shortcut, not a copy.
+
+    Use only credentials already authorized in Colab. A school account whose
+    Drive API access is restricted must not be prompted for extra OAuth scopes
+    or switched to an alternative account automatically.
+    """
+    chat_path = os.path.join(drive_root, 'chat.json')
+    if os.path.isfile(chat_path):
+        return chat_path
+    if os.path.lexists(chat_path):
+        raise RuntimeError('My Drive already contains a non-file chat.json. '
+                           'Not replacing it or creating a second room.')
+    if sleep is None:
+        sleep = time.sleep
+
+    def fail(reason):
+        raise FileNotFoundError(
+            'Automatic chat.json shortcut setup could not complete: ' + reason +
+            '. Open ' + SHARED_CHAT_FILE_LINK +
+            ' with the same Google account as Colab and use '
+            '"Organize > Add shortcut", selecting the root of My Drive, '
+            'then rerun this launcher. Never upload a copy of chat.json.'
+        )
+
+    if session is None:
+        try:
+            import google.auth
+            from google.auth.transport.requests import AuthorizedSession
+            credentials, _ = google.auth.default()
+            session = AuthorizedSession(credentials)
+        except Exception as exc:
+            fail('existing Colab Drive API credentials were unavailable')
+
+    api = 'https://www.googleapis.com/drive/v3/files'
+    try:
+        # Prevent duplicate shortcuts after a previous launch or Drive sync.
+        existing = []
+        cursor = None
+        for _ in range(5):
+            params = {
+                'q': ("'root' in parents and name = 'chat.json' "
+                      "and trashed = false"),
+                'fields': ('nextPageToken,files(id,name,mimeType,'
+                           'shortcutDetails(targetId))'),
+                'pageSize': 100,
+            }
+            if cursor:
+                params['pageToken'] = cursor
+            listing = session.get(api, params=params, timeout=15)
+            if listing.status_code != 200:
+                fail('Drive did not permit listing My Drive shortcuts '
+                     '(HTTP ' + str(listing.status_code) + ')')
+            data = listing.json()
+            existing.extend(data.get('files', []))
+            cursor = data.get('nextPageToken')
+            if not cursor:
+                break
+        if cursor:
+            fail('Drive shortcut search was incomplete')
+        correct = any(
+            f.get('mimeType') == 'application/vnd.google-apps.shortcut'
+            and (f.get('shortcutDetails') or {}).get('targetId')
+            == SHARED_CHAT_FILE_ID for f in existing
+        )
+        if existing and not correct:
+            fail('a different chat.json already exists in My Drive; '
+                 'it must not be replaced')
+        if not correct:
+            # Confirm the target is accessible; permissions are never edited.
+            target = session.get(
+                api + '/' + SHARED_CHAT_FILE_ID,
+                params={'fields': 'id,name,mimeType,trashed'},
+                timeout=15,
+            )
+            if target.status_code != 200:
+                fail('this account cannot access the original shared file '
+                     '(HTTP ' + str(target.status_code) + ')')
+            info = target.json()
+            if (info.get('id') != SHARED_CHAT_FILE_ID or
+                    info.get('mimeType') != 'application/json' or
+                    info.get('trashed')):
+                fail('the linked target is not the expected live chat.json')
+            shortcut = session.post(
+                api,
+                json={'name': 'chat.json',
+                      'mimeType': 'application/vnd.google-apps.shortcut',
+                      'parents': ['root'],
+                      'shortcutDetails': {'targetId': SHARED_CHAT_FILE_ID}},
+                params={'fields': 'id,name,mimeType,shortcutDetails(targetId)'},
+                timeout=15,
+            )
+            if shortcut.status_code not in (200, 201):
+                fail('Drive rejected creating the shortcut '
+                     '(HTTP ' + str(shortcut.status_code) + ')')
+            created = shortcut.json()
+            if ((created.get('shortcutDetails') or {}).get('targetId')
+                    != SHARED_CHAT_FILE_ID):
+                fail('Drive did not confirm the shortcut target')
+            print('Created a shortcut to the existing shared chat.json '
+                  'in this account\'s My Drive. No file was copied.')
+
+        # Drive FUSE can take some time to expose new shortcuts.
+        for attempt in range(max_polls):
+            if os.path.isfile(chat_path):
+                return chat_path
+            if attempt < max_polls - 1:
+                sleep(1)
+        fail('Drive created/found the shortcut but it is not yet visible '
+             'in the mounted filesystem; remount Drive and rerun')
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        fail('the Drive API or its response was unavailable')
+
+
+CHAT_FILE_PATH = ensure_shared_chat_shortcut(DRIVE_ROOT)
 
 PRIVATE_FOLDER = os.path.join(DRIVE_ROOT, '.schoolchat')
 PRIVATE_IDENTITY_PATH = os.path.join(PRIVATE_FOLDER, 'identity.json')
