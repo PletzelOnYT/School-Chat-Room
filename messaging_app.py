@@ -367,6 +367,43 @@ def display_only_message_id(event,position):
     return 'plain-%d-%s' % (position,hashlib.sha256(raw).hexdigest()[:16])
 
 
+# Appended records use a record separator so the original history bytes are
+# immutable. This is an append-only log, NOT a single JSON document.
+APPEND_RECORD_SEPARATOR = '\x1e'
+
+
+def parse_chat_log(raw):
+    """Parse original JSON array followed by optional framed JSON objects."""
+    if isinstance(raw, bytes):
+        try:
+            raw = raw.decode('utf-8-sig')
+        except UnicodeError as exc:
+            raise ChatFileError('Shared chat contains invalid UTF-8.') from exc
+    decoder = json.JSONDecoder()
+    skip = len(raw) - len(raw.lstrip())
+    try:
+        initial, pos = decoder.raw_decode(raw, skip)
+    except (ValueError, TypeError) as exc:
+        raise ChatFileError('Shared chat history is not valid JSON.') from exc
+    if not isinstance(initial, list):
+        raise ChatFileError('Shared history must begin with a JSON array.')
+    messages = list(initial)
+    while True:
+        pos += len(raw[pos:]) - len(raw[pos:].lstrip())
+        if pos >= len(raw):
+            break
+        if raw[pos] != APPEND_RECORD_SEPARATOR:
+            raise ChatFileError('Unexpected bytes after the original chat history.')
+        try:
+            entry, pos = decoder.raw_decode(raw, pos + 1)
+        except (ValueError, TypeError) as exc:
+            raise ChatFileError('Appended chat record incomplete; retry after Drive sync.') from exc
+        if not isinstance(entry, dict):
+            raise ChatFileError('Appended record is not a JSON object.')
+        messages.append(entry)
+    return messages
+
+
 def read_messages():
     """Read both the original pretty JSON array and later append-only records."""
     with file_lock:
@@ -455,25 +492,21 @@ def remember_outgoing(event, current):
 
 
 def write_plain_message(event):
-    """Append and verify an event; keep receipt for eventual reconciliation."""
+    """Append once and preserve a private receipt for later recovery.
+
+    Repeated appends before the first write is visible could duplicate events.
+    Never rewrite existing shared history.
+    """
     if not is_simple_record(event):
         raise ChatFileError('Invalid simplified chat event.')
     with file_lock:
-        current = read_messages()
-        receipt = remember_outgoing(event, current)
-        for attempt in range(5):
-            if attempt:
-                time.sleep(0.18 * attempt)
-            # Do not rewrite any part of shared history.
-            append_event_in_place(event)
-            time.sleep(0.20 + 0.06 * attempt)
-            try:
-                if sum(e == event for e in read_messages()) >= receipt['required']:
-                    return True
-            except ChatFileError:
-                if attempt == 4:
-                    raise
-        return False
+        receipt = remember_outgoing(event, read_messages())
+        append_event_in_place(event)
+        time.sleep(0.20)
+        try:
+            return sum(e == event for e in read_messages()) >= receipt['required']
+        except ChatFileError:
+            return False
 
 
 def write_event(event, remember=True):
