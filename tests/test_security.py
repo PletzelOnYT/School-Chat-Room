@@ -106,7 +106,7 @@ class VerifiedOnlyTests(unittest.TestCase):
                          "student")
         claim = self.evt("claim", kind="role", sender_key=self.a,
                          role="verified", target_key=self.a, active=True,
-                         self_verified=True)
+                         self_verified=True, verification_version=2)
         valid = self.evt("rename", kind="profile", sender_key=self.a,
                          user="CoolName", account_username="student", renamed=True)
         state = env["analyze"]([base, spoof, claim, valid])
