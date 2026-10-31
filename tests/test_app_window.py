@@ -126,6 +126,13 @@ async function run(){
  assert(html.includes('class="composer-wrap"'));
  assert(html.includes('class="message"')===false,'messages must be dynamic');
  assert(html.includes('id="app-search"'));
+ assert(html.includes('id="app-thread-panel"'));
+ assert(html.includes('id="app-thread-form"'));
+ assert(html.includes('id="app-mention-list"'));
+ assert(html.includes('id="app-pings"'));
+ assert(html.includes('@keyframes thread-in'));
+ assert(html.includes('@keyframes message-arrive'));
+ assert(html.includes('prefers-reduced-motion:reduce'));
  assert(html.includes('@media(max-width:670px)'));
  assert(html.includes('background:var(--surface)'));
  assert(!html.includes('onerror=alert'),'untrusted text must not be in markup');
@@ -187,6 +194,55 @@ async function run(){
  assert(transcript.textContent.includes('Incoming live!'));
  assert.strictEqual(input.value,'unsent draft');
 
+
+ // Username pings are highlighted and counted only when newly received.
+ state.messages.push(makeMsg(4,'Emma','hey @Alex check this out'));
+ polling();
+ await sleep(40);
+ assert(find(transcript,n=>n.className==='ping-mention mine'),'self ping styled');
+ assert(find(transcript,n=>n.className==='ping-marker'),'ping highlight label');
+ assert.strictEqual(el['app-ping-count'].textContent,'1');
+ el['app-pings'].events.click();
+ assert(transcript.textContent.includes('hey @Alex'));
+ assert(!transcript.textContent.includes('Good morning'));
+ assert.strictEqual(el['app-ping-count'].textContent,'0');
+ el['app-pings'].events.click();
+ assert(transcript.textContent.includes('Good morning'));
+
+ // @mention suggestions insert a real username without sending a message.
+ input.value='hello @Em';
+ input.events.input();
+ const mentionList=el['app-mention-list'];
+ assert.strictEqual(mentionList.style.display,'block');
+ clickButton(mentionList,'@Emma');
+ assert.strictEqual(input.value,'hello @Emma ');
+ assert.strictEqual(mentionList.style.display,'none');
+
+ // A root thread opens a responsive panel and sends through the same callback.
+ state.threads=[{root:state.messages[0],replies:[
+   makeMsg(5,'Sasha','First thread reply',{reply_to:'m1'})
+ ],total_replies:1}];
+ polling();
+ await sleep(35);
+ clickButton(transcript,'▤ Thread');
+ assert.strictEqual(el['app-layout'].className,'app thread-open');
+ assert(el['app-thread-body'].textContent.includes('First thread reply'));
+ assert(el['app-thread-meta'].textContent.includes('1 reply'));
+ el['app-thread-input'].value='Answer in thread';
+ el['app-thread-form'].events.submit({preventDefault(){}});
+ await sleep(820);
+ assert(sent.includes('/reply 1 Answer in thread'),sent);
+
+ const nestedReply=find(el['app-thread-body'],n=>n.className.includes('thread-card reply'));
+ assert(nestedReply,'thread reply should be visible in side panel');
+ clickButton(nestedReply,'↳ Reply');
+ el['app-thread-input'].value='Nested answer';
+ el['app-thread-form'].events.submit({preventDefault(){}});
+ await sleep(820);
+ assert(sent.includes('/reply 5 Nested answer'),sent);
+ el['app-thread-close'].events.click();
+ assert.strictEqual(el['app-layout'].className,'app');
+
  app.win.close();
  classicControl('[Open in App]').events.click();
  assert.strictEqual(opened.length,2);
@@ -207,13 +263,16 @@ run().catch(e=>{console.error(e);process.exitCode=1});
 class AppWindowTests(unittest.TestCase):
     def test_discord_style_only_affects_popup(self):
         source=SOURCE.read_text(encoding="utf-8")
-        self.assertIn("CLIENT_VERSION = '5.52'",source)
+        self.assertIn("CLIENT_VERSION = '5.53'",source)
         self.assertIn('font-family:monospace;font-size:13px',HTML)
         self.assertIn('height:19px',HTML)
         self.assertIn("textControl('[Open in App]',openAppWindow",SCRIPT)
         self.assertIn("function renderApp(state",SCRIPT)
         self.assertIn("function appTimeline(state)",SCRIPT)
-        self.assertIn("renderTextWithMentions(body",SCRIPT)
+        self.assertIn("appTextWithPings(doc,body",SCRIPT)
+        self.assertIn("function appRenderThread(state)",SCRIPT)
+        self.assertIn("function appUpdateMentions()",SCRIPT)
+        self.assertIn("appHasMention(msg.text,state.username)",SCRIPT)
         self.assertNotIn("innerHTML = msg.text",SCRIPT)
 
     @unittest.skipUnless(shutil.which("node"),"Node.js required")
