@@ -52,9 +52,10 @@ class PlainMessagesTests(unittest.TestCase):
     def test_append_plain_message_does_not_write_ids(self):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/"chat.json"
-            original=[{"id":"anchor","text":"existing history"}]
-            path.write_text(json.dumps(original))
-            env=setup({"CHAT_FILE_PATH":str(path),"ORIGINAL_HISTORY_ANCHOR":"anchor"})
+            original=[{"kind":"message","time":"04:12:00",
+                       "user":"ColabUser","text":"existing history"}]
+            path.write_text(json.dumps(original, indent=2)+"\n")
+            env=setup({"CHAT_FILE_PATH":str(path)})
             item=env["plain_message"]("fdg")
             self.assertTrue(env["write_event"](item))
             entries=json.loads(path.read_text())
