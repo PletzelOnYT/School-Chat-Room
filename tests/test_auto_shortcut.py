@@ -55,6 +55,14 @@ class Session:
                 "name": "chat.json", "mimeType": "application/json",
                 "id": "not-the-original"
             }]})
+        if self.state == "mixed":
+            return Response(200, {"files": [
+                {"name": "chat.json",
+                 "mimeType": "application/vnd.google-apps.shortcut",
+                 "shortcutDetails": {"targetId": TARGET}},
+                {"name": "chat.json", "mimeType": "application/json",
+                 "id": "other-room-copy"},
+            ]})
         return Response(200, {"files": []})
 
     def post(self, url, json=None, params=None, timeout=None):
@@ -102,6 +110,13 @@ class ShortcutBootstrapTests(unittest.TestCase):
         session = Session(self.tmp.name, state="collision")
         with self.assertRaisesRegex(FileNotFoundError, "different chat.json"):
             ensure(self.tmp.name, session=session, sleep=lambda _: None)
+        self.assertEqual(session.posts, [])
+
+    def test_mixed_correct_and_wrong_name_is_not_assumed_safe(self):
+        session = Session(self.tmp.name, state="mixed")
+        with self.assertRaisesRegex(FileNotFoundError, "different chat.json"):
+            ensure(self.tmp.name, session=session, sleep=lambda _: None)
+        self.assertFalse(self.path.exists())
         self.assertEqual(session.posts, [])
 
     def test_denied_original_access_never_creates_or_copies(self):
