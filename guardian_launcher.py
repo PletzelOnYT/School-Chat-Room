@@ -1,4 +1,4 @@
-# @title Owner Guardian v2.6 — Google Colab launcher
+# @title Owner Guardian v2.7 — Google Colab launcher
 """Owner-only one-cell launcher for the latest Drive Chat Guardian.
 
 Uses the owner-provided Colab runtime and Google user authorization. The
