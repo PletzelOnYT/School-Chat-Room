@@ -55,7 +55,10 @@ The Stress Lab now provides a **MOD MENU — attach to actual chat** checkbox.
 When enabled in the owner's Colab, it reads the currently mounted original
 `MyDrive/chat.json`, takes a private snapshot in the notebook's temporary
 directory, and shows the **real current messages** alongside a modded local
-view. The interface includes a selection of visual hacks (rainbow nickname,
+view. Attaching also seeds the full 59-case Guardian attack suite from an
+**isolated copy of that actual room snapshot**. Every malicious write stays
+inside the temporary test copy, not the shared Drive file.
+The interface includes a selection of visual hacks (rainbow nickname,
 mock owner/verified badges, name replacement, local fake reaction, mock
 timestamp, ghost message, message highlighting, hiding, and order changes).
 **Apply to live view** modifies only what this notebook displays.
