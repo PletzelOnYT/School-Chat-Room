@@ -101,14 +101,16 @@ async function run(){
   let p=opened[0];
   assert(p.features.includes('popup=yes'));
   assert(p.features.includes('width=330'));
-  assert(p.features.includes('height=112'));
+  assert(p.features.includes('height=56'));
   assert(p.features.includes('left=938'),p.features);
-  assert(p.features.includes('top=676'),p.features);
+  assert(p.features.includes('top=732'),p.features);
   assert(p.doc===undefined);
   assert(p.win.document.html.includes('Pletzel Chat'));
   assert(p.win.document.html.includes('@keyframes expire'));
   assert(p.win.document.html.includes('white-space:nowrap;overflow:hidden;text-overflow:ellipsis'));
   assert(p.win.document.html.includes('height:2px'));
+  assert(p.win.document.html.includes('height:56px'));
+  assert(p.win.document.html.includes('height:53px'));
   assert(!p.win.document.html.includes('-webkit-line-clamp:2'));
   assert(p.fields.sender.textContent.includes('Preview'));
   assert.strictEqual(timers.size,1);
@@ -206,7 +208,7 @@ class DesktopPopupTests(unittest.TestCase):
         self.assertEqual(run.returncode,0,run.stdout+"\n"+run.stderr)
 
     def test_no_built_in_browser_notifications_or_embedded_toast(self):
-        self.assertIn("CLIENT_VERSION = '5.44'",SOURCE.read_text(encoding="utf-8"))
+        self.assertIn("CLIENT_VERSION = '5.45'",SOURCE.read_text(encoding="utf-8"))
         self.assertNotIn('messaging-toast-SESSION_ID',HTML)
         self.assertIn("popup=yes,width=",JAVASCRIPT)
         self.assertIn("window.open('', 'pletzel-desktop-SESSION_ID'",JAVASCRIPT)
