@@ -1,6 +1,11 @@
-# Messaging App v5.30
+# Messaging App v5.31
 
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
+
+
+## v5.31: Local chat timestamps
+
+The displayed clock is now converted from the Google Colab runtime's UTC time into each viewer's browser-local time, without changing the terminal-style UI. New records still contain the same **four message fields** (`kind`, `time`, `user`, `text`) and are written with UTC `HH:MM:SS`; the existing shared Drive history remains untouched. Old time-only records cannot recover their original date or historical daylight-saving offset; they are displayed using a recent UTC-day assumption. Signed historical records with `issued_at` use their absolute timestamp when available.
 
 ## Live file migration completed
 
