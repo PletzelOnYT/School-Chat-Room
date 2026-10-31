@@ -599,6 +599,7 @@ class StressLab:
             raise RuntimeError("Unsafe experiment directory")
         self.cases = {}
         self.results = []
+        self.previews = {}
 
     def _directory(self, case):
         if case not in ATTACK_LABELS:
@@ -606,6 +607,12 @@ class StressLab:
         destination = (self.root / "cases" / case).resolve()
         if not destination.is_relative_to(self.root):
             raise RuntimeError("Unsafe lab path")
+        # A rerun must start from fresh ledger state. Otherwise an older
+        # attack's private SQLite checkpoint can poison subsequent results.
+        if destination.exists():
+            if not destination.is_relative_to(self.root):
+                raise RuntimeError("Unsafe temporary directory")
+            shutil.rmtree(destination)
         destination.mkdir(parents=True, exist_ok=True)
         return destination
 
@@ -625,10 +632,14 @@ class StressLab:
             if start not in ("enrolled", "healthy"):
                 raise RuntimeError("Test Guardian could not enroll: " + str(start))
             baseline = copy.deepcopy(self.guardian.read_shared(shared)[1])
+            before = preview_snapshot(self.guardian, shared.read_bytes())
             attack = ModifiedClient(shared, self.guardian)
             attack.create(case)
-            injected = shared.read_bytes() != self.seed
+            modified_bytes = shared.read_bytes()
+            attacked = preview_snapshot(self.guardian, modified_bytes)
+            injected = modified_bytes != self.seed
             outcome = monitor.process()
+            after_snapshot = preview_snapshot(self.guardian, shared.read_bytes())
             try:
                 _, after = self.guardian.read_shared(shared)
             except (OSError, ValueError):
@@ -638,18 +649,43 @@ class StressLab:
             if case == "normal":
                 passed = approved
                 label = "PASS" if passed else "FAIL"
+                note = "Legitimate message accepted by Guardian."
+            elif outcome == "restored" and restored:
+                passed = True
+                label = "BLOCKED"
+                note = "Guardian removed the injected changes from this clone."
+            elif outcome in ("corrupt", "rescan", "needs_repair",
+                             "migration_needs_baseline"):
+                passed = False
+                label = "DETECTED ONLY"
+                note = "Guardian noticed an issue but the clone was not restored."
+            elif case in BENIGN_TEXT_CASES and approved:
+                passed = True
+                label = "ALLOWED TEXT"
+                note = "Text was accepted; this does NOT demonstrate code execution."
+            elif case in EXPECTED_IDENTITY_GAPS and approved:
+                passed = False
+                label = "SECURITY GAP"
+                note = "Unsigned user/title/reaction action accepted without identity proof."
             else:
-                passed = outcome == "restored" and restored
-                label = "BLOCKED" if passed else "SECURITY GAP"
+                passed = False
+                label = "SECURITY GAP" if approved else "UNRESOLVED"
+                note = "Protection not confirmed. Inspect both snapshots and scan logs."
             row = {
                 "case": case, "name": ATTACK_LABELS[case],
+                "group": CASE_GROUP[case],
                 "status": label, "guardian_result": str(outcome),
                 "blocked": bool(passed) if case != "normal" else None,
                 "restored": bool(restored),
                 "modified_clone": bool(injected),
-                "note": ("Expected legitimate write accepted" if case == "normal"
-                         else "Test copy restored" if passed
-                         else "Potential access-control gap: review Guardian and client."),
+                "before_records": before["events"],
+                "attack_records": attacked["events"],
+                "after_records": after_snapshot["events"],
+                "note": note,
+            }
+            self.previews[case] = {
+                "before": before, "attack": attacked, "after": after_snapshot,
+                "status": label, "note": note,
             }
             self.cases[case] = shared
             self.results = [r for r in self.results if r["case"] != case] + [row]
@@ -680,6 +716,7 @@ class StressLab:
             shutil.rmtree(destination)
         self.cases.clear()
         self.results.clear()
+        self.previews.clear()
         return reverted
 
     def close(self):
