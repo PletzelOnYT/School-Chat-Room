@@ -1,4 +1,4 @@
-# @title Messaging App — Owner Guardian v2.7
+# @title Messaging App — Owner Guardian v3.0
 """Owner-side Google Drive watchdog. Does not run inside messaging_app.py.
 
 - Approves only allowlisted, signed NEW events and stores a durable event ledger.
@@ -33,7 +33,7 @@ import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-GUARDIAN_VERSION = "2.7"
+GUARDIAN_VERSION = "3.0"
 # Exact existing shared file; Guardian never copies the message archive.
 SHARED_CHAT_FILE_ID = '1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd'
 SHARED_CHAT_FILE_LINK = (
@@ -468,9 +468,48 @@ def connect_db(path):
     return conn
 
 
+class GuardianLedgerError(RuntimeError):
+    """Fail closed when the private approved-history ledger is untrustworthy."""
+
+
+class ConcurrentChatChange(RuntimeError):
+    """The shared file changed during recovery; rescan instead of overwriting."""
+
+
 def db_events(conn):
-    return [json.loads(row[0]) for row in conn.execute(
-        "SELECT json FROM approved ORDER BY position")]
+    """Read verified approved events; never repair from a corrupted checkpoint.
+
+    The SQLite file is owner-private, but damaged disks, interrupted backups
+    or accidental database edits can corrupt records. The stored SHA-256
+    authenticates each row against accidental changes, not a malicious actor
+    with access to BOTH the database and its hashes.
+    """
+    events=[]
+    for event_key,kind,sender,raw_json,expected_sha in conn.execute(
+        "SELECT event_id,kind,sender,json,sha256 "
+        "FROM approved ORDER BY position"
+    ):
+        try:
+            event=json.loads(raw_json)
+            if not isinstance(event,dict):
+                raise ValueError("ledger event is not an object")
+            if digest(raw_json.encode("utf-8")) != expected_sha:
+                raise ValueError("ledger checksum mismatch")
+            if canonical_event(event) != raw_json:
+                raise ValueError("ledger event is not canonical")
+            if event_key!=event_id(event,len(events)):
+                raise ValueError("ledger event ID/position mismatch")
+            if kind!=event.get("kind") or sender!=event.get("sender_key"):
+                raise ValueError("ledger metadata mismatch")
+        except (TypeError,ValueError,UnicodeError) as exc:
+            raise GuardianLedgerError(
+                "Owner Guardian's private approved-history checkpoint failed "
+                "integrity verification at record " + str(len(events)+1) +
+                ". Repairs are disabled until the owner restores or inspects "
+                "their PRIVATE backup. Never reset the baseline or overwrite "
+                "the shared chat to resolve this.") from exc
+        events.append(event)
+    return events
 
 
 def count_events(conn):
@@ -505,18 +544,38 @@ def safe_bytes(events):
 
 
 def private_db_backup(conn, drive_directory):
-    """Copy SQLite by SQLite's backup API; never copy a live SQLite journal."""
+    """Publish a validated SQLite backup without touching the existing backup first."""
+    # Refuse to copy a damaged approved-history ledger over the last good
+    # private backup. This does not authenticate against a malicious owner.
+    db_events(conn)
     drive_directory.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory() as td:
         local=Path(td)/"guardian-copy.sqlite3"
         dest=sqlite3.connect(str(local))
         try:
             conn.backup(dest)
+            if dest.execute("PRAGMA quick_check").fetchone()[0]!="ok":
+                raise GuardianLedgerError("SQLite backup integrity check failed")
+            db_events(dest)
         finally:
             dest.close()
         pending=drive_directory/"guardian.sqlite3.pending"
-        shutil.copyfile(local,pending)
-        os.replace(pending,drive_directory/"guardian.sqlite3")
+        try:
+            shutil.copyfile(local,pending)
+            verify=sqlite3.connect(str(pending))
+            try:
+                if verify.execute("PRAGMA quick_check").fetchone()[0]!="ok":
+                    raise GuardianLedgerError("Pending backup integrity check failed")
+                db_events(verify)
+            finally:
+                verify.close()
+            os.replace(pending,drive_directory/"guardian.sqlite3")
+        finally:
+            # An interrupted or failed backup should not leave an orphan copy.
+            try:
+                pending.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def preserve_forensics(path, private_directory):
@@ -533,14 +592,26 @@ def preserve_forensics(path, private_directory):
         pass
 
 
-def recover_existing(path, events, private_directory):
-    """Restore only an EXISTING shared file/shortcut; never fork room identity."""
+def recover_existing(path, events, private_directory, expected_raw=None):
+    """Recover in place, refusing to overwrite a concurrently changed snapshot.
+
+    There is no atomic compare-and-swap for Google Drive FUSE. A byte-for-byte
+    check while the EXISTING file is already open narrows (but cannot remove)
+    the race with another Colab user. We never os.replace the shared shortcut.
+    """
     if not path.is_file():
         raise FileNotFoundError("Original shared file/shortcut is absent")
     data=safe_bytes(events)
-    preserve_forensics(path,private_directory)
-    # No os.replace() on shared shortcuts: this could replace only the link.
+    if expected_raw is not None and not isinstance(expected_raw,bytes):
+        raise TypeError("expected_raw must be original bytes")
+    # Do not store or print actual message text in routine status output.
     with open(path,"r+b") as fh:
+        current=fh.read(MAX_FILE+1)
+        if expected_raw is not None and current!=expected_raw:
+            raise ConcurrentChatChange(
+                "Shared chat changed during repair; rescan and preserve new messages")
+        # Save the exact suspicious bytes before the destructive write.
+        preserve_forensics(path,private_directory)
         fh.seek(0)
         fh.write(data)
         fh.truncate()
@@ -549,11 +620,10 @@ def recover_existing(path, events, private_directory):
             os.fsync(fh.fileno())
         except OSError:
             # Some Google Drive FUSE mounts do not implement fsync().
-            # The readback below is the actual verification step.
             pass
     raw,check=read_shared(path)
-    if check!=events:
-        raise IOError("recovery write could not be verified")
+    if check!=events or raw!=data:
+        raise IOError("recovery write could not be verified byte-for-byte")
     return len(raw)
 
 
