@@ -47,6 +47,37 @@ class ColabKernelArgTests(unittest.TestCase):
             )
             self.assertEqual(sys.argv, kernel_argv)
 
+    def test_launcher_uses_unique_cache_busted_guardian_source(self):
+        repo = Path(__file__).resolve().parents[1]
+        source = (repo / "guardian_launcher.py").read_text(encoding="utf-8")
+        fake_guardian = (
+            "GUARDIAN_VERSION = '2.6'\\n"
+            "def main(argv=None):\\n"
+            "    pass\\n"
+        ).replace("\\\\n", "\\n")
+        requested_urls = []
+        def respond(request, timeout=None):
+            requested_urls.append(request.full_url)
+            return Response(fake_guardian)
+        with (
+            patch("urllib.request.urlopen", side_effect=respond),
+            patch("time.time_ns", return_value=123456789),
+        ):
+            exec(compile(source, "guardian_launcher.py", "exec"),
+                 {"__name__": "__main__"})
+        self.assertEqual(len(requested_urls), 1)
+        self.assertIn("?cache_bust=123456789", requested_urls[0])
+
+    def test_launcher_rejects_outdated_guardian(self):
+        repo = Path(__file__).resolve().parents[1]
+        source = (repo / "guardian_launcher.py").read_text(encoding="utf-8")
+        fake_guardian = "GUARDIAN_VERSION = '2.5'\\ndef main(argv=None): pass\\n".replace("\\\\n", "\\n")
+        with patch("urllib.request.urlopen",
+                   return_value=Response(fake_guardian)):
+            with self.assertRaisesRegex(RuntimeError, "Outdated Owner Guardian"):
+                exec(compile(source, "guardian_launcher.py", "exec"),
+                     {"__name__": "__main__"})
+
     def test_guardian_main_ignores_jupyter_kernel_flags_by_default(self):
         with (
             patch.object(guardian.sys, "argv", [
