@@ -1457,6 +1457,8 @@ def build_threads(messages, count, muted, cleared):
     visible = [m for m in messages if m['number'] > cleared and
                m['user'].casefold() not in muted]
     ordered = chronological_display_messages(visible)
+    if count <= 0:
+        return []
     display_rank = {m['id']: rank for rank, m in enumerate(ordered)}
     selected = ordered[-count:]
     by_id = {m['id']: m for m in messages}
