@@ -1,4 +1,4 @@
-# @title Messaging App v5.36 — Google Drive Messenger
+# @title Messaging App v5.37 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.36'
+CLIENT_VERSION = '5.37'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -200,7 +200,7 @@ last_message_time = 0.0
 recent_sent_messages = []  # Only local: (timestamp, normalized text)
 running = True
 local_messages = []  # Private, inline System messages, NEVER sent to Drive.
-next_popup = None  # One-shot private /help popup
+next_popup = None  # Latest private command-output popup; never sent to Drive
 visible_count = VISIBLE_MESSAGES
 muted_names = set()
 clear_through = 0
@@ -1212,9 +1212,14 @@ def note(value):
 
 
 def popup(title, content):
-    """Queue one modal for this browser only; never broadcast."""
+    """Queue one separate command-result window; private to this Colab session.
+
+    Long command output never becomes an in-chat message or a Drive event.
+    An opaque ID ensures repeated identical results open as new windows.
+    """
     global next_popup
-    next_popup = {'title': title, 'text': content, 'id': uuid.uuid4().hex}
+    next_popup = {'title': str(title), 'text': str(content),
+                  'id': uuid.uuid4().hex}
 
 
 
@@ -1222,15 +1227,15 @@ HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /help or /hellp            Open commands in a separate window
 /rules                     Chat rules
 /whoami or /id             Your signed identity and Verified status
-/users                     Unique signed identities and display names
-/verified                  List users with the blue checkmark
-/mentions                  Find your recent @mentions
-/search <filters>          Find by name, date, reactions or replies
+/users                     List chat users in a separate window
+/verified                  List Verified users in a separate window
+/mentions                  Show recent @mentions in a separate window
+/search <filters>          Search messages in a separate window
 /reply <#> <message>        Reply to a numbered post
 /react <#> <emoji>          React to a message (/reacte also works)
 /unreact <#> <emoji>        Remove your reaction
 /mute <name> /unmute <name> Hide/show someone's posts locally
-/muted                     View locally muted names
+/muted                     List locally muted names in a separate window
 /last <1-100>              Change visible history length
 /clear /reset              Clear your local view / restore it
 /me <action>               Post a chat action
@@ -1675,10 +1680,10 @@ def submit_message(raw):
                 popup('MESSAGING APP COMMANDS', HELP_TEXT)
                 return snapshot()
             if command == '/rules':
-                note(RULES)
+                popup('CHAT RULES', RULES)
                 return snapshot()
             if command == '/version':
-                note('Messaging App v' + CLIENT_VERSION +
+                popup('CHAT VERSION', 'Messaging App v' + CLIENT_VERSION +
                      ' | timestamps: UTC storage, browser-local display; '+
                      'new messages include absolute clock metadata. '+
                      'Old date-less clocks are estimated; small send-order inversions display correctly. '+ 
@@ -1697,7 +1702,7 @@ def submit_message(raw):
             a = latest_analysis()
             if command in ('/whoami', '/id'):
                 roles = ['Verified'] if identity_public in a['verified'] else []
-                note('Name: ' + username + '\nYour identity ID: ' + short_id(identity_public) +
+                popup('YOUR CHAT IDENTITY', 'Name: ' + username + '\nYour identity ID: ' + short_id(identity_public) +
                      '\nRoles: ' + (', '.join(roles) or 'Member') +
                      '\nThis ID does not change when you rename yourself. '
                      'Keep your Google Drive .schoolchat/identity.json private and backed up.')
@@ -1711,8 +1716,8 @@ def submit_message(raw):
                     people = [n for n in people if n.casefold() in a['verified_names']]
                 lines = [('☑ ' if name.casefold() in a['verified_names'] else '') +
                          '@' + name for name in people[-50:]]
-                note(('VERIFIED USERS' if command == '/verified' else 'CHAT USERS') +
-                     '\n' + ('\n'.join(lines) if lines else '(none)'))
+                popup('VERIFIED USERS' if command == '/verified' else 'CHAT USERS',
+                      '\n'.join(lines) if lines else '(none)')
                 return snapshot()
             if command == '/stats':
                 note(f'{len(a["messages"])} messages, '
@@ -1720,20 +1725,24 @@ def submit_message(raw):
                 return snapshot()
             if command == '/mentions':
                 hits = [m for m in a['messages'] if is_mentioned(m['text'], username)][-10:]
-                note('RECENT MENTIONS\n' + ('\n'.join(
-                    f'#{m["number"]} {m["user"]}: {m["text"][:100]}' for m in hits) or 'No mentions.'))
+                popup('RECENT MENTIONS', '\n'.join(
+                    f'#{m["number"]} {m["user"]}: {m["text"][:100]}' for m in hits
+                ) or 'No mentions.')
                 return snapshot()
             if command in ('/search', '/find'):
                 if not arg:
-                    note('Search examples: /search homework  |  '
-                         '/search from:Alex after:2026-10-01  |  '
-                         '/search has:reaction  |  /search in:replies "quiz"')
+                    popup('SEARCH HELP',
+                          'Search examples:\n/search homework\n'
+                          '/search from:Alex after:2026-10-01\n'
+                          '/search has:reaction\n'
+                          '/search in:replies "quiz"')
                 else:
                     hits = search_messages(arg, a['messages'])
-                    note('SEARCH RESULTS (' + str(len(hits)) + ' most recent matches)\n'
-                         + ('\n'.join(
-                            f'#{m["number"]} [{m["time"]}] {m["user"]}: {m["text"][:110]}'
-                            for m in hits) or 'No matches.'))
+                    popup('SEARCH RESULTS (' + str(len(hits)) + ' matches)',
+                          '\n'.join(
+                              f'#{m["number"]} [{m["time"]}] {m["user"]}: {m["text"][:110]}'
+                              for m in hits
+                          ) or 'No matches.')
                 return snapshot()
             if command == '/last':
                 if arg.isdecimal() and 1 <= int(arg) <= 100:
@@ -1761,7 +1770,7 @@ def submit_message(raw):
                     note('Unmuted: ' + arg)
                 return snapshot()
             if command == '/muted':
-                note('Locally muted names: ' + (', '.join(sorted(muted_names)) or '(none)'))
+                popup('LOCALLY MUTED NAMES', '\n'.join(sorted(muted_names)) or '(none)')
                 return snapshot()
 
             if command in ('/react', '/reacte', '/unreact'):
