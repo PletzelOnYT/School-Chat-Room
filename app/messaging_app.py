@@ -1,4 +1,4 @@
-# @title Messaging App v5.38 — Google Drive Messenger
+# @title Messaging App v5.39 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.38'
+CLIENT_VERSION = '5.39'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1858,6 +1858,14 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   let lastPopupId = null;
   const pendingPopupWindows = [];
   let lastHelpURL = null;
+  // Optional Chromebook/desktop system notifications. A separate top-level
+  // popup asks for permission only after a user click. We NEVER bypass
+  // browser/school policy, register a service worker, or install an extension.
+  let desktopAlertsWindow = null;
+  let desktopAlertsEnabled = false;
+  let desktopAlertsPreviews = false;
+  let desktopAlertsStatus = 'Off';
+  let lastSeenChatNumber = null;
   const popupCommands = new Set([
     '/help', '/hellp', '/rules', '/version', '/whoami', '/id',
     '/users', '/verified', '/mentions', '/search', '/find', '/muted'
@@ -1919,6 +1927,195 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     lastHelpURL = URL.createObjectURL(new Blob([page], {type:'text/html'}));
     helpLink.href = lastHelpURL;
     helpFallback.style.display = 'block';
+  }
+
+  function notificationAccess() {
+    // Access must belong to the separate window's origin, not a Colab iframe.
+    try {
+      if (!desktopAlertsWindow || desktopAlertsWindow.closed) return null;
+      if (!desktopAlertsWindow.isSecureContext) return null;
+      if (!desktopAlertsWindow.Notification) return null;
+      return desktopAlertsWindow.Notification;
+    } catch (error) {
+      console.debug('System notifications unavailable:', error);
+      return null;
+    }
+  }
+  function desktopAlertsStatusText() {
+    if (desktopAlertsEnabled && (!desktopAlertsWindow || desktopAlertsWindow.closed ||
+        !notificationAccess() || notificationAccess().permission !== 'granted')) {
+      desktopAlertsEnabled = false;
+      desktopAlertsStatus = 'Unavailable';
+    }
+    return desktopAlertsEnabled ? '[Alerts ON]' : '[Desktop alerts]';
+  }
+  function refreshDesktopAlertsControl() {
+    if (latestState && root.isConnected) render(latestState);
+  }
+  function disableDesktopAlerts() {
+    desktopAlertsEnabled = false;
+    desktopAlertsStatus = 'Off';
+    if (desktopAlertsWindow && !desktopAlertsWindow.closed) {
+      try {
+        desktopAlertsWindow.document.getElementById('status').textContent =
+          'Desktop alerts are off. Close this window or enable them again.';
+      } catch(error) { console.debug('Notification window unavailable:',error); }
+    }
+    refreshDesktopAlertsControl();
+  }
+  function showSystemNotification(author, body) {
+    const API = notificationAccess();
+    if (!desktopAlertsEnabled || !API || API.permission !== 'granted') {
+      return false;
+    }
+    try {
+      const notification = new API('Pletzel Chat', {
+        body: desktopAlertsPreviews
+          ? (author + ': ' + String(body || '').replace(/\s+/g,' ').slice(0,120))
+          : ('New message from ' + author),
+        tag: 'pletzel-' + String(lastSeenChatNumber),
+        silent: false
+      });
+      notification.onclick = () => {
+        try { window.focus(); } catch(error) { /* Colab may block focus */ }
+        try { notification.close(); } catch(error) { /* no action needed */ }
+      };
+      return true;
+    } catch(error) {
+      desktopAlertsEnabled = false;
+      desktopAlertsStatus = 'Notifications blocked by browser or school';
+      console.debug('Notification delivery blocked:',error);
+      return false;
+    }
+  }
+  function checkIncomingDesktopAlerts(state) {
+    // First full fetch becomes the baseline. Never notify on old chat history
+    // when opening the notebook, reconnecting, or granting permission.
+    const real = (state.messages || []).filter(msg=>
+      msg && !msg.private && Number.isSafeInteger(msg.number) && msg.number > 0);
+    const latest = real.reduce((max,msg)=>Math.max(max,msg.number),0);
+    if (lastSeenChatNumber === null) {
+      lastSeenChatNumber = latest;
+      return;
+    }
+    if (latest <= lastSeenChatNumber) return;
+    const fresh = real.filter(msg => msg.number > lastSeenChatNumber)
+      .sort((a,b)=>a.number-b.number);
+    lastSeenChatNumber = latest;
+    if (!desktopAlertsEnabled || !fresh.length) return;
+    const myName = String(state.username || '').toLocaleLowerCase();
+    const incoming = fresh.filter(msg=>
+      String(msg.user || '').toLocaleLowerCase() !== myName);
+    if (!incoming.length) return;
+    // Burst control: one banner for multiple messages, not 20 banners.
+    const newest = incoming[incoming.length-1];
+    if (incoming.length >= 3) {
+      showSystemNotification('Pletzel Chat', incoming.length +
+        ' new messages from other people');
+    } else {
+      for (const msg of incoming) {
+        showSystemNotification(String(msg.user || 'Someone'),msg.text);
+      }
+    }
+  }
+  function openDesktopAlertsWindow() {
+    if (desktopAlertsEnabled) {
+      disableDesktopAlerts();
+      return;
+    }
+    let win;
+    try {
+      win = window.open('', '_blank',
+        'width=470,height=350,resizable=yes,scrollbars=yes');
+      if (!win) throw new Error('Popup blocked');
+      // This window is an opt-in permission surface, not a way around an
+      // administrator's blocked notification policy.
+      win.document.open();
+      win.document.write('<!doctype html><html><head><meta charset="utf-8">' +
+        '<title>Pletzel Chat — Desktop Notifications</title>' +
+        '<style>body{background:#151515;color:#eee;font:14px system-ui,sans-serif;' +
+        'margin:24px;line-height:1.5}h2{color:#8bdcff}button{background:#263549;' +
+        'color:white;border:1px solid #60758c;padding:10px 14px;cursor:pointer;' +
+        'border-radius:6px;margin-top:8px}label{display:block;margin-top:12px}' +
+        'small{color:#aaa}#status{margin:14px 0;color:#fbbf24}</style></head><body>' +
+        '<h2>Pletzel Chat notifications</h2>' +
+        '<p>Enable ChromeOS/desktop banners for NEW messages. ' +
+        'This window must stay open, and the Colab chat must stay running.</p>' +
+        '<button id="allow" type="button">Enable notifications</button> ' +
+        '<button id="test" type="button">Test notification</button>' +
+        '<label><input type="checkbox" id="preview"> Include message previews ' +
+        '(may be visible on a locked screen)</label>' +
+        '<p id="status" role="status">Click Enable notifications.</p>' +
+        '<small>If your browser or school blocks notifications, ' +
+        'this app cannot override those rules.</small></body></html>');
+      win.document.close();
+    } catch(error) {
+      desktopAlertsStatus = 'Popup blocked; allow popups if permitted';
+      console.debug('Notification setup window unavailable:',error);
+      refreshDesktopAlertsControl();
+      return;
+    }
+    desktopAlertsWindow = win;
+    desktopAlertsEnabled = false;
+    const status = win.document.getElementById('status');
+    const allow = win.document.getElementById('allow');
+    const test = win.document.getElementById('test');
+    const preview = win.document.getElementById('preview');
+    const notifyStatus = message => {
+      status.textContent=message;
+      desktopAlertsStatus=message;
+      refreshDesktopAlertsControl();
+    };
+    const sendTest = () => {
+      const API = notificationAccess();
+      if (!API || API.permission !== 'granted') {
+        notifyStatus('Chrome has not granted desktop notification permission.');
+        return;
+      }
+      try {
+        new API('Pletzel Chat', {body:'Test notification: desktop alerts are working.'});
+        notifyStatus('Test sent. If no banner appears, check ChromeOS notification settings.');
+      } catch(error) {
+        notifyStatus('Notifications blocked by this browser or school policy.');
+      }
+    };
+    allow.addEventListener('click', async () => {
+      const API = notificationAccess();
+      if (!API) {
+        notifyStatus('Unavailable in this Colab popup/origin. '
+          + 'A standalone HTTPS website may be required.');
+        return;
+      }
+      let permission=API.permission;
+      try {
+        if (permission==='default') {
+          permission=await API.requestPermission();
+        }
+      } catch(error) {
+        notifyStatus('Permission request blocked by browser, Colab, or school policy.');
+        return;
+      }
+      if (permission==='granted') {
+        desktopAlertsEnabled=true;
+        desktopAlertsPreviews=Boolean(preview.checked);
+        notifyStatus('Enabled. Leave this window and the Colab chat open.');
+        sendTest();
+      } else {
+        desktopAlertsEnabled=false;
+        notifyStatus(permission==='denied'
+          ? 'Notifications denied by Chrome or school policy.'
+          : 'Notification permission not granted.');
+      }
+    });
+    preview.addEventListener('change', () => {
+      desktopAlertsPreviews=Boolean(preview.checked);
+    });
+    test.addEventListener('click', sendTest);
+    if (!notificationAccess()) {
+      notifyStatus('This popup cannot request desktop notifications in Chrome. '
+        + 'A standalone HTTPS website may be required.');
+    }
+    refreshDesktopAlertsControl();
   }
 
   function colored(text, color, bold = false) {
@@ -2109,6 +2306,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   function render(state) {
     if (!state || !root.isConnected) return;
     latestState = state;
+    checkIncomingDesktopAlerts(state);
     if (selectedMessageId && !(state.messages || []).some(m => m.id === selectedMessageId)) {
       selectedMessageId = null;
       selectedEmojiPicker = false;
@@ -2119,7 +2317,11 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     header.appendChild(document.createTextNode('--- Connected as: '));
     appendVerifiedTitle(state.my_verified, header);
     header.appendChild(colored(state.username, 'green', true));
-    header.appendChild(document.createTextNode(' ---'));
+    header.appendChild(document.createTextNode(' ---  '));
+    const alertsControl = textControl(desktopAlertsStatusText(),
+      openDesktopAlertsWindow, desktopAlertsEnabled ? '#4ade80' : '#00BFFF');
+    alertsControl.title = desktopAlertsStatus + '. Click to change desktop alerts.';
+    header.appendChild(alertsControl);
     // Fullscreen is still available without adding any icons to the classic UI.
     header.title = 'Double-click to toggle fullscreen';
     header.addEventListener('dblclick', () => {
