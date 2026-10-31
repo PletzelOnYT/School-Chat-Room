@@ -121,7 +121,7 @@ def simple_clock(event):
     stamp=event.get("epoch")
     return (event.get("kind")=="clock" and
             isinstance(event.get("time"),str) and
-            re.fullmatch(r"(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d",event["time"]) is not None and
+            re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d",event["time"]) is not None and
             isinstance(event.get("user"),str) and
             0<len(event["user"])<=128 and type(stamp) is int and
             946684800<=stamp<=4102444800 and
