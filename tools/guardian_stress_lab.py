@@ -337,6 +337,127 @@ class ModifiedClient:
         elif case == "corrupt":
             self.target.write_bytes(b"[this is not JSON")
             return
+        elif case == "verified_revoke":
+            records.append({"kind": "title", "time": clock,
+                            "user": "Pletzel", "title": "None"})
+        elif case == "rename_other":
+            records.append({"kind": "rename", "time": clock,
+                            "user": "Pletzel", "name": "LabBoss"})
+        elif case == "reserved_name":
+            records.append(message("Forged owner", user="Owner"))
+        elif case == "name_whitespace":
+            records.append(message("Padded name", user=" Pletzel "))
+        elif case == "name_zero_width":
+            records.append(message("Invisible name", user="Lab\u200bAttacker"))
+        elif case == "name_confusable":
+            records.append(message("Confusable owner", user="Ｐletzel"))
+        elif case == "name_emoji":
+            records.append(message("Emoji name", user="Lab🔴Attacker"))
+        elif case == "name_too_long":
+            records.append(message("Overlong name", user="Attacker" * 7))
+        elif case == "color_section":
+            records.append(message("Color-code name", user="§cOwner"))
+        elif case == "color_field":
+            records.append(dict(message("Inject hex color"), color="#ff0033"))
+        elif case == "html_text":
+            records.append(message('<b style="color:red">ADMIN</b>'))
+        elif case == "script_text":
+            records.append(message("<script>not executable in preview</script>"))
+        elif case == "markdown_title":
+            records.append(message("**[ADMIN]** I control this room"))
+        elif case == "bidi_text":
+            records.append(message("normal\u202eSECRET"))
+        elif case == "control_text":
+            records.append(message("hello\x1b[31mred"))
+        elif case == "blank_text":
+            records.append(message("  \n\t  "))
+        elif case == "oversize_text":
+            records.append(message("N" * (self.guardian.MAX_TEXT + 1)))
+        elif case == "repeat_char":
+            records.append(message("q" * 90))
+        elif case == "keyboard_flood":
+            records.append(message("asdfgh" * 12))
+        elif case == "room_flood":
+            records += [message("room flood #%d" % n, user="Lab%03d" % n)
+                        for n in range(self.guardian.ROOM_RATE_60_SECONDS + 2)]
+        elif case == "clock_orphan":
+            records.append({"kind": "clock", "time": clock,
+                            "user": "LabAttacker", "epoch": int(time.time()),
+                            "message_hash": "a" * 64})
+        elif case == "clock_mismatch":
+            evt = message("Linked but wrong author")
+            records.append(evt)
+            records.append({"kind": "clock", "time": clock,
+                            "user": "OtherUser", "epoch": int(time.time()),
+                            "message_hash": self.guardian.plain_message_hash(evt)})
+        elif case == "clock_old":
+            records.append({"kind": "clock", "time": "00:00:00",
+                            "user": "LabAttacker", "epoch": 42,
+                            "message_hash": "b" * 64})
+        elif case == "clock_extra":
+            records.append({"kind": "clock", "time": clock,
+                            "user": "LabAttacker", "epoch": int(time.time()),
+                            "message_hash": "a" * 64, "color": "#ff0000"})
+        elif case == "unknown_kind":
+            records.append({"kind": "admin-panel", "time": clock, "user": "Lab"})
+        elif case == "profile_unsigned":
+            records.append({"id": str(uuid.uuid4()), "kind": "profile",
+                            "user": "LabAttacker", "renamed": True})
+        elif case in ("signed_forge", "signed_role"):
+            import base64
+            evt = {"id": str(uuid.uuid4()), "kind": "message",
+                   "sender_key": base64.b64encode(b"X" * 32).decode(),
+                   "sig": base64.b64encode(b"Y" * 64).decode(),
+                   "issued_at": int(time.time()),
+                   "time": clock, "user": "LabAttacker",
+                   "text": "Forged authenticated message"}
+            if case == "signed_role":
+                evt.update({"kind": "role", "role": "verified",
+                            "target_key": evt["sender_key"],
+                            "active": True, "self_verified": True,
+                            "verification_version": 2})
+                del evt["text"]
+            records.append(evt)
+        elif case == "signed_replay":
+            records.append({"id": records[1]["id"],
+                            "kind": "message", "time": clock,
+                            "user": "Replay", "text": "Reused approved ID"})
+        elif case in ("reaction_spoof", "reaction_remove"):
+            records.append({"kind": "reaction", "time": clock,
+                            "user": "Pletzel", "target": 1,
+                            "emoji": "⭐",
+                            "active": case == "reaction_spoof"})
+        elif case == "reaction_extra":
+            records.append({"kind": "reaction", "time": clock,
+                            "user": "LabAttacker", "target": 1,
+                            "emoji": "⭐", "active": True,
+                            "color": "#ff0000"})
+        elif case == "tamper_user":
+            records[0]["user"] = "HACKED_OWNER"
+        elif case == "erase_all":
+            records = []
+        elif case == "append_partial":
+            with self.target.open("ab") as stream:
+                stream.write(b"\x1e{\"kind\":\"message\",\"time\":")
+            return
+        elif case == "append_binary":
+            with self.target.open("ab") as stream:
+                stream.write(b"\x1e\xff\xfe")
+            return
+        elif case == "null_event":
+            records.append(None)
+        elif case == "array_event":
+            records.append([{"kind": "message", "text": "nested"}])
+        elif case == "truncate":
+            data = self.target.read_bytes()
+            self.target.write_bytes(data[:max(1, len(data) // 2)])
+            return
+        elif case == "plain_json_concat":
+            with self.target.open("ab") as stream:
+                stream.write(b'{"kind":"message","text":"raw concatenation"}')
+            return
+        elif case == "text_null":
+            records.append(message("lab\x00control"))
         else:
             raise ValueError("Unknown test: " + case)
         self.overwrite_records(records)
