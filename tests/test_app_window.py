@@ -126,11 +126,14 @@ async function run(){
  assert(html.includes('class="composer-wrap"'));
  assert(html.includes('class="message"')===false,'messages must be dynamic');
  assert(html.includes('id="app-search"'));
- assert(html.includes('id="app-thread-panel"'));
- assert(html.includes('id="app-thread-form"'));
+ assert(!html.includes('id="app-thread-panel"'));
+ assert(!html.includes('id="app-thread-form"'));
+ assert(!html.includes('ACTIVE THREADS'));
+ assert(!html.includes('id="app-threads-nav"'));
+ assert(!html.includes('thread-open'));
  assert(html.includes('id="app-mention-list"'));
  assert(html.includes('id="app-pings"'));
- assert(html.includes('@keyframes thread-in'));
+ assert(!html.includes('@keyframes thread-in'));
  assert(html.includes('@keyframes message-arrive'));
  assert(html.includes('prefers-reduced-motion:reduce'));
  assert(html.includes('@media(max-width:670px)'));
@@ -224,56 +227,45 @@ async function run(){
  assert.strictEqual(input.value,'hello @Emma ');
  assert.strictEqual(mentionList.style.display,'none');
 
- // A root thread opens a responsive panel and sends through the same callback.
+ // Existing reply records are still rendered inline with Discord-style
+ // parent previews; there is NO thread sidebar or separate thread composer.
  state.threads=[{root:state.messages[0],replies:[
-   makeMsg(5,'Sasha','First thread reply',{reply_to:'m1'})
- ],total_replies:1}];
+   makeMsg(5,'Sasha','First reply',{reply_to:'m1'}),
+   makeMsg(6,'Alex','Nested reply',{reply_to:'m5'})
+ ],total_replies:2}];
  polling();
  await sleep(35);
- clickButton(transcript,'▤ Thread');
- assert.strictEqual(el['app-layout'].className,'app thread-open');
- assert(el['app-thread-body'].textContent.includes('First thread reply'));
- assert(el['app-thread-meta'].textContent.includes('1 reply'));
- const replyItem=find(transcript,n=>n.tag==='article'&&n._appMessageId==='m5');
- assert(replyItem,'reply exists inline in channel');
- const replyPreview=find(replyItem,n=>String(n.className||'').includes('reply-reference'));
- assert(replyPreview && replyPreview.textContent.includes('Emma'),
-   'inline preview identifies the original author');
- assert(replyPreview.textContent.includes('Hello <img src=x onerror=alert(1)>'),
-   'inline preview shows original message safely');
- assert(!replyItem.textContent.includes('Thread reply'),'no generic reply label');
- replyPreview.events.click();
+ const reply=find(transcript,n=>n.tag==='article'&&n._appMessageId==='m5');
+ assert(reply,'reply appears directly in channel');
+ const preview=find(reply,n=>String(n.className||'').includes('reply-reference'));
+ assert(preview && preview.textContent.includes('Emma'));
+ assert(preview.textContent.includes('Hello <img src=x onerror=alert(1)>'));
+ assert(!reply.textContent.includes('Thread reply'));
+ preview.events.click();
  const original=find(transcript,n=>n.tag==='article'&&n._appMessageId==='m1');
  assert(original.className.includes('reply-focus'),
-   'clicking a reply preview highlights its original message');
- el['app-thread-input'].value='Answer in thread';
- el['app-thread-form'].events.submit({preventDefault(){}});
- await sleep(820);
- assert(sent.includes('/reply 1 Answer in thread'),sent);
+   'preview jumps to original and highlights it');
 
- const nestedReply=find(el['app-thread-body'],n=>String(n.className||'').includes('thread-card reply'));
- assert(nestedReply,'thread reply should be visible in side panel');
- clickButton(nestedReply,'↳ Reply');
- el['app-thread-input'].value='Nested answer';
- el['app-thread-form'].events.submit({preventDefault(){}});
- await sleep(820);
- assert(sent.includes('/reply 5 Nested answer'),sent);
- // Nested replies show exactly which message was answered, not just a thread label.
- state.threads[0].replies.push(makeMsg(6,'Alex','Nested message',{reply_to:'m5'}));
- polling();
- await sleep(35);
  const nested=find(transcript,n=>n.tag==='article'&&n._appMessageId==='m6');
- assert(nested,'nested reply visible in channel');
+ assert(nested,'nested reply remains in main chat');
  const nestedPreview=find(nested,n=>String(n.className||'').includes('reply-reference'));
  assert(nestedPreview && nestedPreview.textContent.includes('Sasha'));
- assert(nestedPreview.textContent.includes('First thread reply'),
-   'nested preview references the immediate parent instead of the thread root');
- assert(el['app-thread-body'].textContent.includes('First thread reply'));
- assert(el['app-thread-body'].textContent.includes('Nested message'));
- assert(find(el['app-thread-body'],n=>String(n.className||'').includes('reply-reference')),
-   'thread panel also uses the reply reference preview');
- el['app-thread-close'].events.click();
+ assert(nestedPreview.textContent.includes('First reply'),
+   'nested reply points to its direct parent');
+ assert(!find(transcript,n=>n.tag==='button' &&
+   String(n.textContent).includes('Thread')),'no thread buttons');
+ assert(!find(transcript,n=>n.tag==='button' &&
+   String(n.textContent).includes('View thread')),'no thread navigation links');
  assert.strictEqual(el['app-layout'].className,'app');
+
+ // Ordinary Reply still sends the existing /reply backend command.
+ clickButton(nested,'↳ Reply');
+ assert(el['app-replyname'].textContent.includes('Alex'));
+ assert(el['app-replydetail'].textContent.includes('Nested reply'));
+ input.value='Answer to nested reply';
+ form.events.submit({preventDefault(){}});
+ await sleep(820);
+ assert(sent.includes('/reply 6 Answer to nested reply'),sent);
 
  // The mocked backend must restore its ordinary full timeline when reopened.
  state.threads=[];
@@ -297,14 +289,17 @@ run().catch(e=>{console.error(e);process.exitCode=1});
 class AppWindowTests(unittest.TestCase):
     def test_discord_style_only_affects_popup(self):
         source=SOURCE.read_text(encoding="utf-8")
-        self.assertIn("CLIENT_VERSION = '5.54'",source)
+        self.assertIn("CLIENT_VERSION = '5.55'",source)
         self.assertIn('font-family:monospace;font-size:13px',HTML)
         self.assertIn('height:19px',HTML)
         self.assertIn("textControl('[Open in App]',openAppWindow",SCRIPT)
         self.assertIn("function renderApp(state",SCRIPT)
         self.assertIn("function appTimeline(state)",SCRIPT)
         self.assertIn("appTextWithPings(doc,body",SCRIPT)
-        self.assertIn("function appRenderThread(state)",SCRIPT)
+        self.assertNotIn("function appRenderThread(state)",SCRIPT)
+        self.assertNotIn("function appOpenThread(",SCRIPT)
+        self.assertNotIn("app-thread-panel",SCRIPT)
+        self.assertIn("function appReplyPreview(",SCRIPT)
         self.assertIn("function appUpdateMentions()",SCRIPT)
         self.assertIn("function appReplyPreview(",SCRIPT)
         self.assertIn("function appJumpToMessage(",SCRIPT)
