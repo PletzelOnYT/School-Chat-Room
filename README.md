@@ -1,7 +1,17 @@
-# Messaging App v5.31
+# Messaging App v5.32
 
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
+
+## v5.32: Clock validation, browser-local time, and /version
+
+Run `/version` in the Colab chat to see the current script version. The launcher still fetches `messaging_app.py` from the GitHub `main` branch on restart.
+
+New messages keep **exactly** the four message fields `kind`, `time`, `user`, `text`. The client writes each message time in UTC and appends a separate `kind: "clock"` metadata record with an absolute Unix timestamp and SHA-256 digest of the message. This lets viewers display the correct local time, even across dates and daylight-saving transitions, without breaking the original message schema or rewriting the shared history.
+
+Owner Guardian validates the UTC clock against the absolute timestamp, checks that the digest points to an existing message, quarantines malformed records, and restores a previously approved clock record if tampered with. This is **integrity monitoring, not trusted timestamp attestation**: shared-file editors can still forge unsigned new records. Older messages that contain only `HH:MM:SS` cannot be perfectly repaired; they have no date/timezone evidence, and the Guardian intentionally does not guess and rewrite them.
+
+**Restart both the chat Colab cell and the separate Owner Guardian process** to load the new versions. If an old Guardian process remains running, it can reject the new `clock` metadata. Do not reset the Guardian baseline or delete `chat.json`.
 
 ## v5.31: Local chat timestamps
 
@@ -77,7 +87,7 @@ Emoji reactions also work with small metadata records:
 1. Stop all older Colab chat cells; older versions can write incompatible records.
 2. Keep the original `chat.json` shortcut in the root of each participant's My Drive.
 3. Rerun the existing GitHub launcher (old `school_chat.py` path still loads `messaging_app.py`).
-4. **Stop any older Owner Guardian before anyone starts v5.30.** An older Guardian will treat the appended records as broken JSON and could overwrite them. Download the latest `owner_guardian.py` and restart it. **Do not reset an existing healthy Guardian database** solely for this upgrade; a reset would discard the prior verified backup history. Run a temporary `--audit-only` check first.
+4. **Stop any older Owner Guardian before anyone starts v5.32.** An older Guardian will treat the appended records as broken JSON and could overwrite them. Download the latest `owner_guardian.py` and restart it. **Do not reset an existing healthy Guardian database** solely for this upgrade; a reset would discard the prior verified backup history. Run a temporary `--audit-only` check first.
 
 ## Supported features and trade-offs
 
