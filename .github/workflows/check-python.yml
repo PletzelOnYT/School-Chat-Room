@@ -5,6 +5,7 @@ on:
       - 'messaging_app.py'
       - 'school_chat.py'
       - 'owner_guardian.py'
+      - 'guardian_launcher.py'
       - 'tests/**'
       - '.github/workflows/check-python.yml'
   pull_request:
@@ -12,6 +13,7 @@ on:
       - 'messaging_app.py'
       - 'school_chat.py'
       - 'owner_guardian.py'
+      - 'guardian_launcher.py'
       - 'tests/**'
 jobs:
   messaging-app-tests:
@@ -26,6 +28,6 @@ jobs:
       - name: Install guardian signature verification dependency
         run: python -m pip install 'cryptography>=43,<49'
       - name: Check Messaging App, compatibility launcher and guardian syntax
-        run: python -m py_compile messaging_app.py school_chat.py owner_guardian.py
+        run: python -m py_compile messaging_app.py school_chat.py owner_guardian.py guardian_launcher.py
       - name: Run messaging, security and browser regression tests
         run: python -m unittest discover -s tests -v
