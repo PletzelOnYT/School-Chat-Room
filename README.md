@@ -1,4 +1,22 @@
-# Messaging App v5.46
+# Messaging App v5.47
+
+## Messaging App v5.47 — Fix bottom gap below countdown bar
+
+Fixed the reported white space **underneath** the blue countdown bar in
+the actual desktop Chrome popup. The card previously relied on a
+viewport-height container, and the countdown used absolute positioning
+relative to that container. Now the notification uses
+`.card { position: fixed; inset: 0 }` and the countdown uses
+`.track { position: fixed; bottom: 0 }` so the bar is attached to
+the **actual bottom of the browser content viewport**, regardless of the
+minimum desktop popup height enforced by Chrome.
+
+The requested outer window is still 330×56px, and Chrome may enlarge
+it and show browser controls or the about:blank address bar. Such
+browser-controlled chrome cannot be removed by Colab JavaScript.
+
+Restart the messaging Colab cell and type `/testpopup` to see the update.
+Messages, history, identities and Guardian are unchanged.
 
 ## Messaging App v5.46 — Fix blank space in actual browser popup
 
