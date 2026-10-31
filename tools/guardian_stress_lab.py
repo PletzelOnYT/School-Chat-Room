@@ -877,6 +877,100 @@ def launch_panel(guardian=None):
         indent=False,
         layout=widgets.Layout(width="540px")
     )
+    # The LIVE attachment changes what THIS notebook displays, not the
+    # original shared Drive file. Snapshot is kept in private /tmp memory.
+    live_switch = widgets.Checkbox(
+        value=False, description="Attach mod menu to the actual chat (READ ONLY)",
+        indent=False, layout=widgets.Layout(width="490px"))
+    live_hack = widgets.Dropdown(
+        options=[(label, name) for name, label in LOCAL_HACKS.items()],
+        description="Visual hack:", layout=widgets.Layout(width="550px"))
+    live_apply = widgets.Button(
+        description="Apply to live view", icon="wand-magic-sparkles",
+        button_style="info")
+    live_refresh = widgets.Button(description="Refresh real chat",
+                                  icon="refresh-cw")
+    live_status = widgets.HTML(
+        '<div style="color:#64748b">Not attached. '
+        'Connect to inspect the real room without changing its data.</div>')
+    live_before = widgets.HTML(layout=widgets.Layout(width="50%"))
+    live_after = widgets.HTML(layout=widgets.Layout(width="50%"))
+    live_comparison = widgets.HBox(
+        [live_before, live_after], layout=widgets.Layout(
+            width="100%", gap="9px", overflow_x="auto"))
+    live_apply.disabled = True
+    live_refresh.disabled = True
+
+    def render_live():
+        overlay = current.get("live")
+        if overlay is None:
+            live_before.value = ""
+            live_after.value = ""
+            live_status.value = (
+                '<div style="color:#94a3b8">Disconnected from live chat.</div>')
+            return
+        before = overlay.original_preview()
+        modified = overlay.preview()
+        live_before.value = render_chat_preview(
+            before, "Actual chat when attached", "BEFORE")
+        live_after.value = render_chat_preview(
+            modified, "Your local modded view", "ATTACK")
+        live_status.value = (
+            '<div style="color:#4ade80;font-size:12px">'
+            '<b>LIVE CHAT ATTACHED — READ ONLY.</b> ' +
+            str(modified["messages"]) + " messages; " +
+            str(len(overlay.actions)) +
+            ' local visual modifications. Source snapshot hash: <code>' +
+            hashlib.sha256(overlay._baseline).hexdigest()[:16] +
+            '</code>. Other people do not see these overlays.</div>')
+
+    def live_toggle(change):
+        if change.get("name") != "value":
+            return
+        with output:
+            if change["new"]:
+                try:
+                    current["live"] = LiveChatOverlay(module)
+                    live_apply.disabled = False
+                    live_refresh.disabled = False
+                    render_live()
+                    print("Attached a read-only view of the actual chat. "
+                          "Saved its starting bytes privately in /tmp.")
+                except Exception as exc:
+                    print("Could not attach:", type(exc).__name__, str(exc))
+                    live_switch.unobserve(live_toggle, names="value")
+                    live_switch.value = False
+                    live_switch.observe(live_toggle, names="value")
+            else:
+                overlay = current.pop("live", None)
+                if overlay is not None:
+                    overlay.close()
+                live_apply.disabled = True
+                live_refresh.disabled = True
+                render_live()
+                print("Detached live viewer; temporary snapshot deleted.")
+
+    def on_visual_hack(_):
+        with output:
+            overlay = current.get("live")
+            if overlay is None:
+                print("Attach to the live chat first.")
+                return
+            overlay.add_hack(live_hack.value)
+            render_live()
+            print("Applied", live_hack.value, "to this notebook's view ONLY.")
+
+    def on_live_refresh(_):
+        with output:
+            overlay = current.get("live")
+            if overlay is not None:
+                try:
+                    overlay.refresh()
+                    render_live()
+                    print("Refreshed real chat read-only; mods remain local.")
+                except Exception as exc:
+                    print("Live refresh error:", type(exc).__name__, str(exc))
+
     categories = widgets.Dropdown(
         options=["All categories", *ATTACK_GROUPS],
         value="All categories", description="Category:",
@@ -1059,12 +1153,20 @@ def launch_panel(guardian=None):
     def on_revert(_):
         with output:
             count = get_lab().revert_all()
+            live_overlay = current.get("live")
+            if live_overlay is not None:
+                live_overlay.revert()
+                render_live()
             update_inspector()
             refresh_preview("")
             print("🟥 REVERT COMPLETE:", count,
                   "isolated chat copies restored byte-for-byte and removed.")
-            print("The original Google Drive chat was never written.")
+            print("All local mod menu effects also reset. The original "
+                  "Google Drive chat was never written.")
 
+    live_switch.observe(live_toggle, names="value")
+    live_apply.on_click(on_visual_hack)
+    live_refresh.on_click(on_live_refresh)
     categories.observe(on_category, names="value")
     select_preview.observe(on_select_preview, names="value")
     use_mirror.observe(mirror_toggle, names="value")
@@ -1074,7 +1176,12 @@ def launch_panel(guardian=None):
     revert.on_click(on_revert)
     refresh_preview("")
     display(widgets.VBox([
-        header, use_mirror,
+        header,
+        widgets.HTML('<b>MOD MENU — attach to actual chat, local changes only</b>'),
+        live_switch, widgets.HBox([live_hack, live_apply, live_refresh]),
+        live_status, live_comparison,
+        widgets.HTML('<b>GUARDIAN ATTACK LAB — full simulation in test copies</b>'),
+        use_mirror,
         widgets.HBox([categories, case_picker]),
         widgets.HBox([run_one, run_category, run_all]), revert,
         widgets.HTML('<b>CHAT PREVIEW — test data only</b>'),
@@ -1087,6 +1194,7 @@ def launch_panel(guardian=None):
         print(LIVE_NOTE)
         print("Use the red button to remove all attack test files.")
     current["refresh_preview"] = refresh_preview
+    current["render_live"] = render_live
     current["preview_cards"] = preview_cards
     return current
 
