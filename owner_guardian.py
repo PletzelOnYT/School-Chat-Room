@@ -37,6 +37,12 @@ ANCHOR = "081cad07-8430-4c0e-8000-f3a4a379536a"
 MAX_FILE = 48 * 1024 * 1024
 MAX_EVENT = 16 * 1024
 MAX_TEXT = 1000
+# Conservative throttle windows; no ability to authenticate unsigned users.
+RATE_10_SECONDS = 10
+RATE_60_SECONDS = 45
+ROOM_RATE_60_SECONDS = 140
+REPEAT_20_SECONDS = 4
+CLOCK_SKEW_SECONDS = 300
 FIELDS = {
     "message": {"id","kind","sender_key","sig","issued_at","issued_at_ns",
                 "time","user","account_username","text","reply_to"},
@@ -175,6 +181,11 @@ def valid_name(value):
         return False
     if value.casefold() in RESERVED or "  " in value:
         return False
+    if unicodedata.normalize("NFKC",value)!=value:
+        return False
+    if SENSITIVE_CONTROL.search(value) or any(
+            unicodedata.category(ch).startswith("C") for ch in value):
+        return False
     return True
 
 
@@ -235,22 +246,34 @@ def check_new_event(event, accepted, rate_log, now=None):
         stamp=now
         history[:]=[(ts,body) for ts,body in history if stamp-ts<=60]
         normalized=" ".join(event["text"].casefold().split())
-        if sum(0<=stamp-ts<=10 for ts,_ in history)>=12:
-            return "message rate exceeded"
-        if sum(normalized==body and 0<=stamp-ts<=15
-               for ts,body in history)>=4:
+        if sum(0<=stamp-ts<=10 for ts,_ in history)>=RATE_10_SECONDS:
+            return "message burst from same nickname"
+        if len(history)>=RATE_60_SECONDS:
+            return "message flood from same nickname"
+        if sum(normalized==body and 0<=stamp-ts<=20
+               for ts,body in history)>=REPEAT_20_SECONDS:
             return "duplicate-message flood"
+        global_history=rate_log.setdefault("__room_messages__",[])
+        global_history[:]=[(ts,body) for ts,body in global_history
+                           if 0<=stamp-ts<=60]
+        if len(global_history)>=ROOM_RATE_60_SECONDS:
+            return "room-wide message flood"
         history.append((stamp,normalized))
+        global_history.append((stamp,normalized))
         return None
     if simple_clock(event):
         if not valid_name(event["user"]):
             return "invalid clock author"
-        if event["epoch"]>now+300:
+        if event["epoch"]>now+CLOCK_SKEW_SECONDS:
             return "clock timestamp lies in the future"
-        if not any(simple_message(previous) and
-                   plain_message_hash(previous)==event["message_hash"]
-                   for previous in accepted.values()):
+        matching=[previous for previous in accepted.values()
+                  if simple_message(previous) and
+                  plain_message_hash(previous)==event["message_hash"]]
+        if not matching:
             return "clock references a missing chat message"
+        if not any(previous["time"]==event["time"] and
+                   previous["user"]==event["user"] for previous in matching):
+            return "clock metadata disagrees with the linked message"
         return None
     if event.get("kind")=="clock":
         return "invalid or corrupted clock metadata"
@@ -315,12 +338,12 @@ def check_new_event(event, accepted, rate_log, now=None):
             return "reply target does not exist"
         history=rate_log.setdefault(sender,[])
         history[:]=[(ts,body) for ts,body in history if stamp-ts<=60]
-        if sum(0<=stamp-ts<=10 for ts,_ in history)>=12:
+        if sum(0<=stamp-ts<=10 for ts,_ in history)>=RATE_10_SECONDS:
             return "message rate exceeded (10s)"
-        if sum(0<=stamp-ts<=60 for ts,_ in history)>=65:
+        if sum(0<=stamp-ts<=60 for ts,_ in history)>=RATE_60_SECONDS:
             return "message rate exceeded (60s)"
         body=" ".join(event["text"].casefold().split())
-        if sum(body==x and 0<=stamp-ts<=15 for ts,x in history)>=4:
+        if sum(body==x and 0<=stamp-ts<=20 for ts,x in history)>=REPEAT_20_SECONDS:
             return "duplicate-message flood"
         history.append((stamp,body))
     elif kind=="profile":
@@ -431,6 +454,10 @@ def connect_db(path):
         time TEXT NOT NULL, reason TEXT NOT NULL, event_id TEXT,
         sha256 TEXT, action TEXT NOT NULL);
     """)
+    # Upgrade existing Guardian backups in place; no baseline reset.
+    existing={row[1] for row in conn.execute("PRAGMA table_info(approved)")}
+    if "observed_at" not in existing:
+        conn.execute("ALTER TABLE approved ADD COLUMN observed_at REAL")
     conn.commit()
     return conn
 
@@ -449,10 +476,10 @@ def save_approved(conn, events):
     for offset,event in enumerate(events):
         line=canonical_event(event)
         conn.execute(
-            "INSERT OR IGNORE INTO approved(event_id,kind,sender,json,sha256) "
-            "VALUES(?,?,?,?,?)",
+            "INSERT OR IGNORE INTO approved(event_id,kind,sender,json,sha256,observed_at) "
+            "VALUES(?,?,?,?,?,?)",
             (event_id(event,start+offset),event.get("kind"),event.get("sender_key"),
-             line,digest(line.encode())))
+             line,digest(line.encode()),time.time()))
     conn.commit()
 
 
@@ -663,6 +690,22 @@ class Guardian:
         additions=[]
         ids=dict(expected)
         rate={}
+        # Previously approved messages still count during the next 60 seconds,
+        # including after restart. The initial baseline has no reliable timestamp.
+        recent_cutoff=time.time()-60
+        for stored_json, observed_at in self.db.execute(
+                "SELECT json,observed_at FROM approved WHERE observed_at>=?",
+                (recent_cutoff,)):
+            try:
+                stored=json.loads(stored_json)
+            except (ValueError,TypeError):
+                continue
+            if not simple_message(stored):
+                continue
+            key="display-name:"+stored["user"].casefold()
+            body=" ".join(stored["text"].casefold().split())
+            rate.setdefault(key,[]).append((observed_at,body))
+            rate.setdefault("__room_messages__",[]).append((observed_at,body))
         # Carry recent message-rate history across monitoring passes, not
         # merely across newly appended events in this particular scan.
         for approved in known:
