@@ -43,7 +43,7 @@ class RenameIntegrationTests(unittest.TestCase):
         self.assertIn("pletzel",state["verified_names"])
         self.assertTrue(state["messages"][0]["verified"])
         self.assertEqual(state["messages"][0]["user"],"Pletzel")
-        records=json.loads(self.path.read_text())
+        records=self.env["read_messages"]()
         self.assertEqual(records[-1]["kind"],"rename")
         self.assertEqual(set(records[-1]),{"kind","time","user","name"})
         self.assertEqual(records[-1]["user"],"Guest-626")
@@ -85,7 +85,7 @@ class RenameIntegrationTests(unittest.TestCase):
 
     def test_rejects_rename_without_vf(self):
         result=self.env["submit_message"]("/rename Pletzel")
-        self.assertEqual(len(json.loads(self.path.read_text())),1)
+        self.assertEqual(len(self.env["read_messages"]()),1)
         self.assertEqual(result["messages"][0]["user"],"Guest-626")
         self.assertTrue(any("Rename is not available" in m for m in self.notes))
 
@@ -103,7 +103,7 @@ class RenameIntegrationTests(unittest.TestCase):
         state=self.env["latest_analysis"]()
         self.assertFalse(state["messages"][0]["reactions"])
         self.assertNotIn("❤️",state["messages"][0]["my_reactions"])
-        records=json.loads(self.path.read_text())
+        records=self.env["read_messages"]()
         self.assertEqual([r["kind"] for r in records],
                          ["message","title","reaction","rename","reaction"])
         self.assertEqual(set(records[2]),
@@ -112,7 +112,7 @@ class RenameIntegrationTests(unittest.TestCase):
     def test_invalid_name_does_not_break_chat(self):
         self.env["submit_message"]("/vf")
         self.env["submit_message"]("/rename Owner")
-        self.assertEqual(len(json.loads(self.path.read_text())),2)
+        self.assertEqual(len(self.env["read_messages"]()),2)
         self.assertEqual(self.env["username"],"Guest-626")
         self.assertTrue(self.env["is_plain_message"](
             {"kind":"message","time":"04:15:50",
