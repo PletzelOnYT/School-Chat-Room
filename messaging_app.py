@@ -1,4 +1,4 @@
-# @title Messaging App v5.27 — Google Drive Messenger
+# @title Messaging App v5.28 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -37,7 +37,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.27'
+CLIENT_VERSION = '5.28'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1359,7 +1359,7 @@ def submit_message(raw):
                 note('Cannot check role status right now: ' + str(exc))
                 return snapshot()
             if username.casefold() not in current['verified_names']:
-                note('Use /vf to claim the blue checkmark before /rename.')
+                note('Rename is not available for this account.')
                 return snapshot()
             new_name = valid_username(rename.group(1))
             if not new_name:
