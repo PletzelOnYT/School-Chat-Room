@@ -1,4 +1,27 @@
-# Messaging App v5.36
+# Messaging App v5.37
+
+## Messaging App v5.37 — Command output windows
+
+Long informational commands now open **private browser popup windows**
+instead of inserting multi-line System entries into the chat timeline.
+
+`/help`, `/hellp`, `/users`, `/verified`, `/rules`,
+`/whoami`, `/id`, `/mentions`, `/search`, `/find`,
+`/muted`, and `/version` use the same separate-window experience.
+This includes search help with no query, empty results, and repeated
+commands. Windows open when the user presses Enter, before asynchronous
+Google Colab callbacks, to reduce popup blocking. If a browser blocks a
+popup, the client shows a local, clickable **Open command output** link.
+
+Short status/confirmation replies such as `/ping`, `/stats`,
+`/last` and `/mute` remain inline. No changes were made to the
+message renderer, input size, chat history structure, or Guardian.
+Command results are local to the requesting browser and never written
+to shared `chat.json`.
+
+To activate, **restart each chat Colab cell** using the existing
+`messaging_app.py` GitHub launcher and confirm `/version` displays
+v5.37. The Owner Guardian does not need to be restarted.
 
 ## Repository structure
 
