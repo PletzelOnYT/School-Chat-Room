@@ -3,6 +3,51 @@
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
 
+## Owner-only modified-client attack stress lab (reversible)
+
+`guardian_stress_lab.py` is a **separate red-team test panel**. It imports
+the production `owner_guardian.py` and simulates a modified client that
+writes forbidden JSON records **only to private, temporary test copies** of
+`chat.json`. It never uploads attack payloads, writes to your real shared
+Drive file, changes sharing permissions, or resets the live Guardian.
+
+To open the test panel inside **the owner's Colab notebook**, run:
+
+```python
+import time, urllib.request
+url = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/guardian_stress_lab.py"
+exec(compile(urllib.request.urlopen(url + "?v=" + str(time.time_ns())).read().decode("utf-8"), url, "exec"))
+```
+
+The panel provides a choice of attacks, **Run full stress test**, and a large
+red **REVERT ALL TEST CHANGES** button. The red button restores the bytes of
+every test copy to its initial snapshot and then deletes temporary scenarios
+and their test-only incident logs. Even if a simulated attack successfully
+bypasses the Guardian, the **original shared chat never changes**.
+
+It exercises direct unauthorized title and nickname claims, owner-role
+spooﬁng, impersonation, ANSI/HTML/CSS/bidirectional Unicode color tricks,
+invalid timestamps and sidecars, extra fields, invalid reactions, anti-spam
+limits, historical edits, deletion, reordering and JSON corruption. The
+positive control is one legitimate four-field message. A separate checkbox
+can **read** the actual mounted `MyDrive/chat.json` once to seed a local
+sandbox; it never writes to that file. No one needs to run the attack suite
+in every student's Colab.
+
+**Important security limitation:** The chat's current four-field message,
+title and rename events have no cryptographic user identity, and the
+original Drive file permits Editors to modify its contents. A watchdog that
+checks every few seconds cannot prevent all unauthorized writes or prove
+who made one, and cannot stop someone copying code from a public GitHub
+repository. The panel reports these cases as **SECURITY GAP**, not as
+successes. Reliable prevention requires a server-side identity and
+authorization boundary or restricted Drive write permissions, not just
+obfuscated client commands.
+
+Run local automated tests with `python guardian_stress_lab.py --cli`.
+For inspection without writing any local attack payloads to Drive, leave the
+live-file checkbox off (the default).
+
 ## v5.36 / Guardian v2.7: Live timestamp ordering and monitoring
 
 **Confirmed in the original shared chat file:** two messages with absolute
