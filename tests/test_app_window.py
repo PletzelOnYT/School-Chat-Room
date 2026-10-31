@@ -243,6 +243,8 @@ async function run(){
  el['app-thread-close'].events.click();
  assert.strictEqual(el['app-layout'].className,'app');
 
+ // The mocked backend must restore its ordinary full timeline when reopened.
+ state.threads=[];
  app.win.close();
  classicControl('[Open in App]').events.click();
  assert.strictEqual(opened.length,2);
