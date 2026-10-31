@@ -1,4 +1,22 @@
-# Messaging App v5.45
+# Messaging App v5.46
+
+## Messaging App v5.46 — Fix blank space in actual browser popup
+
+Screenshots from macOS Chrome show the requested 56px window was expanded
+by Chrome's minimum browser-window size, but our page was still hardcoded to
+53–56px high. That left a large blank white area below the notification.
+
+The popup now fills **100% of the actual browser content viewport**, with
+vertically centered sender and one-line message preview, a compact blue
+P icon, thin blue left border, an unobtrusive close button and a progress
+bar pinned to the **real bottom edge**. It continues to request a 330×56
+outer window but adapts when Chrome makes the window taller. Existing
+6.5-second auto-close, local /testpopup, message notifications and all
+chat history behavior are unchanged.
+
+Chrome controls the macOS traffic-light buttons, address bar and window
+minimum; web code in Colab cannot remove those browser features. Restart
+the chat cell and type `/testpopup` to see the improved layout.
 
 ## Messaging App v5.45 — Half-height desktop popup
 
