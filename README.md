@@ -1,4 +1,39 @@
-# Messaging App v5.38
+# Messaging App v5.39
+
+## Messaging App v5.39 — Experimental Chromebook desktop notifications
+
+The chat now has a small clickable **[Desktop alerts]** control beside the
+existing terminal header. It requires no Chrome extension, executable or
+special Chromebook software installation.
+
+When clicked, it opens a **separate top-level setup window**. The user must
+press **Enable notifications** in that window; only then will Chrome be asked
+for system-notification permission. A **Test notification** button provides
+immediate feedback. Leave the setup window and Colab chat running; the
+feature does **not** deliver push messages when Colab is closed, disconnected,
+paused or sleeping. Chrome may delay polls in inactive tabs.
+
+If permission is granted, the browser delivers one desktop banner per new
+batch of messages. It ignores existing history at startup, your own messages,
+private System output and duplicate refreshes. Previews of message text are
+**off by default** (to avoid exposing them on a lock screen); users can enable
+them explicitly. Clicking **[Alerts ON]** in the main chat turns alerts off.
+No notification settings or message text are uploaded to Google Drive.
+
+**Important:** Google Colab embeds HTML inside an iframe and browsers block
+notification permission requests from cross-origin iframes. The separate
+window is an attempt to request permission from a top-level browsing context.
+Depending on the popup's origin and Colab's sandbox configuration, even that
+may be disallowed. If the school configures a Chrome policy blocking
+notifications, this feature cannot bypass the policy. The setup window shows
+an unavailable/denied status instead of pretending alerts work. For reliable
+background push notifications, a standalone HTTPS web app with a service
+worker and an authorized backend is required.
+
+To test: restart the current messaging-app Colab cell, click
+**[Desktop alerts]**, click **Enable notifications**, approve Chrome's
+prompt only if offered, and check **Test notification**. Make sure the
+Chromebook/Chrome notifications are allowed by school policy.
 
 ## Messaging App v5.38 — Private System messages follow chat traffic
 
