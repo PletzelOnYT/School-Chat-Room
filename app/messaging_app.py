@@ -1,4 +1,4 @@
-# @title Messaging App v5.39 — Google Drive Messenger
+# @title Messaging App v5.40 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.39'
+CLIENT_VERSION = '5.40'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -2041,8 +2041,11 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         '<label><input type="checkbox" id="preview"> Include message previews ' +
         '(may be visible on a locked screen)</label>' +
         '<p id="status" role="status">Click Enable notifications.</p>' +
-        '<small>If your browser or school blocks notifications, ' +
-        'this app cannot override those rules.</small></body></html>');
+        '<p id="diagnostics" style="font-size:12px;color:#aebacf"></p>' +
+        '<small>Chrome path: Settings → Privacy and security → ' +
+        'Site settings → Notifications. A school-managed browser may ' +
+        'lock this setting. We cannot override school policy.</small>' +
+        '</body></html>');
       win.document.close();
     } catch(error) {
       desktopAlertsStatus = 'Popup blocked; allow popups if permitted';
@@ -2053,12 +2056,32 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     desktopAlertsWindow = win;
     desktopAlertsEnabled = false;
     const status = win.document.getElementById('status');
+    const diagnostics = win.document.getElementById('diagnostics');
     const allow = win.document.getElementById('allow');
     const test = win.document.getElementById('test');
     const preview = win.document.getElementById('preview');
+    const describePermissions = () => {
+      const API = notificationAccess();
+      let pageKind = 'unknown';
+      try {
+        // window.open('', '_blank') creates about:blank, not an
+        // independently hosted HTTPS site. Its inherited origin may
+        // remain restricted by the Colab sandbox.
+        pageKind = String(win.location?.protocol || 'unknown');
+      } catch(error) { pageKind = 'restricted'; }
+      const permission = API ? String(API.permission) : 'API unavailable';
+      diagnostics.textContent =
+        'Browser permission: ' + permission + '. ' +
+        'Popup document: ' + pageKind + '. ' +
+        (pageKind === 'about:'
+          ? 'This about:blank popup inherits its context from Colab; ' +
+            'Chrome may suppress notification prompts here.'
+          : 'Chrome may still enforce school or browser notification policy.');
+    };
     const notifyStatus = message => {
       status.textContent=message;
       desktopAlertsStatus=message;
+      describePermissions();
       refreshDesktopAlertsControl();
     };
     const sendTest = () => {
@@ -2077,29 +2100,45 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     allow.addEventListener('click', async () => {
       const API = notificationAccess();
       if (!API) {
-        notifyStatus('Unavailable in this Colab popup/origin. '
-          + 'A standalone HTTPS website may be required.');
+        notifyStatus('Notification API unavailable in this Colab-generated popup. ' +
+          'Chrome cannot show a permission prompt here. ' +
+          'A separately hosted HTTPS site is needed to test permissions reliably.');
         return;
       }
-      let permission=API.permission;
+      const before = API.permission;
+      if (before === 'denied') {
+        desktopAlertsEnabled=false;
+        notifyStatus('No prompt: Chrome already reports DENIED for this popup. ' +
+          'Check Chrome site settings; school policy may lock the choice.');
+        return;
+      }
+      let permission=before;
       try {
-        if (permission==='default') {
+        if (permission === 'default') {
+          notifyStatus('Chrome permission request started. ' +
+            'If no prompt appears, the browser may be suppressing it.');
           permission=await API.requestPermission();
         }
       } catch(error) {
-        notifyStatus('Permission request blocked by browser, Colab, or school policy.');
+        desktopAlertsEnabled=false;
+        notifyStatus('No prompt: browser refused the permission request ' +
+          'from Colab. A standalone HTTPS page would be required.');
         return;
       }
       if (permission==='granted') {
         desktopAlertsEnabled=true;
         desktopAlertsPreviews=Boolean(preview.checked);
-        notifyStatus('Enabled. Leave this window and the Colab chat open.');
+        notifyStatus('Permission GRANTED. Keep both chat and popup open.');
         sendTest();
       } else {
         desktopAlertsEnabled=false;
-        notifyStatus(permission==='denied'
-          ? 'Notifications denied by Chrome or school policy.'
-          : 'Notification permission not granted.');
+        notifyStatus(before==='default'
+          ? 'No usable permission: Chrome returned ' +
+            String(permission).toUpperCase() +
+            '. If no prompt appeared, Colab or your school browser ' +
+            'may have suppressed it.'
+          : 'No prompt: Chrome permission is ' +
+            String(permission).toUpperCase() + '.');
       }
     });
     preview.addEventListener('change', () => {
@@ -2107,8 +2146,10 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     });
     test.addEventListener('click', sendTest);
     if (!notificationAccess()) {
-      notifyStatus('This popup cannot request desktop notifications in Chrome. '
-        + 'A standalone HTTPS website may be required.');
+      notifyStatus('Notification API unavailable in this Colab popup. ' +
+        'Chrome may require a separate HTTPS website.');
+    } else {
+      describePermissions();
     }
     refreshDesktopAlertsControl();
   }
