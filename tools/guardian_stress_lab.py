@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import html
 import importlib.util
 import json
 import os
@@ -55,7 +56,88 @@ ATTACK_LABELS = {
     "delete": "Delete the approved history",
     "reorder": "Reorder approved history",
     "corrupt": "Corrupt the JSON history",
+    "verified_revoke": "Forge a Verified badge removal",
+    "rename_other": "Rename somebody else's nickname",
+    "reserved_name": "Impersonate reserved Owner username",
+    "name_whitespace": "Use padded/spoofed nickname",
+    "name_zero_width": "Insert invisible Unicode in nickname",
+    "name_confusable": "Use Unicode confusable owner nickname",
+    "name_emoji": "Insert emoji in nickname",
+    "name_too_long": "Overflow nickname length",
+    "color_section": "Inject section-sign color code in nickname",
+    "color_field": "Inject unsupported hex color field",
+    "html_text": "Insert HTML-tag payload in message text",
+    "script_text": "Insert script-tag payload in text",
+    "markdown_title": "Write apparent ADMIN text in message",
+    "bidi_text": "Hide bidirectional control in message",
+    "control_text": "Insert escape/control code in message",
+    "blank_text": "Send whitespace-only message",
+    "oversize_text": "Send message beyond Guardian text limit",
+    "repeat_char": "Send repeated-character flood",
+    "keyboard_flood": "Send patterned keyboard flood",
+    "room_flood": "Flood room using rotating nicknames",
+    "clock_orphan": "Forge clock without a linked message",
+    "clock_mismatch": "Forge clock with mismatched username",
+    "clock_old": "Send timestamp before supported era",
+    "clock_extra": "Inject unauthorized timestamp metadata",
+    "unknown_kind": "Write unsupported event kind",
+    "profile_unsigned": "Forge unsigned identity profile",
+    "signed_forge": "Forge signed message without private key",
+    "signed_role": "Forge privileged signed role grant",
+    "signed_replay": "Replay forged signed event ID",
+    "reaction_spoof": "Forge reaction on existing message",
+    "reaction_remove": "Erase someone else's reaction",
+    "reaction_extra": "Add forbidden reaction style/color",
+    "tamper_user": "Modify a historical sender",
+    "erase_all": "Erase the entire message array",
+    "append_partial": "Append incomplete journal record",
+    "append_binary": "Append invalid UTF-8 bytes",
+    "null_event": "Inject a null event into the archive",
+    "array_event": "Inject a nested array event",
+    "truncate": "Truncate JSON mid-record",
+    "plain_json_concat": "Concatenate two JSON documents",
+    "text_null": "Insert NUL byte in message text",
 }
+ATTACK_GROUPS = {
+    "Identity & badges": (
+        "impersonate", "verified", "rename", "owner", "verified_revoke",
+        "rename_other", "reserved_name", "name_whitespace", "name_zero_width",
+        "name_confusable", "name_emoji", "name_too_long", "profile_unsigned",
+        "signed_role", "signed_forge", "signed_replay",
+    ),
+    "Color & presentation": (
+        "red_title", "ansi", "html", "bidi", "color_section", "color_field",
+        "html_text", "script_text", "markdown_title", "bidi_text", "control_text",
+    ),
+    "Spam & limits": (
+        "duplicate", "spam", "room_flood", "blank_text", "oversize_text",
+        "repeat_char", "keyboard_flood", "text_null",
+    ),
+    "Clocks & reactions": (
+        "invalid_clock", "invalid_time", "reaction", "clock_orphan",
+        "clock_mismatch", "clock_old", "clock_extra", "reaction_spoof",
+        "reaction_remove", "reaction_extra",
+    ),
+    "History & file integrity": (
+        "extra_fields", "rewrite", "delete", "reorder", "corrupt",
+        "tamper_user", "erase_all", "append_partial", "append_binary",
+        "null_event", "array_event", "truncate", "plain_json_concat",
+        "unknown_kind",
+    ),
+    "Control": ("normal",),
+}
+if sorted(x for group in ATTACK_GROUPS.values() for x in group) != sorted(ATTACK_LABELS):
+    raise RuntimeError("Every stress-test case must belong to exactly one group")
+CASE_GROUP = {name: group for group, cases in ATTACK_GROUPS.items()
+              for name in cases}
+# These syntactically valid *unsigned* operations cannot be securely
+# attributed to a Google account. Explicitly flag their acceptance.
+EXPECTED_IDENTITY_GAPS = {
+    "impersonate", "verified", "rename", "verified_revoke", "rename_other",
+    "reaction_spoof", "reaction_remove",
+}
+# Text that looks privileged isn't itself proof of a privilege bypass.
+BENIGN_TEXT_CASES = {"html_text", "script_text", "markdown_title"}
 EXPECTED_BLOCKED = set(ATTACK_LABELS) - {"normal"}
 LIVE_NOTE = (
     "This is a cloned-file test, NOT a live attack. "
