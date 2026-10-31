@@ -182,7 +182,7 @@ class SystemTimelineTests(unittest.TestCase):
         env={
             "check_upstream_version":lambda:None,
             "reconcile_outbox":lambda:None,
-            "latest_analysis":lambda:{"messages":messages},
+            "latest_analysis":lambda:{"messages":messages,"verified_names":set()},
             "update_required":False,"update_notice_shown":False,
             "running":True,"local_messages":local,"state_lock":threading.RLock(),
             "clear_through":0,"muted_names":set(),"visible_count":2,
