@@ -1,4 +1,25 @@
-# Messaging App v5.37
+# Messaging App v5.38
+
+## Messaging App v5.38 — Private System messages follow chat traffic
+
+Command errors, short confirmations and other local `System:` notices
+now render **inline at their original point in the conversation**.
+Previously they were always appended after every threaded message, making
+them appear stuck to the bottom. A private notice is now merged into the
+normal chat feed according to the number of shared messages present when
+it was created. When a new classmate message arrives, it displays below
+the old notice; old notices leave the visible-history window naturally.
+Nested replies still remain attached to their parent threads.
+
+System notices continue to use red text with the ordinary timestamp but
+have **no shared message number, reactions or reply action**. They are
+client-side only, never written to the shared `chat.json` or seen by
+other participants. The chat input, fullscreen behavior, and existing
+popup-command behavior are unchanged.
+
+**To activate:** Restart each participant's current `messaging_app.py`
+Colab cell and check `/version` for v5.38 (version opens a separate
+window). The Guardian and its private ledger do not need a restart.
 
 ## Messaging App v5.37 — Command output windows
 
