@@ -1,4 +1,4 @@
-# @title Owner Guardian v2.4 — Google Colab launcher
+# @title Owner Guardian v2.5 — Google Colab launcher
 """Owner-only one-cell launcher for the latest Drive Chat Guardian.
 
 Uses the owner-provided Colab runtime and Google user authorization. The
@@ -29,5 +29,8 @@ _guardian_globals = {"__name__": "_school_chat_owner_guardian",
                      "__file__": GUARDIAN_SOURCE_URL}
 exec(compile(_guardian_source, GUARDIAN_SOURCE_URL, "exec"),
      _guardian_globals)
+print("Loaded Owner Guardian v" +
+      str(_guardian_globals.get("GUARDIAN_VERSION", "unknown")) +
+      " from GitHub. Checking Google Drive authorization now.", flush=True)
 _guardian_globals["main"]([])
 
