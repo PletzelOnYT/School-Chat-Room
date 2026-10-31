@@ -35,6 +35,8 @@ env = {
     "is_plain_message": lambda e: False,
     "is_title_event": lambda e: False,
     "is_rename_event": lambda e: False,
+    "is_simple_reaction": lambda e: False,
+    "GOOGLE_ACCOUNT_USERNAME": "Alex",
     "TITLE_VERIFIED": "Verified",
     "TITLE_NONE": "None",
     "username": "Alex",
