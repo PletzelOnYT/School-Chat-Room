@@ -465,6 +465,96 @@ class GuardianTests(unittest.TestCase):
         self.assertEqual(self.mon.process(),"corrupt")
         self.assertEqual(self.shared.read_bytes(),broken)
 
+    def test_guardian_rejects_back_inserted_valid_signed_event(self):
+        """An authentic signature must not authorize rewriting past order."""
+        self.assertEqual(self.mon.process(),"enrolled")
+        inserted=self.event("signed but placed before approved history")
+        self.shared.write_text(json.dumps([inserted,self.legacy]))
+        self.assertEqual(self.mon.process(),"restored")
+        self.assertEqual(self.current(),[self.legacy])
+        reasons=[r[0] for r in self.mon.db.execute(
+            "SELECT reason FROM incidents")]
+        self.assertTrue(any("prefix" in x for x in reasons),reasons)
+
+    def test_guardian_detects_duplicate_json_object_keys(self):
+        """Ambiguous objects must not pass through parser last-key-wins."""
+        self.mon.process()
+        ambiguous=b'[{"id":"'+guardian.ANCHOR.encode()+(
+            b'","kind":"message","kind":"profile","user":"Legacy","text":"test"}]')
+        self.shared.write_bytes(ambiguous)
+        with self.assertRaisesRegex(ValueError,"duplicate JSON object key"):
+            guardian.decode_shared_stream(ambiguous)
+        self.assertEqual(self.mon.process(),"restored")
+        self.assertEqual(self.current(),[self.legacy])
+
+    def test_guardian_preserves_ambiguous_append_journal_for_inspection(self):
+        self.mon.process()
+        with open(self.shared,"ab") as stream:
+            stream.write(b'\n\x1e{"kind":"message","kind":"title","time":"12:00:00","user":"Alice"}')
+        original=self.shared.read_bytes()
+        self.assertEqual(self.mon.process(),"corrupt")
+        self.assertEqual(self.shared.read_bytes(),original)
+
+    def test_guardian_rejects_nonfinite_numbers_and_invalid_clocks(self):
+        with self.assertRaisesRegex(ValueError,"non-finite"):
+            guardian.decode_shared_stream(b'[{"kind":"message","value":NaN}]')
+        invalid={"kind":"message","time":"99:88:77",
+                 "user":"Alice","text":"hello"}
+        self.assertFalse(guardian.simple_message(invalid))
+        self.assertEqual(guardian.check_new_event(invalid,{},{}),
+                         "unknown event kind")
+        self.assertEqual(guardian.invalid_text("looks\u200bnormal"),
+                         "invisible formatting characters")
+        self.assertIsNone(guardian.invalid_text("emoji \U0001f469\u200d\U0001f4bb works"))
+
+    def test_guardian_metadata_flood_across_scans(self):
+        self.mon.process()
+        records=[self.legacy]
+        for i in range(guardian.META_RATE_10_SECONDS):
+            records.append({"kind":"title","time":"12:00:00",
+                            "user":"Alice","title":"Verified" if i%2 else "None"})
+        self.shared.write_text(json.dumps(records))
+        self.assertEqual(self.mon.process(),"healthy")
+        self.assertEqual(guardian.count_events(self.mon.db),len(records))
+        records.append({"kind":"title","time":"12:00:00",
+                        "user":"Alice","title":"Verified"})
+        self.shared.write_text(json.dumps(records))
+        self.assertEqual(self.mon.process(),"restored")
+        self.assertEqual(self.current(),records[:-1])
+
+    def test_guardian_cross_nickname_repetition_and_room_burst(self):
+        rate={}
+        for i in range(guardian.CROSS_NAME_REPEAT_20_SECONDS):
+            event={"kind":"message","time":"12:00:00",
+                   "user":"Student"+str(i),"text":"identical repeated chat"}
+            self.assertIsNone(guardian.check_new_event(event,{},rate,now=1000))
+        bad={"kind":"message","time":"12:00:00",
+             "user":"Student999","text":"identical repeated chat"}
+        self.assertIn("cross-nickname",guardian.check_new_event(
+            bad,{},rate,now=1000))
+        burst={}
+        for i in range(guardian.ROOM_RATE_10_SECONDS):
+            good={"kind":"message","time":"12:00:00",
+                  "user":"Student"+str(i),"text":"unique content "+str(i)}
+            self.assertIsNone(guardian.check_new_event(good,{},burst,now=1000))
+        self.assertIn("room-wide message burst",guardian.check_new_event({
+            "kind":"message","time":"12:00:00","user":"Student999",
+            "text":"another unique post"}, {}, burst, now=1000))
+
+    def test_signed_rate_limit_uses_observed_not_sender_epoch(self):
+        rate={}
+        now=int(time.time())
+        for i in range(guardian.RATE_10_SECONDS):
+            e=signed(self.private_key,self.public,text="unique text "+str(i))
+            e["issued_at"]=now-3000*i
+            e["issued_at_ns"]=e["issued_at"]*1000000000
+            e["sig"]=base64.b64encode(
+                self.private_key.sign(guardian.canonical(e))).decode()
+            self.assertIsNone(guardian.check_new_event(e,{},rate,now=now))
+        last=signed(self.private_key,self.public,text="one last post")
+        self.assertIn("message rate exceeded",guardian.check_new_event(
+            last,{},rate,now=now))
+
     def test_tampered_approved_text_restored(self):
         self.mon.process()
         e=self.event("safely signed text")
