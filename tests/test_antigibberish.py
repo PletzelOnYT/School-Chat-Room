@@ -6,7 +6,7 @@ import unicodedata
 import unittest
 from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parents[1].joinpath("messaging_app.py").read_text()
+SOURCE = Path(__file__).resolve().parents[1].joinpath("app", "messaging_app.py").read_text()
 TREE = ast.parse(SOURCE)
 FUNCTIONS = [node for node in TREE.body
              if isinstance(node, ast.FunctionDef) and node.name in (

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from test_security import env as legacy_env
 
-SOURCE = Path(__file__).resolve().parents[1].joinpath("messaging_app.py").read_text()
+SOURCE = Path(__file__).resolve().parents[1].joinpath("app", "messaging_app.py").read_text()
 TREE = ast.parse(SOURCE)
 NAMES = {"is_plain_message","plain_message","display_only_message_id",
          "message_hash","is_clock_event","clock_event",

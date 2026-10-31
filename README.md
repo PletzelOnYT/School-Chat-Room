@@ -1,5 +1,39 @@
 # Messaging App v5.36
 
+## Repository structure
+
+The main implementations are grouped by purpose. The old root-level
+`*.py` URLs are lightweight **compatibility entry points**, so existing
+Google Colab notebooks and shared links still work without updating them.
+
+```text
+School-Chat-Room/
+├── README.md                       Main guide and quick start
+├── app/
+│   └── messaging_app.py            Complete chat application
+├── guardian/
+│   ├── owner_guardian.py           Owner-only monitor and recovery engine
+│   └── guardian_launcher.py        Current Guardian Colab launcher
+├── tools/
+│   └── guardian_stress_lab.py      Isolated security stress tests + rollback
+├── docs/
+│   └── OWNER_GUARDIAN_SETUP.md     Owner Guardian setup instructions
+├── tests/                          Automated Python/browser regression tests
+├── .github/workflows/             Continuous integration
+├── school_chat.py                  Public Colab chat launcher (legacy URL)
+├── messaging_app.py                Compatibility loader for app/
+├── guardian_launcher.py           Compatibility loader for guardian/
+├── owner_guardian.py              Compatibility loader for guardian/
+├── guardian_stress_lab.py          Compatibility loader for tools/
+└── OWNER_GUARDIAN_SETUP.md         Documentation redirect for old links
+```
+
+**Important:** Run one owner Guardian in its separate Colab notebook. Do not
+run the Guardian or test attacks in every participant's chat session.
+Neither reorganization nor compatibility loading changes the original
+shared Drive file, the private Guardian database, or any account permissions.
+
+
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
 
@@ -56,7 +90,7 @@ successes. Reliable prevention requires a server-side identity and
 authorization boundary or restricted Drive write permissions, not just
 obfuscated client commands.
 
-Run local automated tests with `python guardian_stress_lab.py --cli`.
+Run local automated tests with `python tools/guardian_stress_lab.py --cli`.
 For inspection without writing any local attack payloads to Drive, leave the
 live-file checkbox off (the default).
 
@@ -194,7 +228,7 @@ If account restrictions prevent automatic Drive shortcut creation, use the
 manual *Add shortcut* action with the original shared file; the Guardian
 never bypasses school-account permissions. Existing approved Guardian
 backups are preserved—**do not reset the baseline** for this upgrade.
-See [Owner Guardian setup](OWNER_GUARDIAN_SETUP.md).
+See [Owner Guardian setup](docs/OWNER_GUARDIAN_SETUP.md).
 
 ## v5.35: Automatically join the original shared Drive chat
 
@@ -321,6 +355,6 @@ Emoji reactions also work with small metadata records:
 
 ## Owner Guardian
 
-The separate [owner_guardian.py](owner_guardian.py) can back up and inspect new simple chat messages, but cannot verify unsigned authorship. See the [owner setup](OWNER_GUARDIAN_SETUP.md) for its one-time migration baseline reset and monitoring limitations.
+The separate [owner_guardian.py](guardian/owner_guardian.py) can back up and inspect new simple chat messages, but cannot verify unsigned authorship. See the [owner setup](docs/OWNER_GUARDIAN_SETUP.md) for its one-time migration baseline reset and monitoring limitations.
 
 **Backup of the original raw JSON:** https://drive.google.com/file/d/1h8bexHbQu2WkIVa_M3qfJVlF2qAZelmK/view

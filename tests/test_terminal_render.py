@@ -5,7 +5,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parents[1].joinpath("messaging_app.py").read_text()
+SOURCE = Path(__file__).resolve().parents[1].joinpath("app", "messaging_app.py").read_text()
 TREE = ast.parse(SOURCE)
 HTML = next(ast.literal_eval(n.value) for n in TREE.body
             if isinstance(n, ast.Assign) and any(

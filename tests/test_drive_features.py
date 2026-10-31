@@ -13,7 +13,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parents[1].joinpath("messaging_app.py").read_text()
+SOURCE = Path(__file__).resolve().parents[1].joinpath("app", "messaging_app.py").read_text()
 TREE = ast.parse(SOURCE)
 NAMES = {"read_messages", "write_event", "write_plain_message",
          "message_hash", "is_clock_event", "clock_event",

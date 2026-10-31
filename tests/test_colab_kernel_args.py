@@ -24,7 +24,7 @@ class Response:
 class ColabKernelArgTests(unittest.TestCase):
     def test_one_cell_launcher_does_not_pass_kernel_flags_to_guardian(self):
         repo = Path(__file__).resolve().parents[1]
-        source = (repo / "guardian_launcher.py").read_text(encoding="utf-8")
+        source = (repo / "guardian" / "guardian_launcher.py").read_text(encoding="utf-8")
         fake_guardian = "\n".join((
             "def main(argv=None):",
             "    global received_args",
@@ -49,7 +49,7 @@ class ColabKernelArgTests(unittest.TestCase):
 
     def test_launcher_uses_unique_cache_busted_guardian_source(self):
         repo = Path(__file__).resolve().parents[1]
-        source = (repo / "guardian_launcher.py").read_text(encoding="utf-8")
+        source = (repo / "guardian" / "guardian_launcher.py").read_text(encoding="utf-8")
         fake_guardian = """GUARDIAN_VERSION = '2.6'
 def main(argv=None):
     pass
@@ -71,7 +71,7 @@ def main(argv=None):
 
     def test_launcher_rejects_outdated_guardian(self):
         repo = Path(__file__).resolve().parents[1]
-        source = (repo / "guardian_launcher.py").read_text(encoding="utf-8")
+        source = (repo / "guardian" / "guardian_launcher.py").read_text(encoding="utf-8")
         fake_guardian = """GUARDIAN_VERSION = '2.5'
 def main(argv=None):
     pass

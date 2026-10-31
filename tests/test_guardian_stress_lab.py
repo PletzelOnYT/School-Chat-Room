@@ -11,13 +11,13 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
-    "guardian_stress_lab", ROOT / "guardian_stress_lab.py"
+    "guardian_stress_lab", ROOT / "tools" / "guardian_stress_lab.py"
 )
 lab_module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(lab_module)
 
 SPEC_GUARDIAN = importlib.util.spec_from_file_location(
-    "test_attacks_owner_guardian", ROOT / "owner_guardian.py"
+    "test_attacks_owner_guardian", ROOT / "guardian" / "owner_guardian.py"
 )
 guardian = importlib.util.module_from_spec(SPEC_GUARDIAN)
 SPEC_GUARDIAN.loader.exec_module(guardian)
@@ -151,7 +151,7 @@ class GuardianStressLabTests(unittest.TestCase):
     def test_local_repo_guardian_can_run_without_network(self):
         with (
             patch.object(lab_module, "__file__",
-                         str(ROOT / "guardian_stress_lab.py")),
+                         str(ROOT / "tools" / "guardian_stress_lab.py")),
             patch.dict(os.environ, {"COLAB_RELEASE_TAG": "",
                                     "COLAB_GPU": ""}),
             patch("urllib.request.urlopen",
@@ -165,7 +165,7 @@ class GuardianStressLabTests(unittest.TestCase):
 
     def test_no_live_write_path_exists_in_modified_client(self):
         import inspect
-        text = (ROOT / "guardian_stress_lab.py").read_text()
+        text = (ROOT / "tools" / "guardian_stress_lab.py").read_text()
         self.assertIn("LIVE_CHAT_READ_ONLY.read_bytes()", text)
         self.assertIn("guardian_stress_lab_", text)
         self.assertNotIn("LIVE_CHAT_READ_ONLY.write", text)

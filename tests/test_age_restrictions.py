@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-SOURCE = Path(__file__).resolve().parents[1].joinpath("messaging_app.py").read_text()
+SOURCE = Path(__file__).resolve().parents[1].joinpath("app", "messaging_app.py").read_text()
 TREE = ast.parse(SOURCE)
 
 

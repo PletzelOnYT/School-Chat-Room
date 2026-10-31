@@ -11,7 +11,7 @@ import uuid
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-PROGRAM = Path(__file__).resolve().parents[1] / "owner_guardian.py"
+PROGRAM = Path(__file__).resolve().parents[1] / "guardian" / "owner_guardian.py"
 spec = importlib.util.spec_from_file_location("owner_guardian", PROGRAM)
 guardian = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(guardian)

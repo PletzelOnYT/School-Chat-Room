@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parents[1].joinpath("messaging_app.py").read_text()
+SOURCE = Path(__file__).resolve().parents[1].joinpath("app", "messaging_app.py").read_text()
 TREE = ast.parse(SOURCE)
 FUNC = next(n for n in TREE.body if isinstance(n, ast.FunctionDef)
             and n.name == "ensure_shared_chat_shortcut")

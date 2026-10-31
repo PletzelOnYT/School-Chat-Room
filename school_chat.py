@@ -10,7 +10,7 @@ import time
 
 MESSAGING_APP_SOURCE = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
-    'School-Chat-Room/main/messaging_app.py'
+    'School-Chat-Room/main/app/messaging_app.py'
 )
 # The query defeats raw.githubusercontent.com and Colab proxy caches.
 # No private data is included in this URL.
