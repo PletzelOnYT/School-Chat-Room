@@ -1,4 +1,4 @@
-# @title Messaging App — Owner Guardian v2.6
+# @title Messaging App — Owner Guardian v2.7
 """Owner-side Google Drive watchdog. Does not run inside messaging_app.py.
 
 - Approves only allowlisted, signed NEW events and stores a durable event ledger.
@@ -33,7 +33,7 @@ import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-GUARDIAN_VERSION = "2.6"
+GUARDIAN_VERSION = "2.7"
 # Exact existing shared file; Guardian never copies the message archive.
 SHARED_CHAT_FILE_ID = '1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd'
 SHARED_CHAT_FILE_LINK = (
@@ -644,20 +644,36 @@ def historical_clock_audit(events, now=None):
             continue
         h,m,sec=[int(x) for x in clock.groups()]
         candidate=(anchor//86400)*86400+h*3600+m*60+sec
-        if candidate>anchor+300:
+        # Concurrent Drive writers may append a message seconds after one
+        # that was actually sent later. Do not mistake a small inversion for
+        # a UTC midnight rollover (which would invent a one-day gap).
+        if candidate>anchor+120:
             candidate-=86400
-        if candidate>=946684800 and 0<=anchor-candidate<=86400+300:
+        delta=anchor-candidate
+        if candidate>=946684800 and -120<=delta<=86400+300:
             item["epoch"]=candidate
             item["basis"]="inferred_utc_not_verified"
             counts["estimated"]+=1
-            anchor=candidate
+            anchor=min(anchor,candidate)
         else:
             counts["unknown"]+=1
+    inversions=[]
+    for earlier,later in zip(entries,entries[1:]):
+        a,b=earlier["epoch"],later["epoch"]
+        if type(a) is int and type(b) is int and 0<a-b<=120:
+            exact=(earlier["basis"] in ("clock_metadata","stored_epoch")
+                   and later["basis"] in ("clock_metadata","stored_epoch"))
+            inversions.append({"previous_position":earlier["position"],
+                               "next_position":later["position"],
+                               "seconds":a-b,
+                               "confidence":"exact" if exact else "inferred"})
     return {"schema":1,"generated_utc":dt.datetime.now(dt.timezone.utc).isoformat(),
             "warning":"Date-less clocks may have gaps or used local time. "
                       "Inferred UTC times are estimates, not authenticated; "
                       "the shared chat log is not reordered or rewritten.",
-            "counts":counts,"messages":entries}
+            "counts":counts,
+            "near_order_inversions":inversions,
+            "messages":entries}
 
 
 class Guardian:
@@ -698,7 +714,9 @@ class Guardian:
         counts=report["counts"]
         self.log("Historical clock audit: "+
                  f'{counts["exact"]} exact, {counts["estimated"]} inferred, '+
-                 f'{counts["unknown"]} unknown. No history reordered.')
+                 f'{counts["unknown"]} unknown; '+
+                 f'{len(report["near_order_inversions"])} nearby ordering inversions. '+
+                 'Original history untouched; newer clients fix display order.')
 
     def process(self):
         """One monitoring pass; no destructive operations when history untrusted."""
@@ -1210,9 +1228,26 @@ def main(argv=None):
         print("Shared file:",shared,flush=True)
         print("PRIVATE backups:",private,flush=True)
         print("Mode:","AUDIT ONLY" if args.audit_only else "AUTO REPAIR",flush=True)
+        last_live_notice=0.0
         while True:
             try:
-                guardian.process()
+                scan_status=guardian.process()
+                current=time.monotonic()
+                if current-last_live_notice>=30.0:
+                    try:
+                        raw_live,events_live=read_shared(shared)
+                        guardian.log(
+                            "LIVE MONITOR: "+scan_status+"; shared file "+
+                            str(len(raw_live))+" bytes / "+
+                            str(len(events_live))+" records; "+
+                            str(count_events(guardian.db))+" approved in "+
+                            "private checkpoint. Scanning every "+
+                            str(max(2.0,args.interval))+" seconds.")
+                    except (OSError,ValueError) as exc:
+                        guardian.log("LIVE MONITOR: "+scan_status+
+                                     "; shared file unavailable: "+
+                                     type(exc).__name__)
+                    last_live_notice=current
             except Exception as exc:
                 guardian.log("ERROR: "+type(exc).__name__+": "+str(exc))
             if args.once:
