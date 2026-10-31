@@ -1,4 +1,18 @@
-# Messaging App v5.44
+# Messaging App v5.45
+
+## Messaging App v5.45 — Half-height desktop popup
+
+The separate Chrome popup now requests **330 × 56 pixels**, exactly half
+of v5.44's 112-pixel requested height. Its message layout is compressed
+to fit a 53px content area (sender and a single-line preview), with the
+existing 2px blue countdown bar, close button and 6.5-second timeout.
+
+ChromeOS/Chrome may enforce a minimum outer window height and add its
+own title bar; `window.open` cannot override this. The popup remains a
+separate browser window and does not become a system notification.
+
+Restart the existing chat launcher and enter `/testpopup` to preview it;
+existing messages and Guardian are unchanged.
 
 ## Messaging App v5.44 — Slim desktop notification banner
 
