@@ -67,8 +67,10 @@ def simple_message(event):
             event.get("kind")=="message" and
             isinstance(event.get("time"),str) and
             re.fullmatch(r"\d{2}:\d{2}:\d{2}",event["time"]) is not None and
-            valid_name(event.get("user")) and
-            invalid_text(event.get("text")) is None)
+            isinstance(event.get("user"),str) and
+            0<len(event["user"])<=128 and
+            isinstance(event.get("text"),str) and
+            len(event["text"])<=5000)
 
 
 def event_id(event, position=None):
@@ -159,6 +161,11 @@ def check_new_event(event, accepted, rate_log, now=None):
     # Four-field chat messages deliberately have no signature or sender ID.
     # They can be checked for format and spam, NOT identity/authenticity.
     if simple_message(event):
+        if not valid_name(event["user"]):
+            return "invalid new display name"
+        reason=invalid_text(event["text"])
+        if reason:
+            return reason
         sender="display-name:"+event["user"].casefold()
         history=rate_log.setdefault(sender,[])
         stamp=now
