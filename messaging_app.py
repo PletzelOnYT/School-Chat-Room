@@ -1,4 +1,4 @@
-# @title Messaging App v5.31 — Google Drive Messenger
+# @title Messaging App v5.32 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.31'
+CLIENT_VERSION = '5.32'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -273,6 +273,7 @@ PLAIN_MESSAGE_FIELDS = frozenset(('kind','time','user','text'))
 TITLE_FIELDS = frozenset(('kind','time','user','title'))
 RENAME_FIELDS = frozenset(('kind','time','user','name'))
 REACTION_FIELDS = frozenset(('kind','time','user','target','emoji','active'))
+CLOCK_FIELDS = frozenset(('kind','time','user','epoch','message_hash'))
 TITLE_VERIFIED = 'Verified'
 TITLE_NONE = 'None'
 REPLY_TEXT_RE = re.compile(r'^↳ \[reply:#(\d+)\] (.+)$', re.DOTALL)
@@ -349,14 +350,46 @@ def title_event(target, enabled):
             'title': TITLE_VERIFIED if enabled else TITLE_NONE}
 
 
+
+def message_hash(event):
+    """Stable digest of a four-field message; leaves stored message unchanged."""
+    payload = json.dumps(event, sort_keys=True, ensure_ascii=False,
+                         separators=(',', ':')).encode('utf-8')
+    return hashlib.sha256(payload).hexdigest()
+
+
+def is_clock_event(event):
+    """Standalone absolute timestamp, never an extra message field."""
+    return (isinstance(event, dict) and set(event) == CLOCK_FIELDS
+            and event.get('kind') == 'clock'
+            and isinstance(event.get('time'), str)
+            and re.fullmatch(r'(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d',
+                             event['time']) is not None
+            and isinstance(event.get('user'), str)
+            and 0 < len(event['user']) <= 128
+            and type(event.get('epoch')) is int
+            and 946684800 <= event['epoch'] <= 4102444800
+            and re.fullmatch(r'[0-9a-f]{64}', str(event.get('message_hash', ''))) is not None
+            and time.strftime('%H:%M:%S', time.gmtime(event['epoch'])) == event['time'])
+
+
+def clock_event(message, epoch):
+    """Attach precise UTC time as metadata; four-field chat message stays intact."""
+    if not is_plain_message(message):
+        raise ValueError('Clock metadata requires a four-field message')
+    return {'kind': 'clock', 'time': message['time'], 'user': message['user'],
+            'epoch': epoch, 'message_hash': message_hash(message)}
+
 def is_simple_record(event):
     return (is_plain_message(event) or is_title_event(event) or
-            is_rename_event(event) or is_simple_reaction(event))
+            is_rename_event(event) or is_simple_reaction(event) or
+            is_clock_event(event))
 
 
-def plain_message(text):
+def plain_message(text, timestamp=None):
+    stamped = int(time.time()) if timestamp is None else int(timestamp)
     return {'kind':'message',
-            'time':time.strftime('%H:%M:%S',time.gmtime()),
+            'time':time.strftime('%H:%M:%S',time.gmtime(stamped)),
             'user':username,'text':text}
 
 
@@ -431,7 +464,7 @@ def append_event_in_place(event):
     necessary. The history prefix and all previous records stay unchanged.
     """
     if not is_simple_record(event):
-        raise ChatFileError('Only approved message, title, rename or reaction records are allowed.')
+        raise ChatFileError('Only approved chat records are allowed.')
     pretty = json.dumps(event, indent=2, ensure_ascii=False).encode('utf-8')
     frame = b'\n\x1e' + pretty + b'\n'
     with open(CHAT_FILE_PATH, 'ab', buffering=0) as fh:
@@ -694,6 +727,7 @@ def analyze(events):
     post_number = 0
     reaction_state = {}
     simple_reactions = {}
+    clock_pending = {}  # hash -> messages waiting for a precise UTC epoch
     rate_history = {}
     seen_any_signed_event = False
     claim_order = {}  # (identity, normalized name) -> first signed appearance
@@ -727,6 +761,14 @@ def analyze(events):
             continue
         if kind == 'reaction' and is_simple_reaction(e):
             simple_reactions[(e['target'], e['user'].casefold(), e['emoji'])] = e['active']
+            continue
+        if kind == 'clock' and is_clock_event(e):
+            pending = clock_pending.get(e['message_hash'], [])
+            for matched in pending:
+                if (matched.get('issued_at') is None and
+                        matched['time'] == e['time'] and matched['user'] == e['user']):
+                    matched['issued_at'] = e['epoch']
+                    break
             continue
         signed = valid_signature(e)
         if signed:
@@ -847,6 +889,8 @@ def analyze(events):
             'issued_at': e.get('issued_at') if signed else None,
         }
         messages.append(item)
+        if plain:
+            clock_pending.setdefault(message_hash(e), []).append(item)
         by_number[post_number] = item
 
     # One current display name per signed identity; only one identity can own
@@ -1044,6 +1088,7 @@ HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /me <action>               Post a chat action
 /stats                     Chat statistics
 /ping                      Check shared file
+/version                   Show the running chat version and clock mode
 /exit                      Close the chat
 
 Search: from:Alex after:2026-10-01 before:2026-11-01 has:reaction in:replies
@@ -1336,9 +1381,14 @@ def send_message(body, reply_to=None):
             note('Cannot reply: original message no longer exists.')
             return False
         body = '↳ [reply:#%d] %s' % (target['number'],body)
-    evt = plain_message(body)
+    stamp = int(time.time())
+    evt = plain_message(body, timestamp=stamp)
     ok = write_event(evt)
     if ok:
+        # Separate metadata: old message readers still see an ordinary 4-field
+        # record, while updated clients have an unambiguous date for local time.
+        if not write_event(clock_event(evt, stamp)):
+            note('Message sent, but its precise timestamp metadata was not confirmed.')
         last_message_time = now
         recent_sent_messages.append((now, normalized_body))
     else:
@@ -1438,6 +1488,12 @@ def submit_message(raw):
                 return snapshot()
             if command == '/rules':
                 note(RULES)
+                return snapshot()
+            if command == '/version':
+                note('Messaging App v' + CLIENT_VERSION +
+                     ' | timestamps: UTC storage, browser-local display; '+
+                     'new messages include absolute clock metadata. '+
+                     'Older messages without dates may remain approximate.')
                 return snapshot()
             if command == '/ping':
                 t = time.monotonic()
