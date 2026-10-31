@@ -109,8 +109,12 @@ async function run(){
   assert(p.win.document.html.includes('@keyframes expire'));
   assert(p.win.document.html.includes('white-space:nowrap;overflow:hidden;text-overflow:ellipsis'));
   assert(p.win.document.html.includes('height:3px'));
-  assert(p.win.document.html.includes('height:100vh'),'body must fill enforced browser min height');
-  assert(p.win.document.html.includes('min-height:56px'));
+  assert(p.win.document.html.includes('.card{position:fixed;inset:0'),
+    'notification card must fill viewport, not the requested window height');
+  assert(p.win.document.html.includes('.track{position:fixed;bottom:0'),
+    'blue timer must attach to actual viewport bottom');
+  assert(p.win.document.html.includes('min-height:0;'),
+    'min-height must not create empty region below timer');
   assert(p.win.document.html.includes('display:flex;align-items:center;background:#fff'));
   assert(p.win.document.html.includes('border-left:3px solid #1a73e8'));
   assert(!p.win.document.html.includes('height:53px'),
@@ -212,7 +216,7 @@ class DesktopPopupTests(unittest.TestCase):
         self.assertEqual(run.returncode,0,run.stdout+"\n"+run.stderr)
 
     def test_no_built_in_browser_notifications_or_embedded_toast(self):
-        self.assertIn("CLIENT_VERSION = '5.46'",SOURCE.read_text(encoding="utf-8"))
+        self.assertIn("CLIENT_VERSION = '5.47'",SOURCE.read_text(encoding="utf-8"))
         self.assertNotIn('messaging-toast-SESSION_ID',HTML)
         self.assertIn("popup=yes,width=",JAVASCRIPT)
         self.assertIn("window.open('', 'pletzel-desktop-SESSION_ID'",JAVASCRIPT)
