@@ -3,6 +3,21 @@
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
 
+## Guardian v2.5: Fix recurring Colab VM credential RefreshError
+
+Some Colab sessions keep exposing Compute Engine ADC even when Drive is
+mounted. Guardian now runs Google's standard `auth.authenticate_user()`
+user-consent check **before** initializing any Drive API session. If the
+owner already granted consent, Colab reuses it; otherwise the owner must
+approve Google's prompt. The launcher prints the fetched Guardian version
+*before* the OAuth step, making stale notebook sessions easier to identify.
+
+If Google's school/Workspace policy does not allow Drive API access, Guardian
+cannot grant that permission automatically. Open the original shared
+`chat.json` with the same account and add a shortcut to the root of
+`My Drive`, then restart the owner-only Guardian. **Never upload a copy,
+reset the guardian baseline, or share private backup files.**
+
 ## Owner Guardian v2.4: Google Drive REST API authorization
 
 Google Drive mounting and Drive API OAuth are separate. If Colab's default
