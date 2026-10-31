@@ -95,10 +95,10 @@ function control(label){
   assert(header,'classic Colab header must still exist');
   return header.nodes.find(x=>x.textContent.includes(label));
 }
-function findButton(node,label){
-  if(node.tag==='button'&&node.textContent===label)return node;
+function findControl(node,label){
+  if(node.tag==='span'&&node.textContent===label&&node.events?.click)return node;
   for(const n of node.nodes||[]) {
-    const found=findButton(n,label);
+    const found=findControl(n,label);
     if(found)return found;
   }
   return null;
@@ -120,10 +120,21 @@ async function run(){
   assert(app.win.document.html.includes('height:100dvh'));
   assert(app.win.document.html.includes('@media(max-width:540px)'));
   assert(app.win.document.html.includes('id="app-input"'));
+  assert(app.win.document.html.includes('font-family:monospace;font-size:13px'));
+  assert(app.win.document.html.includes('height:19px'));
+  assert(app.win.document.html.includes('width:min(INPUTPXpx,100%)'));
+  assert(app.win.document.html.includes('max-width:WRAPCHch'));
+  assert(app.win.document.html.includes('white-space:pre-wrap;overflow-wrap:anywhere'));
+  assert(!app.win.document.html.includes('class="message"'),
+    'no redesigned chat cards');
+  assert(!app.win.document.html.includes('id="app-send"'),
+    'the original terminal has only an input, not a Send button');
   assert(!app.win.document.html.includes('Hello <b>'),
     'messages must not be interpolated into app HTML');
   assert(app.elems['app-messages'].textContent.includes('Hello <b>not markup</b>'));
-  assert(app.elems['app-status'].textContent.includes('Alex'));
+  assert(app.elems['app-messages'].textContent.includes('--- Connected as: '));
+  assert(app.elems['app-messages'].textContent.includes('--- Type your message and press Enter.'));
+  assert(app.elems['app-messages'].textContent.includes('Alex'));
 
   // Re-click focuses the existing window without creating another session.
   control('[Open in App]').events.click();
@@ -147,13 +158,20 @@ async function run(){
   await sleep(30);
   assert(app.elems['app-messages'].textContent.includes('New message from Colab'));
   assert.strictEqual(appInput.value,'draft in progress');
-  const reply=findButton(app.elems['app-messages'],'↳ Reply');
-  assert(reply&&reply.events.click,'popup replies must work');
+  const message=app.elems['app-messages'].nodes.find(x=>x.tag==='span' &&
+    x.textContent.includes('Hello <b>not markup</b>'));
+  assert(message && message.events.click,
+    'messages in the popup should be clickable exactly as in Colab');
+  message.events.click();
+  const reply=findControl(app.elems['app-messages'],'[Reply]');
+  assert(reply&&reply.events.click,'original inline [Reply] must work');
+  assert(findControl(app.elems['app-messages'],'[React]'),
+    'original inline [React] must work');
   reply.events.click();
   assert(appInput.value.startsWith('/reply 1 '));
 
   // Closing and reopening creates a new usable view, not a duplicate poller.
-  app.elems['app-close'].events.click();
+  app.win.close();
   assert(app.win.closed);
   control('[Open in App]').events.click();
   assert.strictEqual(opened.length,2);
@@ -161,12 +179,12 @@ async function run(){
   assert(control('Desktop popups OFF'));
 
   // Browsers that block popups retain the classic chat and show a retry cue.
-  opened[1].elems['app-close'].events.click();
+  opened[1].win.close();
   allowPopups=false;
   control('[Open in App]').events.click();
   assert(control('[Open in App]').title.includes('Browser blocked'));
   assert(control('Desktop popups OFF'));
-  console.log('App popup: responsive, live mirror, send, reply, reuse, close, blocked: PASS');
+  console.log('Original terminal preserved in app popup, with live mirror, send, replies, and resize: PASS');
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});
 """
@@ -174,12 +192,12 @@ run().catch(error=>{console.error(error);process.exitCode=1;});
 
 class AppWindowTests(unittest.TestCase):
     def test_layout_and_safe_app_bridge_are_present(self):
-        self.assertIn("CLIENT_VERSION = '5.48'", SOURCE.read_text(encoding="utf-8"))
+        self.assertIn("CLIENT_VERSION = '5.49'", SOURCE.read_text(encoding="utf-8"))
         self.assertIn("textControl('[Open in App]',openAppWindow", SCRIPT)
         self.assertIn("function appWindowFeatures()", SCRIPT)
         self.assertIn("function renderApp(state)", SCRIPT)
         self.assertIn("function appTimeline(state)", SCRIPT)
-        self.assertIn("view.replaceChildren(fragment)", SCRIPT)
+        self.assertIn("view.replaceChildren()", SCRIPT)
         self.assertNotIn("innerHTML = msg.text", SCRIPT)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js not installed")
