@@ -23,7 +23,8 @@ class TitleBadgeTests(unittest.TestCase):
             {"kind":"message","time":"04:15:51","user":"Emma","text":"Hi"},
         ]
         self.path.write_text(json.dumps(self.start,indent=2)+"\n")
-        self.env=setup({"CHAT_FILE_PATH":str(self.path),"username":"Pletzel"})
+        self.env=setup({"CHAT_FILE_PATH":str(self.path),"username":"Pletzel",
+                        "identity_public":"test-local-identity"})
         self.env.update({
             "state_lock":threading.RLock(),
             "running":True,
