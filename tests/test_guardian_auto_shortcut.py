@@ -95,7 +95,7 @@ class GuardianAutoShortcutTests(unittest.TestCase):
 
     def test_owner_guarantees_same_target_as_client(self):
         self.assertEqual(guardian.SHARED_CHAT_FILE_ID, TARGET)
-        self.assertEqual(guardian.GUARDIAN_VERSION, "2.5")
+        self.assertEqual(guardian.GUARDIAN_VERSION, "2.6")
 
 
 if __name__ == "__main__":
