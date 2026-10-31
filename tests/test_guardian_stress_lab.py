@@ -251,6 +251,81 @@ class GuardianStressLabTests(unittest.TestCase):
         self.lab.revert_all()
         self.assertFalse(self.lab.previews)
 
+    def test_live_overlay_modded_menu_keeps_actual_chat_untouched(self):
+        with tempfile.TemporaryDirectory() as directory:
+            actual = Path(directory) / "chat.json"
+            original = lab_module.seed_fixture(guardian)
+            actual.write_bytes(original)
+            attached = lab_module.LiveChatOverlay(guardian, actual)
+            try:
+                before = attached.original_preview()
+                for hack in lab_module.LOCAL_HACKS:
+                    attached.add_hack(hack)
+                changed = attached.preview()
+                self.assertEqual(actual.read_bytes(), original)
+                self.assertNotEqual(before["rows"], changed["rows"])
+                self.assertEqual(len(attached.actions), len(lab_module.LOCAL_HACKS))
+                self.assertEqual(
+                    (attached.root / "before_live_overlay.snapshot").read_bytes(),
+                    original)
+                attached.revert()
+                self.assertEqual(actual.read_bytes(), original)
+                self.assertEqual(attached.actions, [])
+                self.assertEqual(attached.preview()["rows"],
+                                 attached.original_preview()["rows"])
+            finally:
+                private_dir = attached.root
+                attached.close()
+            self.assertFalse(private_dir.exists())
+
+    def test_live_overlay_revert_preserves_concurrent_new_chat_messages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            actual = Path(directory) / "chat.json"
+            old = lab_module.seed_fixture(guardian)
+            actual.write_bytes(old)
+            attached = lab_module.LiveChatOverlay(guardian, actual)
+            try:
+                attached.add_hack("owner_badge")
+                # Simulate another student appending a message after snapshot.
+                changed_events = guardian.decode_shared_stream(old)
+                changed_events.append({
+                    "kind": "message", "time": "12:00:00",
+                    "user": "Classmate", "text": "Keep this new message"})
+                updated = json.dumps(changed_events).encode()
+                actual.write_bytes(updated)
+                attached.revert()
+                self.assertEqual(actual.read_bytes(), updated)
+                self.assertEqual(attached._baseline, old)
+                self.assertEqual(attached.preview()["messages"], 3)
+            finally:
+                attached.close()
+
+    def test_live_overlay_escapes_html_and_rejects_unknown_mods(self):
+        with tempfile.TemporaryDirectory() as directory:
+            actual = Path(directory) / "chat.json"
+            original = lab_module.seed_fixture(guardian)
+            actual.write_bytes(original)
+            attached = lab_module.LiveChatOverlay(guardian, actual)
+            try:
+                with self.assertRaisesRegex(ValueError, "Unsupported"):
+                    attached.add_hack("permanent_owner_privileges")
+                attached.add_hack("ghost")
+                attached.add_hack("nick")
+                rendered = lab_module.render_chat_preview(
+                    attached.preview(), "<script>alert(1)</script>", "ATTACK")
+                self.assertNotIn("<script>", rendered)
+                self.assertIn("&lt;script&gt;", rendered)
+                self.assertEqual(actual.read_bytes(), original)
+            finally:
+                attached.close()
+
+    def test_live_overlay_missing_source_never_creates_room(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original = Path(directory) / "no_chat.json"
+            with self.assertRaises(FileNotFoundError):
+                lab_module.LiveChatOverlay(guardian, original)
+            self.assertFalse(original.exists())
+
     def test_no_live_write_path_exists_in_modified_client(self):
         import inspect
         text = (ROOT / "tools" / "guardian_stress_lab.py").read_text()
