@@ -1,7 +1,42 @@
-# Messaging App v5.35
+# Messaging App v5.36
 
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
 
+
+## v5.36 / Guardian v2.7: Live timestamp ordering and monitoring
+
+**Confirmed in the original shared chat file:** two messages with absolute
+UTC metadata are stored in reversed append order: 02:57:37 was appended before
+02:57:35. The file also contains older messages 02:09:28 and 02:09:25 in
+reversed order without absolute metadata. **These are not necessarily damaged
+timestamps; concurrent Google Drive writers can reach the file in a different
+order than they sent messages.**
+
+Chat v5.36 automatically corrects nearby (up to 120 seconds) time inversions
+**in its display**, including precisely dated messages and plausible short
+legacy inversions. It adjusts old date inference to avoid treating a 2- or
+3-second reversal as an entire day. Reply threads retain their parent/child
+relationships, and all `#number` identifiers remain unchanged. It does not
+physically reorder or overwrite `chat.json`—that could corrupt numeric
+reply targets and reaction references. Longer gaps and missing historical
+dates cannot be reliably corrected without external evidence.
+
+Guardian v2.7 continues to monitor the original file approximately every
+five seconds while its **separate owner Colab runtime is connected**. It
+prints a `LIVE MONITOR` heartbeat every 30 seconds with scan status, shared
+file byte count, event count, and its private approved checkpoint count.
+The private historical timestamp audit also flags nearby inversions and their
+confidence level. Guardian repairs **actual tampering** from its approved
+history but does not rewrite valid timestamps or reorder old messages.
+A healthy Guardian does not mean that display ordering was already corrected
+in old client sessions.
+
+**To activate both sides:** Stop and restart the owner-only Guardian launcher
+(to load v2.7) and restart **every participating chat client** (to load
+v5.36). Old client cells will continue to render old ordering. Run
+`/version` in the chat and look for `v5.36`. Stop old Guardian cells
+before restarting; never start two repair processes against the same room.
+Do not reset the Guardian baseline or replace the original file.
 
 ## Owner Guardian launcher: prevent GitHub raw cache staleness
 
