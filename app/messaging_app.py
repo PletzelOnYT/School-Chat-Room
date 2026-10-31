@@ -1,4 +1,4 @@
-# @title Messaging App v5.43 — Google Drive Messenger
+# @title Messaging App v5.44 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.43'
+CLIENT_VERSION = '5.44'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1957,7 +1957,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   }
 
   function popupWindowFeatures() {
-    const width = 355, height = 165, margin = 16;
+    const width = 330, height = 112, margin = 12;
     let left = 0, top = 0;
     try {
       const bounds = window.screen || {};
@@ -1980,25 +1980,29 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   }
 
   function popupNotificationDocument() {
-    // All dynamic content is inserted via textContent (never HTML).
+    // A compact, desktop-window banner. Chrome still controls window chrome
+    // and minimum dimensions; the page itself is intentionally one-line slim.
+    // All user data is assigned using textContent, never interpreted as HTML.
     return '<!doctype html><html><head><meta charset="utf-8">' +
-      '<title>Pletzel Chat · New message</title>' +
+      '<title>Pletzel Chat</title>' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<style>@keyframes expire{from{width:100%}to{width:0%}}' +
-      '*{box-sizing:border-box}body{margin:0;background:#fff;color:#202124;' +
-      'font:13px Arial,Helvetica,sans-serif;overflow:hidden}' +
-      '.card{position:relative;height:100vh;border:1px solid #dadce0;}' +
-      '.content{display:flex;align-items:flex-start;padding:14px 12px 10px;' +
-      'gap:10px}.avatar{width:29px;height:29px;flex:none;border-radius:50%;' +
+      '*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;' +
+      'overflow:hidden;background:#fff;color:#202124;font:12px Arial,Helvetica,sans-serif}' +
+      '.card{position:relative;width:100%;height:100%;border:1px solid #dadce0}' +
+      '.content{position:absolute;top:50%;transform:translateY(-50%);width:100%;' +
+      'display:flex;align-items:center;gap:8px;padding:5px 9px 8px}' +
+      '.avatar{width:23px;height:23px;flex:none;border-radius:50%;' +
       'background:#e8f0fe;color:#1a73e8;display:flex;align-items:center;' +
-      'justify-content:center;font-size:17px;font-weight:bold}' +
-      '.message{min-width:0;flex:1}.sender{font-weight:600;font-size:13px;' +
-      'line-height:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-      '.preview{margin-top:3px;font-size:12px;line-height:17px;color:#5f6368;' +
-      'overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;' +
-      '-webkit-box-orient:vertical;overflow:hidden}' +
-      'button{font-size:19px;line-height:20px;padding:0 3px;border:0;' +
-      'background:none;color:#5f6368;cursor:pointer}' +
-      '.track{position:absolute;bottom:0;left:0;right:0;height:3px;' +
+      'justify-content:center;font-size:12px;font-weight:700}' +
+      '.message{min-width:0;flex:1;overflow:hidden}' +
+      '.sender{font-weight:600;font-size:12px;line-height:15px;' +
+      'white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '.preview{margin-top:1px;font-size:11px;line-height:14px;color:#5f6368;' +
+      'white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      'button{font-size:16px;line-height:16px;padding:0 2px;border:0;' +
+      'background:transparent;color:#5f6368;cursor:pointer;align-self:flex-start}' +
+      '.track{position:absolute;bottom:0;left:0;right:0;height:2px;' +
       'background:#e8f0fe}.bar{height:100%;width:100%;background:#1a73e8;' +
       'animation:expire 6.5s linear forwards}' +
       '</style></head><body><div class="card"><div class="content">' +
