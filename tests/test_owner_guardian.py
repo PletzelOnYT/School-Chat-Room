@@ -303,6 +303,20 @@ class GuardianTests(unittest.TestCase):
         self.assertIn("counts",parsed)
         self.assertEqual(self.shared.read_bytes(),original)
 
+    def test_historical_baseline_does_not_count_as_fresh_flood(self):
+        initial=[{"kind":"message","time":"13:00:00",
+                  "user":"Alice","text":"old note "+str(i)}
+                 for i in range(guardian.RATE_60_SECONDS+8)]
+        self.shared.write_text(json.dumps(initial))
+        self.assertEqual(self.mon.process(),"enrolled")
+        existing=self.mon.db.execute(
+            "SELECT COUNT(*) FROM approved WHERE observed_at IS NOT NULL").fetchone()[0]
+        self.assertEqual(existing,0)
+        new={"kind":"message","time":"13:00:01",
+             "user":"Alice","text":"brand new message"}
+        self.shared.write_text(json.dumps(initial+[new]))
+        self.assertEqual(self.mon.process(),"healthy")
+
     def test_cross_poll_spam_limits_remain_active(self):
         self.mon.process()
         records=[self.legacy]
