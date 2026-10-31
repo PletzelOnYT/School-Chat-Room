@@ -78,6 +78,51 @@ class GuardianColabOAuthTests(unittest.TestCase):
         self.assertEqual(invalid.refresh_count, 1)
         self.assertTrue(state["authorized"])
 
+    def test_colab_authorization_prompts_only_after_owner_approval(self):
+        events = []
+        guardian.guardian_authorize_owner_colab(
+            authorize=lambda: events.append("Google user consent"))
+        self.assertEqual(events, ["Google user consent"])
+
+    def test_colab_authorization_rejected_without_api_requests(self):
+        def deny():
+            raise PermissionError("school policy")
+
+        with self.assertRaisesRegex(RuntimeError, "Add shortcut"):
+            guardian.guardian_authorize_owner_colab(authorize=deny)
+
+    def test_metadata_refresh_error_never_retried_as_machine_token(self):
+        with tempfile.TemporaryDirectory() as folder:
+            class BrokenSession:
+                def get(self, url, params=None, timeout=None):
+                    raise RuntimeError("metadata.google.internal: 404")
+
+            with (
+                patch.object(guardian, "guardian_authorize_owner_colab") as consent,
+                patch.object(guardian, "guardian_user_drive_session",
+                             return_value=BrokenSession()) as session,
+            ):
+                with self.assertRaisesRegex(FileNotFoundError,
+                                            "Drive API could not complete"):
+                    guardian.ensure_shared_chat_shortcut(
+                        folder, sleep=lambda _: None)
+                consent.assert_called_once_with()
+                session.assert_called_once_with()
+
+    def test_google_authorization_denial_never_starts_api_session(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with (
+                patch.object(guardian, "guardian_authorize_owner_colab",
+                             side_effect=RuntimeError("school restrictions")) as consent,
+                patch.object(guardian, "guardian_user_drive_session") as session,
+            ):
+                with self.assertRaisesRegex(FileNotFoundError,
+                                            "school restrictions"):
+                    guardian.ensure_shared_chat_shortcut(
+                        folder, sleep=lambda _: None)
+                consent.assert_called_once_with()
+                session.assert_not_called()
+
     def test_school_account_denial_is_clear_and_never_bypassed(self):
         vm = FakeCredentials("VM")
         prompts = []
@@ -95,12 +140,16 @@ class GuardianColabOAuthTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             session = Session(folder)
             target = Path(folder) / "chat.json"
-            with patch.object(guardian, "guardian_user_drive_session",
-                              return_value=session) as authorize:
+            with (
+                patch.object(guardian, "guardian_authorize_owner_colab") as consent,
+                patch.object(guardian, "guardian_user_drive_session",
+                             return_value=session) as authorized_session,
+            ):
                 result = guardian.ensure_shared_chat_shortcut(
                     folder, sleep=lambda _: None)
             self.assertEqual(result, str(target))
-            authorize.assert_called_once_with()
+            consent.assert_called_once_with()
+            authorized_session.assert_called_once_with()
             self.assertEqual(len(session.posts), 1)
             self.assertEqual(session.posts[0]["mimeType"],
                              "application/vnd.google-apps.shortcut")
