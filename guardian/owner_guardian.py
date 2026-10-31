@@ -451,7 +451,10 @@ def decode_shared_stream(raw):
                 raise ValueError("duplicate JSON object key: "+str(key)[:60])
             result[key]=value
         return result
-    decoder=json.JSONDecoder(object_pairs_hook=unique_keys)
+    decoder=json.JSONDecoder(
+        object_pairs_hook=unique_keys,
+        parse_constant=lambda token: (_ for _ in ()).throw(
+            ValueError("non-finite JSON numeric constant: "+token)))
     skip=len(data)-len(data.lstrip(" \t\r\n"))
     try:
         history,pos=decoder.raw_decode(data,skip)
@@ -979,24 +982,36 @@ class Guardian:
                 stored=json.loads(stored_json)
             except (ValueError,TypeError):
                 continue
-            if not simple_message(stored):
-                continue
-            key="display-name:"+stored["user"].casefold()
-            body=" ".join(stored["text"].casefold().split())
-            rate.setdefault(key,[]).append((observed_at,body))
-            rate.setdefault("__room_messages__",[]).append((observed_at,body))
-        # Carry recent message-rate history across monitoring passes, not
-        # merely across newly appended events in this particular scan.
-        for approved in known:
-            if (approved.get("kind")=="message" and
-                    isinstance(approved.get("sender_key"),str) and
-                    isinstance(approved.get("text"),str) and
-                    type(approved.get("issued_at")) is int and
-                    abs(time.time()-approved["issued_at"])<70):
-                sender=approved["sender_key"]
-                rate.setdefault(sender,[]).append((
-                    approved["issued_at"],
-                    " ".join(approved["text"].casefold().split())))
+            kind=stored.get("kind")
+            if kind=="message" and isinstance(stored.get("text"),str):
+                body=" ".join(stored["text"].casefold().split())
+                if simple_message(stored):
+                    key="display-name:"+stored["user"].casefold()
+                    rate.setdefault("__room_messages__",[]).append(
+                        (observed_at,body))
+                else:
+                    key=stored.get("sender_key")
+                    if not isinstance(key,str):
+                        continue
+                rate.setdefault(key,[]).append((observed_at,body))
+            elif kind in ("clock","reaction","title","rename","profile","role"):
+                sender=stored.get("sender_key") or (
+                    "display-name:"+str(stored.get("user","")).casefold())
+                rate.setdefault("__meta__:"+sender,[]).append(
+                    (observed_at,kind))
+                rate.setdefault("__all_metadata__",[]).append(
+                    (observed_at,kind))
+        # The private checkpoint supplies observation-time counters across
+        # polls/restarts; sender-controlled timestamps cannot reset a limit.
+        # New records must be APPENDED after every approved checkpoint row.
+        # A signed but back-inserted record must not rewrite past chronology.
+        if (len(live)<len(known) or
+                any(canonical_event(live[index])!=canonical_event(saved)
+                    for index,saved in enumerate(known))):
+            changed=True
+            incident(self.db,"Append-only approved-history prefix changed",
+                     action="restore_attempt")
+            self.log("ALERT: existing history moved, replaced or back-inserted.")
         live_known_order=[]
         for position,entry in enumerate(live):
             eid=event_id(entry,position)
