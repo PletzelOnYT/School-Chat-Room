@@ -1,4 +1,4 @@
-# Messaging App — Owner Guardian v2.3
+# Messaging App — Owner Guardian v2.4
 
 The owner runs a **separate Python program** (`owner_guardian.py`) in their own Google Colab notebook. The chat itself, including the original terminal UI and `chat.json`, remains unchanged. No Vercel, Redis, or additional shared folder is required.
 
@@ -27,6 +27,24 @@ because the app switched to append-only writes.
 - If messages disappear, are modified, or are reordered, repairs the existing shared file using the approved history.
 - If the file is empty, corrupted, or truncated, attempts to restore the approved history **in place**.
 - If the original Drive object is in Trash, it optionally attempts to **untrash the original file ID** using a Google token already available in the session.
+
+## Owner Guardian v2.4: Drive API credentials and metadata 404 fix
+
+Mounting Google Drive does not necessarily authorize the Drive REST API.
+If `google.auth.default()` returns VM/service-account credentials, the
+Guardian must not use those credentials to create a user's shortcut. A fresh
+Colab runtime may fail with `metadata.google.internal` HTTP 404 /
+`RefreshError`. Guardian v2.4 detects unavailable machine credentials,
+uses existing authorized Google **user** credentials when possible, and
+otherwise prompts the owner via the supported
+`google.colab.auth.authenticate_user(clear_output=False)` flow.
+
+If Google requests sign-in, the owner must approve it. This cannot be
+made invisible or bypass a Google Workspace school's restrictions. If
+authorization is declined or administratively blocked, the Guardian explains
+how to add a shortcut using Google Drive's interface. It never uploads or
+replaces `chat.json`, changes share permissions, or resets Guardian backups.
+The original shared Drive file remains the only room.
 
 ## Owner Guardian v2.3: Google Colab startup fix
 
