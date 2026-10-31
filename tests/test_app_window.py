@@ -233,7 +233,7 @@ async function run(){
  await sleep(820);
  assert(sent.includes('/reply 1 Answer in thread'),sent);
 
- const nestedReply=find(el['app-thread-body'],n=>n.className.includes('thread-card reply'));
+ const nestedReply=find(el['app-thread-body'],n=>String(n.className||'').includes('thread-card reply'));
  assert(nestedReply,'thread reply should be visible in side panel');
  clickButton(nestedReply,'↳ Reply');
  el['app-thread-input'].value='Nested answer';
