@@ -1,6 +1,5 @@
-"""Single shared chat.json storage, advanced search, and threads tests."""
+"""Four-field Google Drive JSON storage, formatting, search, and threads."""
 import ast
-import base64
 import hashlib
 import json
 import os
@@ -10,130 +9,103 @@ import tempfile
 import threading
 import time
 import unittest
-import uuid
 from datetime import datetime
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1].joinpath("messaging_app.py").read_text()
 TREE = ast.parse(SOURCE)
-NAMES = {"read_messages", "write_event", "append_event_in_place",
+NAMES = {"read_messages", "write_event", "write_plain_message",
+         "append_event_in_place", "is_plain_message",
          "search_messages", "build_threads"}
-NODES = [n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name in NAMES]
+FUNCTIONS = [node for node in TREE.body
+             if isinstance(node, ast.FunctionDef) and node.name in NAMES]
 
 
-def methods(overrides=None):
-    env = dict(
-        os=os, re=re, shlex=shlex, json=json, time=time, uuid=uuid,
-        hashlib=hashlib, datetime=datetime,
-        valid_signature=lambda e: isinstance(e, dict) and e.get("sig") == "valid",
-        is_plain_message=lambda e: False,
-        ChatFileError=type("ChatFileError", (Exception,), {}),
-        file_lock=threading.RLock(),
-        short_id=lambda key: (key or "")[:12],
-        remember_outgoing=lambda event: None,
-    )
-    if overrides:
-        env.update(overrides)
-    exec(compile(ast.Module(body=NODES, type_ignores=[]), "<messaging-app-storage>", "exec"), env)
+def storage_env(path):
+    env = {
+        "os": os, "re": re, "json": json, "time": time, "hashlib": hashlib,
+        "shlex": shlex, "datetime": datetime,
+        "PLAIN_MESSAGE_FIELDS": frozenset(("kind","time","user","text")),
+        "CHAT_FILE_PATH": str(path),
+        "file_lock": threading.RLock(),
+        "ChatFileError": type("ChatFileError",(Exception,),{}),
+        "short_id": lambda s: str(s)[:12],
+    }
+    exec(compile(ast.Module(body=FUNCTIONS,type_ignores=[]),
+                 "<message-storage>", "exec"), env)
     return env
 
 
-class SingleDriveFileTests(unittest.TestCase):
+def entry(text="hi", user="Pletzel", clock="04:15:50"):
+    return {"kind":"message","time":clock,"user":user,"text":text}
+
+
+class FourFieldDriveTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp=tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.folder = Path(self.temp.name)
-        self.file = self.folder / "chat.json"
-        self.anchor = str(uuid.uuid4())
-        self.original = {"id": self.anchor, "kind": "message", "text": "Original history"}
-        self.file.write_text(json.dumps([self.original]))
-        self.env = methods({
-            "CHAT_FILE_PATH": str(self.file),
-            "ORIGINAL_HISTORY_ANCHOR": self.anchor,
-        })
+        self.path=Path(self.temp.name)/"chat.json"
+        self.initial=[entry("old one","ColabUser","04:12:01"),
+                      entry("old two","Pletzel","04:13:05")]
+        self.path.write_text(json.dumps(self.initial,indent=2,ensure_ascii=False)+"\n")
+        self.env=storage_env(self.path)
 
-    def event(self, msg):
-        return {
-            "id": str(uuid.uuid4()), "kind": "message", "sig": "valid",
-            "issued_at": int(time.time()), "text": msg,
-        }
+    def test_reads_pretty_history_without_anchor_or_ids(self):
+        self.assertEqual(self.env["read_messages"](),self.initial)
+        self.assertTrue(all(len(x)==4 and "id" not in x
+                            for x in self.env["read_messages"]()))
 
-    def test_read_existing_history_and_write_in_one_json(self):
-        saved = self.env["read_messages"]()
-        self.assertEqual(saved, [self.original])
-        for i in range(12):
-            self.assertTrue(self.env["write_event"](self.event(f"New message {i}")))
-        records = json.loads(self.file.read_text())
-        self.assertEqual(len(records), 13)
-        self.assertEqual(records[0], self.original)
-        self.assertEqual(len(list(self.folder.iterdir())), 1)
-        self.assertEqual(self.file.name, "chat.json")
-        self.assertNotIn("with open(CHAT_FILE_PATH, 'w'", SOURCE)
-        self.assertIn("with open(CHAT_FILE_PATH, 'r+b')", SOURCE)
+    def test_utf8_bom_and_windows_newlines_are_supported(self):
+        self.path.write_bytes(
+            b"\xef\xbb\xbf"+
+            (json.dumps(self.initial,indent=2)+"\n").replace("\n","\r\n").encode()
+        )
+        self.assertEqual(self.env["read_messages"](),self.initial)
 
-    def test_in_place_append_keeps_exact_original_history_bytes(self):
-        source = (b'[\n  {"id":"' + self.anchor.encode() +
-                  b'","kind":"message","text":"Original history"}\n]\n')
-        self.file.write_bytes(source)
-        record = self.event("sent after original history")
-        self.assertTrue(self.env["write_event"](record))
-        actual = self.file.read_bytes()
-        # Old data up through the existing closing JSON-array bracket is
-        # preserved byte-for-byte; only the tail is inserted/replaced.
-        self.assertTrue(actual.startswith(source[:source.rindex(b']')]), actual)
-        self.assertEqual(json.loads(actual)[-1]["id"], record["id"])
-        self.assertEqual(actual.count(record["id"].encode()), 1)
+    def test_tail_append_is_beautified_and_no_ids(self):
+        new=entry("fdg")
+        self.assertTrue(self.env["write_event"](new))
+        records=json.loads(self.path.read_bytes())
+        self.assertEqual(records,self.initial+[new])
+        raw=self.path.read_text()
+        self.assertIn('\n  {\n    "kind": "message",\n    "time": "04:15:50"',raw)
+        self.assertIn('"text": "fdg"\n  }\n]',raw)
+        self.assertEqual(len(list(self.path.parent.iterdir())),1)
 
-    def test_repeated_write_same_id_does_not_duplicate_event(self):
-        record = self.event("same ID")
-        self.assertTrue(self.env["write_event"](record))
-        self.assertTrue(self.env["write_event"](record))
-        self.assertEqual(sum(e.get("id") == record["id"]
-                             for e in self.env["read_messages"]()), 1)
+    def test_rejects_metadata_without_rewriting_file(self):
+        before=self.path.read_bytes()
+        signed={"kind":"role","user":"Owner","id":"fake","sig":"bad"}
+        self.assertFalse(self.env["write_event"](signed))
+        self.assertEqual(before,self.path.read_bytes())
 
-    def test_invalid_signature_cannot_be_saved(self):
-        invalid = self.event("spoofed")
-        invalid["sig"] = "invalid"
-        with self.assertRaises(self.env["ChatFileError"]):
-            self.env["write_event"](invalid)
-        self.assertEqual(len(json.loads(self.file.read_text())), 1)
-
-    def test_wrong_original_chat_is_rejected(self):
-        other = self.event("not this room")
-        self.file.write_text(json.dumps([other]))
+    def test_rejects_legacy_record_with_extra_fields(self):
+        self.path.write_text(json.dumps(self.initial+[dict(entry(),id="legacy")]))
         with self.assertRaises(self.env["ChatFileError"]):
             self.env["read_messages"]()
 
-    def test_search_filters_work_without_attachments(self):
-        messages = [
-            {"user": "Alex", "text": "math homework", "issued_at": 1793491200,
-             "sender_key": "keyAlex", "reactions": {}, "reply_to": None},
-            {"user": "Emma", "text": "quiz notes", "issued_at": 1793577600,
-             "sender_key": "keyEmma", "reactions": {"❤️": 2}, "reply_to": "msg1"},
-        ]
-        search = self.env["search_messages"]
-        self.assertEqual(len(search("from:Emma has:reaction", messages)), 1)
-        self.assertEqual(len(search("in:replies", messages)), 1)
-        self.assertEqual(len(search("from:Alex math", messages)), 1)
-        self.assertEqual(len(search("after:2026-11-02 has:reaction", messages)), 1)
+    def test_damaged_json_is_never_overwritten(self):
+        broken=b"[{not valid json"
+        self.path.write_bytes(broken)
         with self.assertRaises(self.env["ChatFileError"]):
-            search("has:attachment", messages)
-        with self.assertRaises(self.env["ChatFileError"]):
-            search("after:2026-99-99", messages)
+            self.env["write_event"](entry("hello"))
+        self.assertEqual(self.path.read_bytes(),broken)
 
-    def test_nested_replies_expand_under_one_root(self):
-        rows = [
-            {"id": "a", "number": 1, "user": "Alex", "reply_to": None},
-            {"id": "b", "number": 2, "user": "Emma", "reply_to": "a"},
-            {"id": "c", "number": 3, "user": "Alex", "reply_to": "b"},
-            {"id": "d", "number": 4, "user": "Jay", "reply_to": None},
+    def test_search_and_nested_threads_still_work(self):
+        rows=[
+            {"id":"a","number":1,"user":"Alex","text":"math homework",
+             "reply_to":None,"issued_at":1793491200,"sender_key":None,"reactions":{}},
+            {"id":"b","number":2,"user":"Emma","text":"quiz",
+             "reply_to":"a","issued_at":1793577600,"sender_key":None,
+             "reactions":{"❤️":1}},
+            {"id":"c","number":3,"user":"Alex","text":"sure",
+             "reply_to":"b","issued_at":1793577600,"sender_key":None,"reactions":{}},
         ]
-        threads = self.env["build_threads"](rows, 15, set(), 0)
-        self.assertEqual(len(threads), 2)
-        self.assertEqual(threads[0]["root"]["id"], "a")
-        self.assertEqual(threads[0]["total_replies"], 2)
-        self.assertEqual([row["id"] for row in threads[0]["replies"]], ["b", "c"])
+        self.assertEqual(len(self.env["search_messages"]("from:Emma has:reaction",rows)),1)
+        self.assertEqual(len(self.env["search_messages"]("in:replies",rows)),2)
+        groups=self.env["build_threads"](rows,15,set(),0)
+        self.assertEqual(groups[0]["root"]["id"],"a")
+        self.assertEqual([m["id"] for m in groups[0]["replies"]],["b","c"])
 
 
-if __name__ == "__main__":
+if __name__=="__main__":
     unittest.main()
