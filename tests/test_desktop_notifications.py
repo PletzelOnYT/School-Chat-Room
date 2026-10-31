@@ -117,7 +117,7 @@ async function test(){
   }
   assert.strictEqual(notifications.length,1,'enable button sends one test banner');
   assert(notifications[0].options.body.includes('Test notification'));
-  assert(d.getElementById('status').textContent.includes('Enabled'));
+  assert(d.getElementById('status').textContent.includes('Test sent'));
   current.messages.push(msg('new',101,'Emma','new message here'));
   await tick();
   assert.strictEqual(notifications.length,2);
@@ -166,7 +166,7 @@ class DesktopNotificationTests(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("node"), "Node.js required")
     def test_browser_or_school_permission_denied(self):
-        res=subprocess.run(["node","-e",NODE,"--denied"],input=JAVASCRIPT,
+        res=subprocess.run(["node","-e",NODE,"--","--denied"],input=JAVASCRIPT,
                             text=True,capture_output=True,timeout=20)
         self.assertEqual(res.returncode,0,res.stdout+"\n"+res.stderr)
 
