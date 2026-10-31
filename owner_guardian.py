@@ -1,4 +1,4 @@
-# @title Messaging App — Owner Guardian (separate monitor)
+# @title Messaging App v5.33 — Owner Guardian v2.1
 """Owner-side Google Drive watchdog. Does not run inside messaging_app.py.
 
 - Approves only allowlisted, signed NEW events and stores a durable event ledger.
@@ -33,6 +33,7 @@ import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
+GUARDIAN_VERSION = "2.1"
 ANCHOR = "081cad07-8430-4c0e-8000-f3a4a379536a"
 MAX_FILE = 48 * 1024 * 1024
 MAX_EVENT = 16 * 1024
@@ -917,7 +918,7 @@ def main(argv=None):
     local_db=Path(local_temp.name)/"guardian.sqlite3"
     guardian=Guardian(shared,private,local_db,args.file_id,not args.audit_only)
     try:
-        print("OWNER GUARDIAN started; this process must remain running.",flush=True)
+        print("OWNER GUARDIAN v"+GUARDIAN_VERSION+" started; this process must remain running.",flush=True)
         print("Shared file:",shared,flush=True)
         print("PRIVATE backups:",private,flush=True)
         print("Mode:","AUDIT ONLY" if args.audit_only else "AUTO REPAIR",flush=True)
