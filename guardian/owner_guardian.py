@@ -100,7 +100,7 @@ def simple_title(event):
             and set(event) == {"kind", "time", "user", "title"}
             and event.get("kind") == "title"
             and isinstance(event.get("time"), str)
-            and re.fullmatch(r"\d{2}:\d{2}:\d{2}", event["time"]) is not None
+            and VALID_CLOCK.fullmatch(event["time"]) is not None
             and isinstance(event.get("user"), str)
             and 0 < len(event["user"]) <= 128
             and event.get("title") in ("Verified", "None"))
@@ -112,7 +112,7 @@ def simple_rename(event):
             set(event) == {"kind", "time", "user", "name"} and
             event.get("kind") == "rename" and
             isinstance(event.get("time"), str) and
-            re.fullmatch(r"\d{2}:\d{2}:\d{2}", event["time"]) is not None and
+            VALID_CLOCK.fullmatch(event["time"]) is not None and
             isinstance(event.get("user"), str) and
             0 < len(event["user"]) <= 128 and
             valid_name(event.get("name")))
@@ -301,6 +301,11 @@ def check_new_event(event, accepted, rate_log, now=None):
                            if 0<=stamp-ts<=60]
         if len(global_history)>=ROOM_RATE_60_SECONDS:
             return "room-wide message flood"
+        if sum(0<=stamp-ts<=10 for ts,_ in global_history)>=ROOM_RATE_10_SECONDS:
+            return "room-wide message burst"
+        if sum(normalized==body and 0<=stamp-ts<=20
+               for ts,body in global_history)>=CROSS_NAME_REPEAT_20_SECONDS:
+            return "cross-nickname duplicate flood"
         history.append((stamp,normalized))
         global_history.append((stamp,normalized))
         return None
@@ -317,7 +322,7 @@ def check_new_event(event, accepted, rate_log, now=None):
         if not any(previous["time"]==event["time"] and
                    previous["user"]==event["user"] for previous in matching):
             return "clock metadata disagrees with the linked message"
-        return None
+        return metadata_rate_limit(event,rate_log,now)
     if event.get("kind")=="clock":
         return "invalid or corrupted clock metadata"
     if simple_reaction(event):
@@ -328,17 +333,17 @@ def check_new_event(event, accepted, rate_log, now=None):
             if isinstance(e,dict))
         if event["target"] > number_of_messages:
             return "reaction target does not exist"
-        return None
+        return metadata_rate_limit(event,rate_log,now)
     if simple_rename(event):
         if not valid_name(event["user"]):
             return "invalid rename source"
-        return None
+        return metadata_rate_limit(event,rate_log,now)
     if simple_title(event):
         # Title records are self-claimed name metadata, not proof of Google ID.
         # The Guardian validates only schema, not the actual user identity.
         if not valid_name(event["user"]):
             return "invalid title display name"
-        return None
+        return metadata_rate_limit(event,rate_log,now)
     kind=event.get("kind")
     if kind not in FIELDS:
         return "unknown event kind"
@@ -363,7 +368,7 @@ def check_new_event(event, accepted, rate_log, now=None):
                               abs(nanos/1e9-stamp)>3):
         return "invalid nanosecond timestamp"
     if not isinstance(event.get("time"),str) or not re.fullmatch(
-            r"\d{2}:\d{2}:\d{2}",event["time"]):
+            VALID_CLOCK,event["time"]):
         return "invalid display timestamp"
     if not valid_name(event.get("user")):
         return "invalid display name"
@@ -379,16 +384,17 @@ def check_new_event(event, accepted, rate_log, now=None):
                                    parent not in accepted or
                                    accepted[parent].get("kind")!="message"):
             return "reply target does not exist"
+        observed=now
         history=rate_log.setdefault(sender,[])
-        history[:]=[(ts,body) for ts,body in history if stamp-ts<=60]
-        if sum(0<=stamp-ts<=10 for ts,_ in history)>=RATE_10_SECONDS:
+        history[:]=[(ts,body) for ts,body in history if 0<=observed-ts<=60]
+        if sum(0<=observed-ts<=10 for ts,_ in history)>=RATE_10_SECONDS:
             return "message rate exceeded (10s)"
-        if sum(0<=stamp-ts<=60 for ts,_ in history)>=RATE_60_SECONDS:
+        if sum(0<=observed-ts<=60 for ts,_ in history)>=RATE_60_SECONDS:
             return "message rate exceeded (60s)"
         body=" ".join(event["text"].casefold().split())
-        if sum(body==x and 0<=stamp-ts<=20 for ts,x in history)>=REPEAT_20_SECONDS:
+        if sum(body==x and 0<=observed-ts<=20 for ts,x in history)>=REPEAT_20_SECONDS:
             return "duplicate-message flood"
-        history.append((stamp,body))
+        history.append((observed,body))
     elif kind=="profile":
         if "renamed" in event:
             if event["renamed"] is not True:
@@ -426,7 +432,7 @@ def check_new_event(event, accepted, rate_log, now=None):
                 return "invalid unverify action"
         else:
             return "invalid role action"
-    return None
+    return metadata_rate_limit(event,rate_log,now)
 
 
 APPEND_RECORD_SEPARATOR = '\x1e'
