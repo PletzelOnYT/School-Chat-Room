@@ -1,4 +1,4 @@
-# @title Messaging App v5.28 — Google Drive Messenger
+# @title Messaging App v5.29 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -37,7 +37,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.28'
+CLIENT_VERSION = '5.29'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -1386,9 +1386,32 @@ def submit_message(raw):
 
         try:
             if command == '/vf':
-                # Explicit local self-claim. Drive mounting alone is never proof.
-                if not claim_self_verified():
-                    note('Could not save the checkmark to shared chat.json. Retry.')
+                # Unlisted. No argument claims the current displayed name;
+                # an explicit name grants that user's blue checkmark.
+                if not arg:
+                    if not claim_self_verified():
+                        note('Could not save the checkmark to shared chat.json. Retry.')
+                    return snapshot()
+                current = latest_analysis()
+                requested = arg.removeprefix('@').strip()
+                known = {m['user'].casefold(): m['user']
+                         for m in current['messages']}
+                for name in current['renamed_users'].values():
+                    known[name.casefold()] = name
+                target_name = known.get(requested.casefold())
+                if not target_name:
+                    note('User not found. Enter an exact display name.')
+                    return snapshot()
+                if target_name.casefold() in current['verified_names']:
+                    note(target_name + ' already has a blue checkmark.')
+                    return snapshot()
+                if write_event(title_event(target_name, True)):
+                    if target_name.casefold() in latest_analysis()['verified_names']:
+                        note('Blue checkmark added to ' + target_name + '.')
+                    else:
+                        note('Drive did not confirm the title change yet.')
+                else:
+                    note('Could not save the title change. Retry.')
                 return snapshot()
             if command == '/uvf':
                 # Unlisted. Four-field messages cannot authenticate a person:
