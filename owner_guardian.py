@@ -97,10 +97,27 @@ def simple_rename(event):
             valid_name(event.get("name")))
 
 
+def simple_reaction(event):
+    """Name-based emoji reaction referencing a previous message number."""
+    emoji = event.get("emoji") if isinstance(event,dict) else None
+    return (isinstance(event,dict)
+            and set(event)=={"kind","time","user","target","emoji","active"}
+            and event.get("kind")=="reaction"
+            and isinstance(event.get("time"),str)
+            and re.fullmatch(r"\d{2}:\d{2}:\d{2}",event["time"]) is not None
+            and isinstance(event.get("user"),str)
+            and 0<len(event["user"])<=128
+            and type(event.get("target")) is int
+            and 1<=event["target"]<=10000000
+            and isinstance(emoji,str) and 1<=len(emoji)<=8
+            and any(ord(ch)>=0x2600 for ch in emoji)
+            and type(event.get("active")) is bool)
+
+
 def event_id(event, position=None):
     """Storage index for private ledger, not written to public chat.json."""
     if (simple_message(event) or simple_title(event) or
-            simple_rename(event)) and position is not None:
+            simple_rename(event) or simple_reaction(event)) and position is not None:
         raw=canonical_event(event).encode("utf-8")
         return "plain-%d-%s" % (position,hashlib.sha256(raw).hexdigest()[:16])
     return event.get("id") if isinstance(event,dict) else None
@@ -202,6 +219,15 @@ def check_new_event(event, accepted, rate_log, now=None):
                for ts,body in history)>=4:
             return "duplicate-message flood"
         history.append((stamp,normalized))
+        return None
+    if simple_reaction(event):
+        if not valid_name(event["user"]):
+            return "invalid reaction actor"
+        number_of_messages = sum(
+            e.get("kind")=="message" for e in accepted.values()
+            if isinstance(e,dict))
+        if event["target"] > number_of_messages:
+            return "reaction target does not exist"
         return None
     if simple_rename(event):
         if not valid_name(event["user"]):
@@ -320,7 +346,7 @@ def read_shared(path):
         raise ValueError("chat.json must be a JSON array")
     legacy_anchor=any(isinstance(x,dict) and x.get("id")==ANCHOR for x in entries)
     simplified=all(simple_message(x) or simple_title(x) or
-                   simple_rename(x) for x in entries)
+                   simple_rename(x) or simple_reaction(x) for x in entries)
     if not legacy_anchor and not simplified:
         raise ValueError("file is neither original history nor simplified four-field chat")
     return raw,entries
@@ -546,7 +572,7 @@ class Guardian:
         # checkpoints. Never undo it automatically and restore old metadata.
         migrated=(bool(live) and all(
                     simple_message(e) or simple_title(e) or
-                    simple_rename(e) for e in live))
+                    simple_rename(e) or simple_reaction(e) for e in live))
         old_baseline=any(e.get("id")==ANCHOR for e in known)
         if migrated and old_baseline:
             self.log("FORMAT MIGRATION detected. Old guardian checkpoint "
