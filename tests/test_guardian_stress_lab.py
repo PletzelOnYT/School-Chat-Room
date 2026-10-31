@@ -278,6 +278,25 @@ class GuardianStressLabTests(unittest.TestCase):
                 attached.close()
             self.assertFalse(private_dir.exists())
 
+    def test_live_mod_menu_renders_rainbow_badges_locally(self):
+        with tempfile.TemporaryDirectory() as directory:
+            actual = Path(directory) / "chat.json"
+            original = lab_module.seed_fixture(guardian)
+            actual.write_bytes(original)
+            attached = lab_module.LiveChatOverlay(guardian, actual)
+            try:
+                attached.add_hack("rainbow")
+                attached.add_hack("owner_badge")
+                attached.add_hack("highlight")
+                markup = lab_module.render_chat_preview(
+                    attached.preview(), "Modded view", "ATTACK")
+                self.assertIn("linear-gradient", markup)
+                self.assertIn("OWNER (LOCAL)", markup)
+                self.assertIn("background:#28334f", markup)
+                self.assertEqual(actual.read_bytes(), original)
+            finally:
+                attached.close()
+
     def test_live_overlay_revert_preserves_concurrent_new_chat_messages(self):
         with tempfile.TemporaryDirectory() as directory:
             actual = Path(directory) / "chat.json"
