@@ -363,7 +363,7 @@ def is_clock_event(event):
     return (isinstance(event, dict) and set(event) == CLOCK_FIELDS
             and event.get('kind') == 'clock'
             and isinstance(event.get('time'), str)
-            and re.fullmatch(r'(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d',
+            and re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d',
                              event['time']) is not None
             and isinstance(event.get('user'), str)
             and 0 < len(event['user']) <= 128
