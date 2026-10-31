@@ -1,4 +1,4 @@
-# @title Messaging App — Owner Guardian v2.5
+# @title Messaging App — Owner Guardian v2.6
 """Owner-side Google Drive watchdog. Does not run inside messaging_app.py.
 
 - Approves only allowlisted, signed NEW events and stores a durable event ledger.
@@ -33,7 +33,7 @@ import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-GUARDIAN_VERSION = "2.5"
+GUARDIAN_VERSION = "2.6"
 # Exact existing shared file; Guardian never copies the message archive.
 SHARED_CHAT_FILE_ID = '1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd'
 SHARED_CHAT_FILE_LINK = (
@@ -915,13 +915,14 @@ def guardian_authorize_owner_colab(authorize=None):
 
 def guardian_user_drive_session(get_default=None, login=None,
                                 make_request=None, make_session=None,
-                                is_machine=None):
-    """Create an authorized USER Drive session, never a GCE machine session.
+                                is_machine=None, colab_adc_loader=None,
+                                ephemeral_mode=None):
+    """Use Google's owner-authorized Colab credentials, not a VM service account.
 
-    Drive mounting and REST API OAuth are separate in Colab. Fresh notebooks
-    can return Compute Engine ADC that fails on metadata.google.internal:404.
-    Ask the owner for Colab's supported interactive consent only if needed.
-    An injected dependency is for deterministic tests, not credential bypass.
+    Colab supports both file-based user ADC and temporary user authentication
+    routed through the metadata credential class (USE_AUTH_EPHEM=1). Rejecting
+    every Compute Engine credential after successful consent caused a loop.
+    Never print, copy to Drive, or disclose the user's access/refresh tokens.
     """
     if get_default is None:
         import google.auth
@@ -936,38 +937,73 @@ def guardian_user_drive_session(get_default=None, login=None,
         from google.auth.compute_engine.credentials import Credentials as GceCredentials
         from google.oauth2.service_account import Credentials as ServiceCredentials
         is_machine=lambda cred: isinstance(cred,(GceCredentials,ServiceCredentials))
+    if ephemeral_mode is None:
+        ephemeral_mode=(os.environ.get("USE_AUTH_EPHEM")=="1")
 
-    def load_user_credentials():
-        credentials, _ = get_default()
-        if is_machine(credentials):
-            raise RuntimeError("default credentials are not a Google user account")
+    def validated(credentials):
+        # In Colab's ephemeral-user mode, *authorized user* tokens may be
+        # represented by the Compute Engine credentials class. A refresh must
+        # actually succeed. Ordinary VM and service-account ADC remain barred.
+        is_ephemeral_gce=(ephemeral_mode and
+            type(credentials).__module__.startswith("google.auth.compute_engine"))
+        if is_machine(credentials) and not is_ephemeral_gce:
+            raise RuntimeError("default credentials are not authorized user credentials")
         if not credentials.valid:
             credentials.refresh(make_request())
+        if not credentials.valid:
+            raise RuntimeError("Google user credentials are not valid")
         return credentials
 
+    def colab_file_credentials():
+        # A standard Colab user login writes /content/.adc/adc.json. If
+        # google.auth.default() still points at GCE, explicitly select this
+        # Colab-managed file, not an arbitrary service-account JSON.
+        adc=Path(os.environ.get("DATALAB_ROOT","/"))/"content/.adc/adc.json"
+        if not adc.is_file():
+            raise RuntimeError("Colab user ADC file is unavailable")
+        if colab_adc_loader is None:
+            import google.auth
+            credentials,_=google.auth.load_credentials_from_file(str(adc))
+        else:
+            credentials=colab_adc_loader(str(adc))
+        if is_machine(credentials):
+            raise RuntimeError("Colab ADC file contains machine credentials")
+        return validated(credentials)
+
+    def existing_user_credentials():
+        errors=[]
+        try:
+            credentials,_=get_default()
+            return validated(credentials)
+        except Exception as exc:
+            errors.append(type(exc).__name__)
+        try:
+            return colab_file_credentials()
+        except Exception as exc:
+            errors.append(type(exc).__name__)
+        raise RuntimeError("no usable Colab user credentials ("+
+                           ",".join(errors)+")")
+
     try:
-        credentials=load_user_credentials()
+        credentials=existing_user_credentials()
     except Exception:
-        # Only the owner running this notebook can approve a Google OAuth
-        # prompt. We never inspect private Colab tokens or work around a
-        # Google Workspace administrator's restriction.
-        print("Owner Guardian: Drive is mounted, but creating a shortcut "
-              "requires Google Drive API user authorization. "
-              "Approve Google's sign-in prompt if one appears.",flush=True)
+        print("Owner Guardian: the default Google credentials cannot be used "
+              "for this shared Drive file. Requesting Colab user "
+              "authorization if needed.",flush=True)
         try:
             if login is None:
                 from google.colab import auth
                 auth.authenticate_user(clear_output=False)
             else:
                 login()
-            credentials=load_user_credentials()
+            credentials=existing_user_credentials()
         except Exception as exc:
             raise RuntimeError(
-                "Google Drive API user authorization was unavailable or "
-                "denied ("+type(exc).__name__+"). "
-                "Use Organize > Add shortcut on the original shared chat.json "
-                "with this same Google account; then rerun Guardian. "
-                "School account permissions cannot be bypassed."
+                "Colab did not provide usable Google user credentials ("+
+                type(exc).__name__+"). Open the original shared chat.json in "
+                "Google Drive using this account and choose "
+                "Organize > Add shortcut to My Drive. Google Workspace "
+                "restrictions cannot be bypassed."
             ) from exc
     return make_session(credentials)
 
