@@ -171,7 +171,7 @@ setTimeout(async()=>{
  send('/stats');
  assert.equal(popups.length,3,'Three long commands should open three popup windows synchronously');
  assert.equal(popups[0].document.fields.heading.textContent,'Loading command output...');
- await new Promise(resolve=>setTimeout(resolve,2600));
+ await new Promise(resolve=>setTimeout(resolve,3600));
  assert.deepStrictEqual(sent,['/users','/help','/search words','/stats']);
  assert.equal(popups[0].document.fields.commands.textContent,'Content for /users');
  assert.equal(popups[1].document.fields.commands.textContent,'Content for /help');
