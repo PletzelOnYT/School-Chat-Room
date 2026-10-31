@@ -87,6 +87,58 @@ class FourFieldDriveTests(unittest.TestCase):
         self.assertIn('"text": "fdg"\n}',raw)
         self.assertEqual(len(list(self.path.parent.glob("chat.json"))),1)
 
+    def test_append_never_changes_existing_bytes(self):
+        baseline=self.path.read_bytes()
+        self.assertTrue(self.env["write_event"](entry("message one")))
+        first=self.path.read_bytes()
+        self.assertTrue(first.startswith(baseline))
+        self.assertTrue(self.env["write_event"](entry("message two","Emma","04:16:00")))
+        second=self.path.read_bytes()
+        self.assertTrue(second.startswith(first))
+        self.assertEqual([x["text"] for x in self.env["read_messages"]()][-2:],
+                         ["message one","message two"])
+
+    def test_concurrent_clients_append_without_replacing_history(self):
+        from concurrent.futures import ThreadPoolExecutor
+        old=self.path.read_bytes()
+
+        def send(index):
+            # Different Colab sessions have separate Python locks/outboxes.
+            env=storage_env(self.path)
+            env["PRIVATE_FOLDER"]=str(self.path.parent/("client-"+str(index)))
+            env["PRIVATE_OUTBOX_PATH"]=str(
+                self.path.parent/("client-"+str(index))/"receipts.json")
+            return env["write_event"](entry("unique concurrent "+str(index),
+                                            "User"+str(index), "04:20:00"))
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            submitted=list(pool.map(send,range(12)))
+        self.assertTrue(all(submitted))
+        self.assertTrue(self.path.read_bytes().startswith(old))
+        found=[x["text"] for x in self.env["read_messages"]()]
+        for i in range(12):
+            self.assertEqual(found.count("unique concurrent "+str(i)),1)
+
+    def test_private_receipt_can_reappend_lost_entry(self):
+        record=entry("this event was lost")
+        self.assertTrue(self.env["write_event"](record))
+        receipt=self.env["load_outbox"]()
+        self.assertEqual(len(receipt),1)
+        # Simulate a stale Drive writer erasing the just-appended bytes.
+        original=json.dumps(self.initial,indent=2,ensure_ascii=False)+"\n"
+        self.path.write_text(original)
+        self.env["reconcile_outbox"]()
+        self.assertIn(record,self.env["read_messages"]())
+        self.assertTrue(self.path.read_text().startswith(original))
+
+    def test_reject_incomplete_append_without_overwriting(self):
+        original=self.path.read_bytes()
+        self.path.write_bytes(original+b"\n\x1e{")
+        broken=self.path.read_bytes()
+        with self.assertRaises(self.env["ChatFileError"]):
+            self.env["write_event"](entry("unsafe"))
+        self.assertEqual(self.path.read_bytes(),broken)
+
     def test_rejects_metadata_without_rewriting_file(self):
         before=self.path.read_bytes()
         signed={"kind":"role","user":"Owner","id":"fake","sig":"bad"}
