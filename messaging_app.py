@@ -323,7 +323,7 @@ def read_messages():
     with file_lock:
         for attempt in range(4):
             try:
-                with open(CHAT_FILE_PATH, encoding='utf-8') as fh:
+                with open(CHAT_FILE_PATH, encoding='utf-8-sig') as fh:
                     events = json.load(fh)
                 break
             except (OSError, ValueError) as exc:
