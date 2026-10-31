@@ -1,12 +1,15 @@
-# @title Messaging App v5.29 — Google Drive Messenger
+# @title Messaging App v5.30 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
 original shared JSON file. No separate shared folder or attachment features.
 There is one self-claimed blue Verified title and no privileged roles.
 
-Shared JSON is NOT a transactional database: concurrent saves may overwrite
-another client's changes. The checkmark does not prove Google ownership.
+A standard JSON array cannot support append-only writes. New events are
+framed after the original array as append-only records in the same chat.json.
+The Google Drive mount still cannot guarantee cross-client atomic appends.
+Private sender receipts support best-effort recovery after write races.
+The checkmark does not prove Google ownership.
 """
 import base64
 import hashlib
@@ -37,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.29'
+CLIENT_VERSION = '5.30'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -364,184 +367,149 @@ def display_only_message_id(event,position):
     return 'plain-%d-%s' % (position,hashlib.sha256(raw).hexdigest()[:16])
 
 
-def write_plain_message(event):
-    """Append four-field chat messages and title events without rewriting history."""
-    if not is_simple_record(event):
-        raise ChatFileError('Only four-field messages and title records are allowed.')
-    with file_lock:
-        prior=sum(e==event for e in read_messages())
-        for attempt in range(4):
-            if attempt:
-                time.sleep(0.12*attempt)
-            try:
-                append_event_in_place(event)
-                time.sleep(0.15)
-                if sum(e==event for e in read_messages())>prior:
-                    return True
-            except OSError as exc:
-                if attempt==3:
-                    raise ChatFileError('Drive append failed: '+str(exc)) from exc
-            except ChatFileError:
-                raise
-        return False
-
-
 def read_messages():
-    """Read only the simplified, prettified Google Drive chat.json."""
+    """Read both the original pretty JSON array and later append-only records."""
     with file_lock:
-        for attempt in range(4):
+        for attempt in range(5):
             try:
-                with open(CHAT_FILE_PATH, encoding='utf-8-sig') as fh:
-                    events = json.load(fh)
-                break
-            except (OSError, ValueError) as exc:
-                if attempt == 3:
-                    raise ChatFileError('Cannot read chat.json: '+str(exc)) from exc
-                time.sleep(0.1*(attempt+1))
-        if not isinstance(events, list):
-            raise ChatFileError('chat.json must be a JSON array.')
-        if any(not is_simple_record(e) for e in events):
-            raise ChatFileError('chat.json contains unsupported records. '
-                                'Only four-field messages and title records are allowed.')
-        return events
+                with open(CHAT_FILE_PATH, 'rb') as fh:
+                    events = parse_chat_log(fh.read())
+                if any(not is_simple_record(e) for e in events):
+                    raise ChatFileError('Unsupported record in shared chat log.')
+                return events
+            except (OSError, ChatFileError) as exc:
+                if attempt == 4:
+                    raise ChatFileError('Cannot read shared chat: ' + str(exc)) from exc
+                time.sleep(0.12 * (attempt + 1))
 
 
 read_messages()  # Verify the correct shared history before showing the chat.
 
 
 def append_event_in_place(event):
-    """Append a fully indented object to the existing pretty JSON array.
+    """Append a complete framed record at EOF, without editing existing bytes.
 
-    Only the final tail changes; concurrent Drive edits are still NOT atomic.
+    Uses O_APPEND for process-local append positioning. Google Drive FUSE does
+    NOT guarantee atomicity across different clients, so receipts/replay remain
+    necessary. The history prefix and all previous records stay unchanged.
     """
     if not is_simple_record(event):
-        raise ChatFileError('Only four-field messages and title records are supported.')
-    body = json.dumps(event, indent=2, ensure_ascii=False).replace('\n', '\n  ')
-    rendered = ('  '+body).encode('utf-8')
-    with open(CHAT_FILE_PATH, 'r+b') as fh:
-        fh.seek(0, os.SEEK_END)
-        size=fh.tell()
-        scan=min(size,8192)
-        fh.seek(size-scan)
-        tail=fh.read(scan)
-        close=len(tail.rstrip())-1
-        if close < 0 or tail[close:close+1] != b']':
-            raise ChatFileError('chat.json is not a closed JSON array.')
-        before=tail[:close].rstrip()
-        if not before or before[-1:] not in (b'}', b'['):
-            raise ChatFileError('chat.json has an invalid closing element.')
-        empty=before[-1:] == b'['
-        trailer=tail[close+1:]
-        fh.seek(size-scan+len(before))
-        fh.write((b'' if empty else b',')+b'\n'+rendered+b'\n]'+trailer)
-        fh.truncate()
-        fh.flush()
-
+        raise ChatFileError('Only approved message, title, rename or reaction records are allowed.')
+    pretty = json.dumps(event, indent=2, ensure_ascii=False).encode('utf-8')
+    frame = b'\n\x1e' + pretty + b'\n'
+    with open(CHAT_FILE_PATH, 'ab', buffering=0) as fh:
+        count = fh.write(frame)
+        if count != len(frame):
+            raise ChatFileError('Drive accepted only part of the appended record.')
 
 
 def load_outbox():
-    """Only this person's private Drive contains their recovery receipts."""
+    """Durable per-sender receipts for unsigned four-field chat records."""
     try:
         with open(PRIVATE_OUTBOX_PATH, encoding='utf-8') as fh:
-            records = json.load(fh)
-        if isinstance(records, list):
-            return [e for e in records if isinstance(e, dict) and
-                    valid_signature(e) and e.get('sender_key') == identity_public][-50:]
-    except (OSError, ValueError):
+            entries = json.load(fh)
+        if isinstance(entries, list):
+            return [item for item in entries
+                    if isinstance(item, dict) and
+                    is_simple_record(item.get('record')) and
+                    type(item.get('required')) is int and
+                    item['required'] > 0 and
+                    isinstance(item.get('created'), (int, float))][-120:]
+    except (OSError, ValueError, TypeError):
         pass
     return []
 
 
-def save_outbox(events):
+def save_outbox(receipts):
+    """Store records in the sender's PRIVATE My Drive, not a shared folder."""
     try:
         os.makedirs(PRIVATE_FOLDER, exist_ok=True)
         with open(PRIVATE_OUTBOX_PATH, 'w', encoding='utf-8') as fh:
-            json.dump(events[-50:], fh, ensure_ascii=False, separators=(',', ':'))
+            json.dump(receipts[-120:], fh, ensure_ascii=False, indent=2)
             fh.flush()
     except OSError as exc:
-        raise ChatFileError('Cannot save your private retry outbox: ' + str(exc)) from exc
+        raise ChatFileError('Could not save a private delivery receipt: ' + str(exc)) from exc
 
 
-def remember_outgoing(event):
-    with file_lock:
-        events = load_outbox()
-        if not any(e.get('id') == event.get('id') for e in events):
-            events.append(event)
-            save_outbox(events)
+def remember_outgoing(event, current):
+    """Persist receipt BEFORE attempting the append.
 
-
-def write_event(event, remember=True):
-    """Small tail append + verify, with durable retry receipt per sender.
-
-    A sender's event ID is stable across retries. A corrupted or unreadable
-    shared file is NEVER overwritten; ask its owner to restore a Drive version.
+    The occurrence counter distinguishes intentionally repeated identical
+    messages when possible. Two users could still send identical records in
+    the same second; without stored IDs this is not fully distinguishable.
     """
-    if is_simple_record(event):
-        return write_plain_message(event)
-    # Do not allow hidden role/reaction/profile metadata to pollute the
-    # intentionally simplified public chat.json.
-    return False
-    if not valid_signature(event):
-        raise ChatFileError('Cannot save unsigned internal metadata.')
-    if remember:
-        remember_outgoing(event)
+    receipts = load_outbox()
+    prior = sum(e == event for e in current)
+    for item in receipts:
+        if item['record'] == event:
+            prior = max(prior, item['required'])
+    receipt = {
+        'local_id': uuid.uuid4().hex,
+        'record': event,
+        'required': prior + 1,
+        'created': time.time(),
+    }
+    receipts.append(receipt)
+    save_outbox(receipts)
+    return receipt
+
+
+def write_plain_message(event):
+    """Append and verify an event; keep receipt for eventual reconciliation."""
+    if not is_simple_record(event):
+        raise ChatFileError('Invalid simplified chat event.')
     with file_lock:
-        for attempt in range(7):
-            existing = read_messages()
-            if any(isinstance(e, dict) and e.get('id') == event.get('id')
-                   for e in existing):
-                return True
-            # Spread concurrent clients' writes to reduce collisions.
+        current = read_messages()
+        receipt = remember_outgoing(event, current)
+        for attempt in range(5):
             if attempt:
-                time.sleep(0.07 * attempt + (int(uuid.uuid4().hex[:4], 16) % 80)/1000)
-                existing = read_messages()
-                if any(isinstance(e, dict) and e.get('id') == event.get('id')
-                       for e in existing):
-                    return True
+                time.sleep(0.18 * attempt)
+            # Do not rewrite any part of shared history.
+            append_event_in_place(event)
+            time.sleep(0.20 + 0.06 * attempt)
             try:
-                append_event_in_place(event)
-            except OSError as exc:
-                if attempt == 6:
-                    raise ChatFileError('Google Drive tail append failed: ' + str(exc)) from exc
-                continue
-            time.sleep(0.16 + attempt * 0.06)
-            try:
-                if any(e.get('id') == event.get('id') for e in read_messages()
-                       if isinstance(e, dict)):
+                if sum(e == event for e in read_messages()) >= receipt['required']:
                     return True
             except ChatFileError:
-                # A concurrent, incomplete write may be syncing. Retry
-                # parsing, but do not rewrite the damaged contents.
-                if attempt == 6:
+                if attempt == 4:
                     raise
         return False
 
 
-def reconcile_outbox():
-    """Restore one recently lost signed event per refresh interval.
+def write_event(event, remember=True):
+    """Only supported four-field messages and other simple metadata."""
+    if not is_simple_record(event):
+        return False
+    return write_plain_message(event)
 
-    Never auto-rewrite damaged JSON. This reduces message loss after a
-    completed Google Drive write is later overwritten by another client.
+
+def reconcile_outbox():
+    """Reappend one recently lost event per poll; never rewrite shared bytes.
+
+    If a Drive collision overwrites an earlier append, its sender can restore
+    the event while their chat is running (or the next time they launch).
     """
     global last_outbox_check
     now = time.monotonic()
-    if now - last_outbox_check < 7.0:
+    if now - last_outbox_check < 5.0:
         return
     last_outbox_check = now
-    records = load_outbox()
-    if not records:
+    receipts = load_outbox()
+    if not receipts:
         return
-    present = {e.get('id') for e in read_messages() if isinstance(e, dict)}
-    for event in records:
-        stamp = event.get('issued_at')
-        if type(stamp) is not int or abs(time.time() - stamp) > 86400:
-            continue
-        if event.get('id') not in present:
-            try:
-                write_event(event, remember=False)
-            except ChatFileError:
-                pass
-            break
+    # Acknowledge only the most recent 24 hours of sender receipts. Older
+    # entries are pruned, avoiding endless replay of stale metadata events.
+    cutoff = time.time() - 24 * 3600
+    recent = [r for r in receipts if r['created'] >= cutoff]
+    if len(recent) != len(receipts):
+        save_outbox(recent)
+    if not recent:
+        return
+    current = read_messages()
+    for receipt in recent:
+        if sum(e == receipt['record'] for e in current) < receipt['required']:
+            append_event_in_place(receipt['record'])
+            return
 
 
 def event_now(kind, **fields):
