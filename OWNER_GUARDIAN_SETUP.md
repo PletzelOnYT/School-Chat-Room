@@ -1,4 +1,4 @@
-# Messaging App — Owner Guardian v2.2
+# Messaging App — Owner Guardian v2.3
 
 The owner runs a **separate Python program** (`owner_guardian.py`) in their own Google Colab notebook. The chat itself, including the original terminal UI and `chat.json`, remains unchanged. No Vercel, Redis, or additional shared folder is required.
 
@@ -27,6 +27,13 @@ because the app switched to append-only writes.
 - If messages disappear, are modified, or are reordered, repairs the existing shared file using the approved history.
 - If the file is empty, corrupted, or truncated, attempts to restore the approved history **in place**.
 - If the original Drive object is in Trash, it optionally attempts to **untrash the original file ID** using a Google token already available in the session.
+
+## Owner Guardian v2.3: Google Colab startup fix
+
+The launcher now prevents Jupyter's `-f ...kernel.json` argument from
+reaching Guardian's command-line parser. To use the fix, rerun the same
+one-cell launcher shown below. **Do not add `--reset-baseline`** for this fix.
+Existing private backups and `chat.json` are preserved.
 
 ## Automatic setup in the owner's Google Colab
 
