@@ -1,4 +1,4 @@
-# @title Messaging App v5.25 — Google Drive Messenger
+# @title Messaging App v5.26 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -37,7 +37,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.25'
+CLIENT_VERSION = '5.26'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -267,6 +267,9 @@ def valid_signature(event):
 
 
 PLAIN_MESSAGE_FIELDS = frozenset(('kind','time','user','text'))
+TITLE_FIELDS = frozenset(('kind','time','user','title'))
+TITLE_VERIFIED = 'Verified'
+TITLE_NONE = 'None'
 REPLY_TEXT_RE = re.compile(r'^↳ \[reply:#(\d+)\] (.+)$', re.DOTALL)
 
 
@@ -283,6 +286,28 @@ def is_plain_message(event):
             and len(event['text']) <= 5000)
 
 
+def is_title_event(event):
+    """A name-based, self-claimed Verified or None title change."""
+    return (isinstance(event, dict) and set(event) == TITLE_FIELDS
+            and event.get('kind') == 'title'
+            and isinstance(event.get('time'), str)
+            and re.fullmatch(r'\d{2}:\d{2}:\d{2}', event['time']) is not None
+            and isinstance(event.get('user'), str)
+            and 0 < len(event['user']) <= 128
+            and event.get('title') in (TITLE_VERIFIED, TITLE_NONE))
+
+
+def title_event(target, enabled):
+    return {'kind': 'title',
+            'time': time.strftime('%H:%M:%S', time.localtime()),
+            'user': target,
+            'title': TITLE_VERIFIED if enabled else TITLE_NONE}
+
+
+def is_simple_record(event):
+    return is_plain_message(event) or is_title_event(event)
+
+
 def plain_message(text):
     return {'kind':'message',
             'time':time.strftime('%H:%M:%S',time.localtime()),
@@ -297,9 +322,9 @@ def display_only_message_id(event,position):
 
 
 def write_plain_message(event):
-    """Append only a four-field entry to the JSON array's existing tail."""
-    if not is_plain_message(event):
-        raise ChatFileError('Plain message must contain exactly four valid fields.')
+    """Append four-field chat messages and title events without rewriting history."""
+    if not is_simple_record(event):
+        raise ChatFileError('Only four-field messages and title records are allowed.')
     with file_lock:
         prior=sum(e==event for e in read_messages())
         for attempt in range(4):
@@ -332,9 +357,9 @@ def read_messages():
                 time.sleep(0.1*(attempt+1))
         if not isinstance(events, list):
             raise ChatFileError('chat.json must be a JSON array.')
-        if any(not is_plain_message(e) for e in events):
-            raise ChatFileError('chat.json contains old or invalid records. '
-                                'Run the owner four-field migration and restart clients.')
+        if any(not is_simple_record(e) for e in events):
+            raise ChatFileError('chat.json contains unsupported records. '
+                                'Only four-field messages and title records are allowed.')
         return events
 
 
@@ -346,8 +371,8 @@ def append_event_in_place(event):
 
     Only the final tail changes; concurrent Drive edits are still NOT atomic.
     """
-    if not is_plain_message(event):
-        raise ChatFileError('Only four-field message records are supported.')
+    if not is_simple_record(event):
+        raise ChatFileError('Only four-field messages and title records are supported.')
     body = json.dumps(event, indent=2, ensure_ascii=False).replace('\n', '\n  ')
     rendered = ('  '+body).encode('utf-8')
     with open(CHAT_FILE_PATH, 'r+b') as fh:
@@ -408,7 +433,7 @@ def write_event(event, remember=True):
     A sender's event ID is stable across retries. A corrupted or unreadable
     shared file is NEVER overwritten; ask its owner to restore a Drive version.
     """
-    if is_plain_message(event):
+    if is_simple_record(event):
         return write_plain_message(event)
     # Do not allow hidden role/reaction/profile metadata to pollute the
     # intentionally simplified public chat.json.
