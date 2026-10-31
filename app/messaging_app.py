@@ -2227,11 +2227,75 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     return button;
   }
 
+  // Replies are already linked by the existing server's reply_to IDs.
+  // Resolve them from the current snapshot without altering chat.json.
+  function appMessageMap(state) {
+    const map=new Map();
+    for(const group of state?.threads||[]) {
+      if(group.root?.id)map.set(group.root.id,group.root);
+      for(const reply of group.replies||[])
+        if(reply.id)map.set(reply.id,reply);
+    }
+    for(const message of state?.messages||[])
+      if(message.id)map.set(message.id,message);
+    return map;
+  }
+
+  function appReplyPreview(doc,parent,number,onOpen) {
+    const control=doc.createElement('button');
+    control.type='button';
+    control.className='reply-reference'+(parent?'':' is-missing');
+    control.title=parent?'Jump to original message':'Original message not in visible history';
+    const author=doc.createElement('span');
+    author.className='reply-preview-author';
+    author.textContent=parent?String(parent.user||'Unknown'):'Original message';
+    if(parent) {
+      const mini=appAvatar(doc,parent.user,'reply-mini-avatar');
+      control.appendChild(mini);
+    }
+    control.appendChild(author);
+    const excerpt=doc.createElement('span');
+    excerpt.className='reply-preview-text';
+    excerpt.textContent=parent?
+      String(parent.text||'').replace(/\s+/g,' ').trim():
+      (Number.isSafeInteger(number)?'Message #'+number+' is unavailable':'Message unavailable');
+    control.appendChild(excerpt);
+    if(parent && onOpen)control.addEventListener('click',onOpen);
+    else control.disabled=true;
+    return control;
+  }
+
+  function appJumpToMessage(id) {
+    if(!appElements || !latestState)return;
+    const el=appElements;
+    // If filters hide the parent, restore the normal timeline first.
+    if(appSearchTerm || appPingOnly) {
+      appSearchTerm='';appPingOnly=false;
+      el.search.value='';appUpdatePingBadge();
+      renderApp(latestState,true);
+    }
+    const children=Array.from(el.transcript.children||el.transcript.nodes||[]);
+    const target=children.find(element=>element._appMessageId===id);
+    if(target) {
+      try{target.scrollIntoView?.({behavior:'smooth',block:'center'});}catch(error){/* optional */}
+      target.className=String(target.className||'').replace(/\s*reply-focus/g,'')+' reply-focus';
+      setTimeout(()=>{
+        target.className=String(target.className||'').replace(/\s*reply-focus/g,'');
+      },1400);
+    }else {
+      // A parent can be outside the recent-message window. Show its thread
+      // without fabricating older history or extra stored messages.
+      appOpenThread(id);
+    }
+  }
+
   function showAppReply() {
     if(!appElements) return;
     appElements.replyBar.style.display=appReplyTarget ? 'flex' : 'none';
     appElements.replyName.textContent=appReplyTarget ?
-      '↳ Replying to ' + appReplyTarget.user : '';
+      'Replying to ' + appReplyTarget.user : '';
+    appElements.replyDetail.textContent=appReplyTarget ?
+      String(appReplyTarget.text||'').replace(/\s+/g,' ').trim() : '';
     appElements.input.placeholder=appReplyTarget ?
       'Reply to ' + appReplyTarget.user : 'Message #general';
   }
@@ -2402,6 +2466,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       const el=appElements;
       const view=el.messages;
       const rows=appTimeline(state);
+      const replyMap=appMessageMap(state);
       const signature=JSON.stringify([state.username,state.my_verified,state.running,
         state.messages,state.threads,appSearchTerm,appPickerMessageId,appPingOnly,appThreadRootId]);
       el.profileName.textContent=String(state.username || 'Guest');
@@ -2480,11 +2545,13 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         const pinged=!msg.private && appHasMention(body,state.username);
         message.className='message'+(msg.private?' private':'')+
           (pinged?' pinged':'')+(freshlyArrived.has(msg.id)?' fresh':'');
-        if(depth) {
-          const context=doc.createElement('div');
-          context.className='reply-context';
-          context.textContent='↳ Thread reply';
-          message.appendChild(context);
+        message._appMessageId=msg.id;
+        message._appMessageNumber=msg.number;
+        if(msg.reply_to) {
+          const parent=replyMap.get(msg.reply_to)||null;
+          message.className+=' has-reply';
+          message.appendChild(appReplyPreview(doc,parent,
+            parent?.number,()=>appJumpToMessage(msg.reply_to)));
         }
         message.appendChild(appAvatar(doc,author));
         const heading=doc.createElement('div');
@@ -2497,7 +2564,10 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         heading.appendChild(user);
         if(msg.verified && !msg.private){
           const badge=doc.createElement('span');
-          badge.className='verified';badge.textContent='☑ Verified';
+          badge.className='verified';
+          badge.textContent='✓';
+          badge.title='Verified badge';
+          badge.setAttribute('aria-label','Verified badge');
           heading.appendChild(badge);
         }
         const clock=doc.createElement('span');
@@ -2541,7 +2611,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
           const tools=doc.createElement('div');
           tools.className='msg-tools';
           tools.appendChild(appButton(doc,'↳ Reply',() => {
-            appReplyTarget={number:msg.number,user:author};
+            appReplyTarget={number:msg.number,user:author,text:body,id:msg.id};
             showAppReply();el.input.focus();
           }));
           tools.appendChild(appButton(doc,'▤ Thread',()=>appOpenThread(msg.id)));
@@ -2622,6 +2692,7 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
         search:doc.getElementById('app-search'),
         replyBar:doc.getElementById('app-replybar'),
         replyName:doc.getElementById('app-replyname'),
+        replyDetail:doc.getElementById('app-replydetail'),
         pings:doc.getElementById('app-pings'),
         pingCount:doc.getElementById('app-ping-count'),
         mentionList:doc.getElementById('app-mention-list'),
