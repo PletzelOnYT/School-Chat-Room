@@ -121,7 +121,23 @@ async function test(){
   text=await rendered();
   before(text,'Alex: first normal message','System: Usage: /last <1-100>');
   before(text,'System: Usage: /last <1-100>','Emma: second normal message');
-  console.log('Private System messages scroll with shared chat traffic: PASS');
+  // /last 2: the local System notice must consume one of two message slots.
+  // Older shared groups still exist as reply-preview context, not visible rows.
+  state.threads=[group(a),group(b),group(c),group(d)];
+  state.messages=[system2,c];
+  text=await rendered();
+  assert(text.includes('System: Second command warning'),text);
+  assert(text.includes('Sasha: third new message'),text);
+  assert(!text.includes('Alex: first normal message'),text);
+  assert(!text.includes('Emma: second normal message'),text);
+  assert(!text.includes('Alex: fourth new message'),text);
+  // When two new shared messages arrive, that System notice scrolls out.
+  state.messages=[c,d];
+  text=await rendered();
+  assert(!text.includes('System: Second command warning'),text);
+  assert(text.includes('Sasha: third new message'),text);
+  assert(text.includes('Alex: fourth new message'),text);
+  console.log('Private System messages consume /last slots and scroll away: PASS');
 }
 test().catch(e=>{console.error(e);process.exitCode=1;});
 """
@@ -145,6 +161,67 @@ class SystemTimelineTests(unittest.TestCase):
         self.assertIn("'private': True",src)
         self.assertNotIn("write_event",src)
         self.assertNotIn("append_event_in_place",src)
+
+
+    def test_backend_last_quota_counts_system_notices_before_thread_building(self):
+        """A local warning is one display slot, not a permanent extra row."""
+        import threading
+        import time
+        source=APP.read_text(encoding="utf-8")
+        tree=ast.parse(source)
+        snapshot_node=next(n for n in tree.body
+                           if isinstance(n,ast.FunctionDef) and n.name=="snapshot")
+        messages=[dict(number=n,id="m"+str(n),user="Emma",text="Post "+str(n))
+                  for n in (1,2,3,4)]
+        local=[dict(id="local1",number=None,anchor=3,user="System",
+                    text="Usage warning",private=True,time="12:00:00",reactions={})]
+        counts=[]
+        def build_groups(shared,count,muted,cleared):
+            counts.append(count)
+            return []
+        env={
+            "check_upstream_version":lambda:None,
+            "reconcile_outbox":lambda:None,
+            "latest_analysis":lambda:{"messages":messages},
+            "update_required":False,"update_notice_shown":False,
+            "running":True,"local_messages":local,"state_lock":threading.RLock(),
+            "clear_through":0,"muted_names":set(),"visible_count":2,
+            "is_mentioned":lambda text,name:False,
+            "build_threads":build_groups,"JSON":lambda obj:obj,
+            "username":"Alex","next_popup":None,"time":time,
+            "ChatFileError":type("ChatFileError",(Exception,),{}),
+        }
+        compiled=compile(ast.Module(body=[snapshot_node],type_ignores=[]),
+                         "<snapshot-test>","exec")
+        exec(compiled,env)
+        snap=env["snapshot"]()
+        self.assertEqual([m["text"] for m in snap["messages"]],
+                         ["Usage warning","Post 4"])
+        self.assertEqual(counts[-1],1)
+        messages.append(dict(number=5,id="m5",user="Emma",text="Post 5"))
+        snap=env["snapshot"]()
+        self.assertEqual([m["text"] for m in snap["messages"]],
+                         ["Post 4","Post 5"])
+        self.assertEqual(counts[-1],2)
+        # /last 1 can consist entirely of a private System notice.
+        env["visible_count"]=1
+        local.append(dict(id="local2",number=None,anchor=5,user="System",
+                          text="Most recent warning",private=True,
+                          time="12:00:01",reactions={}))
+        snap=env["snapshot"]()
+        self.assertEqual([m["text"] for m in snap["messages"]],
+                         ["Most recent warning"])
+        self.assertEqual(counts[-1],0)
+
+    def test_zero_shared_slots_do_not_reintroduce_all_old_thread_groups(self):
+        source=APP.read_text(encoding="utf-8")
+        tree=ast.parse(source)
+        build=next(n for n in tree.body
+                   if isinstance(n,ast.FunctionDef) and n.name=="build_threads")
+        segment=ast.get_source_segment(source,build)
+        self.assertIn("if count <= 0:",segment)
+        self.assertIn("return []",segment)
+
 
 
 if __name__=="__main__":
