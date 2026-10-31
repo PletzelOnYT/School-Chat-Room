@@ -21,7 +21,7 @@ NAMES = {"is_plain_message","plain_message","display_only_message_id",
          "is_title_event","is_simple_record","title_event",
          "is_rename_event","rename_event",
          "is_simple_reaction","simple_reaction_event",
-         "analyze","write_event","parse_chat_log","load_outbox",
+         "analyze","chronological_display_messages","write_event","parse_chat_log","load_outbox",
          "save_outbox","remember_outgoing","reconcile_outbox"}
 NODES = [n for n in TREE.body if isinstance(n,ast.FunctionDef) and n.name in NAMES]
 
@@ -87,6 +87,45 @@ class PlainMessagesTests(unittest.TestCase):
         self.assertFalse(posts[2]["time_estimated"])
         self.assertLess(posts[0]["estimated_epoch"],posts[1]["estimated_epoch"])
         self.assertLess(posts[1]["estimated_epoch"],posts[2]["issued_at"])
+
+    def test_precise_sidecar_race_is_corrected_only_in_display_order(self):
+        env=setup()
+        first=env["plain_message"]("Sasha first",timestamp=1793415457)
+        second=env["plain_message"]("Pletzel second",timestamp=1793415455)
+        state=env["analyze"]([first,env["clock_event"](first,1793415457),
+                              second,env["clock_event"](second,1793415455)])
+        raw=state["messages"]
+        self.assertEqual([m["number"] for m in raw],[1,2])
+        shown=env["chronological_display_messages"](raw)
+        self.assertEqual([m["text"] for m in shown],
+                         ["Pletzel second","Sasha first"])
+        self.assertEqual([m["number"] for m in shown],[2,1])
+        self.assertEqual([m["number"] for m in raw],[1,2])
+        self.assertEqual(shown[0]["issued_at"],1793415455)
+        self.assertEqual(shown[1]["issued_at"],1793415457)
+
+    def test_legacy_two_second_inversion_does_not_infer_previous_day(self):
+        env=setup()
+        first={"kind":"message","time":"02:09:28","user":"Sasha",
+               "text":"test"}
+        second={"kind":"message","time":"02:09:25","user":"Pletzel",
+                "text":"hi"}
+        known=env["plain_message"]("known timestamp",timestamp=1793415457)
+        state=env["analyze"]([first,second,known,env["clock_event"](known,1793415457)])
+        raw=state["messages"]
+        self.assertLess(raw[1]["estimated_epoch"],raw[0]["estimated_epoch"])
+        self.assertEqual(raw[0]["estimated_epoch"]-raw[1]["estimated_epoch"],3)
+        self.assertEqual([m["number"] for m in env["chronological_display_messages"](raw)],
+                         [2,1,3])
+
+    def test_large_unverified_inversion_is_not_reordered_as_exact(self):
+        env=setup()
+        rows=[{"id":"one","number":1,"issued_at":1793415457},
+              {"id":"two","number":2,"issued_at":1793415000}]
+        # > two minutes might indicate a wrong date/timezone, not a race.
+        self.assertEqual([m["id"] for m in env["chronological_display_messages"](rows)],
+                         ["one","two"])
+        self.assertEqual([m["id"] for m in rows],["one","two"])
 
     def test_invalid_clock_sidecar_cannot_override_message(self):
         env=setup()
