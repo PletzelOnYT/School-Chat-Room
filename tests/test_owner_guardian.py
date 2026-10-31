@@ -273,6 +273,55 @@ class GuardianTests(unittest.TestCase):
         self.assertIn("missing chat message",
                       guardian.check_new_event(clock,{},{}))
 
+
+    def test_historical_time_report_uses_midnight_rollover_not_reordering(self):
+        stamp=1793498400  # 2026-11-01 02:00 UTC
+        last={"kind":"message",
+              "time":time.strftime("%H:%M:%S",time.gmtime(stamp)),
+              "user":"Alice","text":"known UTC"}
+        proof={"kind":"clock","time":last["time"],"user":"Alice",
+               "epoch":stamp,"message_hash":guardian.plain_message_hash(last)}
+        old={"kind":"message","time":"23:58:00","user":"Alice","text":"before midnight"}
+        midnight={"kind":"message","time":"00:01:00","user":"Alice","text":"after midnight"}
+        initial=[old,midnight,last,proof]
+        report=guardian.historical_clock_audit(initial,now=stamp)
+        rows=report["messages"]
+        self.assertEqual([item["position"] for item in rows],[0,1,2])
+        self.assertEqual(rows[-1]["basis"],"clock_metadata")
+        self.assertEqual(rows[0]["basis"],"inferred_utc_not_verified")
+        self.assertEqual(rows[0]["epoch"]%86400,23*3600+58*60)
+        self.assertEqual(rows[1]["epoch"]%86400,60)
+        self.assertTrue(rows[0]["epoch"]<rows[1]["epoch"]<rows[2]["epoch"])
+        self.assertEqual(initial[0],old)
+
+    def test_guardian_writes_private_clock_audit_without_rewriting_chat(self):
+        original=self.shared.read_bytes()
+        self.assertEqual(self.mon.process(),"enrolled")
+        report_path=self.private/"historical_clock_audit.json"
+        self.assertTrue(report_path.is_file())
+        parsed=json.loads(report_path.read_text())
+        self.assertIn("counts",parsed)
+        self.assertEqual(self.shared.read_bytes(),original)
+
+    def test_cross_poll_spam_limits_remain_active(self):
+        self.mon.process()
+        records=[self.legacy]
+        for index in range(guardian.RATE_10_SECONDS):
+            records.append({"kind":"message","time":"12:00:00",
+                            "user":"Alice","text":"unique post "+str(index)})
+            self.shared.write_text(json.dumps(records))
+            self.assertEqual(self.mon.process(),"healthy")
+        records.append({"kind":"message","time":"12:00:00",
+                        "user":"Alice","text":"unique post blocked"})
+        self.shared.write_text(json.dumps(records))
+        self.assertEqual(self.mon.process(),"restored")
+        self.assertEqual(guardian.count_events(self.mon.db),1+guardian.RATE_10_SECONDS)
+        self.assertEqual(len(self.current()),1+guardian.RATE_10_SECONDS)
+
+    def test_guardian_name_rejects_format_control(self):
+        self.assertFalse(guardian.valid_name("Alex\\u202e"))
+        self.assertFalse(guardian.valid_name("Al\\u200bex"))
+
     def test_guardian_reads_framed_append_only_events(self):
         self.mon.process()
         original=self.shared.read_bytes()
