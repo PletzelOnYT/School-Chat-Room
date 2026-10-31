@@ -1963,17 +1963,18 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     }
     refreshDesktopAlertsControl();
   }
-  function showSystemNotification(author, body) {
+  function showSystemNotification(author, body, count=1, messageNumber=null) {
     const API = notificationAccess();
     if (!desktopAlertsEnabled || !API || API.permission !== 'granted') {
       return false;
     }
     try {
       const notification = new API('Pletzel Chat', {
-        body: desktopAlertsPreviews
-          ? (author + ': ' + String(body || '').replace(/\s+/g,' ').slice(0,120))
-          : ('New message from ' + author),
-        tag: 'pletzel-' + String(lastSeenChatNumber),
+        body: count > 1 ? (count + ' new messages in chat') :
+          (desktopAlertsPreviews
+            ? (author + ': ' + String(body || '').replace(/\s+/g,' ').slice(0,120))
+            : ('New message from ' + author)),
+        tag: 'pletzel-' + String(messageNumber ?? lastSeenChatNumber),
         silent: false
       });
       notification.onclick = () => {
@@ -2009,14 +2010,8 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
     if (!incoming.length) return;
     // Burst control: one banner for multiple messages, not 20 banners.
     const newest = incoming[incoming.length-1];
-    if (incoming.length >= 3) {
-      showSystemNotification('Pletzel Chat', incoming.length +
-        ' new messages from other people');
-    } else {
-      for (const msg of incoming) {
-        showSystemNotification(String(msg.user || 'Someone'),msg.text);
-      }
-    }
+    showSystemNotification(String(newest.user || 'Someone'), newest.text,
+      incoming.length, newest.number);
   }
   function openDesktopAlertsWindow() {
     if (desktopAlertsEnabled) {
