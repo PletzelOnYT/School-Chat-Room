@@ -546,11 +546,28 @@ def render_chat_preview(snapshot, heading, status_label="SANDBOX"):
         stamp = _visible_text(entry["time"], 18)
         body = _visible_text(entry["text"], 220)
         style = "#94a3b8" if kind != "MESSAGE" else "#e5e7eb"
+        nickname_css = (
+            "background:linear-gradient(90deg,#f472b6,#facc15,#4ade80,#60a5fa);"
+            "background-clip:text;-webkit-background-clip:text;color:transparent"
+            if entry.get("rainbow_local") is True else "color:#93c5fd"
+        )
+        badge = entry.get("badge_local")
+        badge_markup = (
+            '<span style="color:#facc15;font-size:10px;margin-left:7px">'
+            + _visible_text(badge, 36) + '</span>'
+            if badge in ("OWNER (LOCAL)", "Verified (LOCAL)") else ""
+        )
+        highlight_css = (
+            "background:#28334f;border-radius:5px;padding-left:5px;"
+            if entry.get("highlight_local") is True else ""
+        )
         rows.append(
             '<div style="padding:9px 0;border-bottom:1px solid #27364b;'
-            'overflow-wrap:anywhere;font-size:12px;color:' + style + ';">'
+            'overflow-wrap:anywhere;font-size:12px;color:' + style + ';' +
+            highlight_css + '">'
             '<span style="color:#8ea2bf">[' + stamp + ']</span> '
-            '<strong style="color:#93c5fd">' + user + '</strong>'
+            '<strong style="' + nickname_css + '">' + user + '</strong>' +
+            badge_markup +
             '<span style="color:#c4b5fd"> · ' + kind + '</span>'
             '<div style="white-space:pre-wrap;margin-top:3px">'
             + body + '</div></div>'
@@ -818,13 +835,13 @@ class LiveChatOverlay:
             elif action == "nick":
                 rows[-1]["user"] = "Hacker"
             elif action == "owner_badge":
-                rows[-1]["user"] += " [OWNER (LOCAL)]"
+                rows[-1]["badge_local"] = "OWNER (LOCAL)"
             elif action == "verified_badge":
-                rows[-1]["user"] += " ✓ Verified (LOCAL)"
+                rows[-1]["badge_local"] = "Verified (LOCAL)"
             elif action == "rainbow":
-                rows[-1]["user"] += " 🌈 (LOCAL)"
+                rows[-1]["rainbow_local"] = True
             elif action == "highlight":
-                rows[-1]["kind"] = "HIGHLIGHTED MESSAGE (LOCAL)"
+                rows[-1]["highlight_local"] = True
             elif action == "reaction":
                 rows[-1]["text"] += "  ⭐×999 (LOCAL)"
         snapshot["rows"] = rows
