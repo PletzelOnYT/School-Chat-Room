@@ -763,7 +763,11 @@ class LiveChatOverlay:
         self._baseline = None
         self._current = None
         self.actions = []
-        self.refresh()
+        try:
+            self.refresh()
+        except Exception:
+            self.temp.cleanup()
+            raise
 
     def refresh(self):
         """Only read the source; never write to the shared file or its parent."""
