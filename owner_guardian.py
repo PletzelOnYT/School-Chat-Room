@@ -114,10 +114,32 @@ def simple_reaction(event):
             and type(event.get("active")) is bool)
 
 
+def simple_clock(event):
+    """Separate four-field message timestamp evidence, never a message rewrite."""
+    if not isinstance(event,dict) or set(event)!={"kind","time","user","epoch","message_hash"}:
+        return False
+    stamp=event.get("epoch")
+    return (event.get("kind")=="clock" and
+            isinstance(event.get("time"),str) and
+            re.fullmatch(r"(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d",event["time"]) is not None and
+            isinstance(event.get("user"),str) and
+            0<len(event["user"])<=128 and type(stamp) is int and
+            946684800<=stamp<=4102444800 and
+            isinstance(event.get("message_hash"),str) and
+            re.fullmatch(r"[0-9a-f]{64}",event["message_hash"]) is not None and
+            time.strftime("%H:%M:%S",time.gmtime(stamp))==event["time"])
+
+
+def plain_message_hash(event):
+    """Same deterministic SHA-256 as the Colab chat client."""
+    return hashlib.sha256(canonical_event(event).encode("utf-8")).hexdigest()
+
+
 def event_id(event, position=None):
     """Storage index for private ledger, not written to public chat.json."""
     if (simple_message(event) or simple_title(event) or
-            simple_rename(event) or simple_reaction(event)) and position is not None:
+            simple_rename(event) or simple_reaction(event) or
+            simple_clock(event)) and position is not None:
         raw=canonical_event(event).encode("utf-8")
         return "plain-%d-%s" % (position,hashlib.sha256(raw).hexdigest()[:16])
     return event.get("id") if isinstance(event,dict) else None
@@ -220,6 +242,18 @@ def check_new_event(event, accepted, rate_log, now=None):
             return "duplicate-message flood"
         history.append((stamp,normalized))
         return None
+    if simple_clock(event):
+        if not valid_name(event["user"]):
+            return "invalid clock author"
+        if event["epoch"]>now+300:
+            return "clock timestamp lies in the future"
+        if not any(simple_message(previous) and
+                   plain_message_hash(previous)==event["message_hash"]
+                   for previous in accepted.values()):
+            return "clock references a missing chat message"
+        return None
+    if event.get("kind")=="clock":
+        return "invalid or corrupted clock metadata"
     if simple_reaction(event):
         if not valid_name(event["user"]):
             return "invalid reaction actor"
@@ -374,7 +408,8 @@ def read_shared(path):
     entries=decode_shared_stream(raw)
     legacy_anchor=any(isinstance(x,dict) and x.get("id")==ANCHOR for x in entries)
     simplified=all(simple_message(x) or simple_title(x) or
-                   simple_rename(x) or simple_reaction(x) for x in entries)
+                   simple_rename(x) or simple_reaction(x) or
+                    simple_clock(x) for x in entries)
     if not legacy_anchor and not simplified:
         raise ValueError("file is neither legacy history nor simplified chat")
     return raw,entries
@@ -612,7 +647,8 @@ class Guardian:
         # checkpoints. Never undo it automatically and restore old metadata.
         migrated=(bool(live) and all(
                     simple_message(e) or simple_title(e) or
-                    simple_rename(e) or simple_reaction(e) for e in live))
+                    simple_rename(e) or simple_reaction(e) or
+                     simple_clock(e) for e in live))
         old_baseline=any(e.get("id")==ANCHOR for e in known)
         if migrated and old_baseline:
             self.log("FORMAT MIGRATION detected. Old guardian checkpoint "
