@@ -163,6 +163,94 @@ class GuardianStressLabTests(unittest.TestCase):
             (2, 7),
         )
 
+    def test_every_attack_has_exactly_one_category(self):
+        all_cases = sorted(lab_module.ATTACK_LABELS)
+        groups = [case for cases in lab_module.ATTACK_GROUPS.values()
+                  for case in cases]
+        self.assertEqual(sorted(groups), all_cases)
+        self.assertEqual(len(groups), len(set(groups)))
+        self.assertGreaterEqual(len(all_cases), 55)
+
+    def test_chat_preview_contains_real_attack_and_guardian_snapshots(self):
+        row = self.lab.test("verified")
+        self.assertEqual(row["status"], "SECURITY GAP")
+        snapshots = self.lab.previews["verified"]
+        self.assertEqual(set(snapshots),
+                         {"before", "attack", "after", "status", "note"})
+        before = snapshots["before"]
+        attacked = snapshots["attack"]
+        after = snapshots["after"]
+        self.assertEqual(attacked["events"], before["events"] + 1)
+        self.assertEqual(after["events"], attacked["events"])
+        self.assertTrue(any("Verified" in x["text"]
+                            for x in attacked["rows"]))
+        self.assertEqual(self.lab.cases["verified"].read_bytes(),
+                         self.lab.cases["verified"].read_bytes())
+
+    def test_rendered_chat_escapes_all_payload_html(self):
+        record = lab_module.preview_snapshot(guardian, self.lab.seed)
+        record["rows"].append({
+            "kind": "message",
+            "user": '<img src=x onerror="alert(1)">',
+            "time": "<script>",
+            "text": '<script>alert("do not run")</script>',
+            "index": 10,
+        })
+        markup = lab_module.render_chat_preview(
+            record, "<img src=x onerror=alert(3)>", "ATTACK")
+        self.assertIn("&lt;script&gt;", markup)
+        self.assertIn("&lt;img", markup)
+        self.assertNotIn("<script>", markup)
+        self.assertNotIn('<img src=x onerror=', markup)
+        self.assertIn("background:#0f172a", markup)
+
+    def test_corrupted_snapshot_is_safely_previewed(self):
+        snapshot = lab_module.preview_snapshot(guardian, b"\x1e\xff</style>")
+        self.assertIsNotNone(snapshot["error"])
+        markup = lab_module.render_chat_preview(snapshot, "Corrupted", "ATTACK")
+        self.assertIn("INVALID / UNREADABLE CHAT", markup)
+        self.assertNotIn("</style>", markup)
+
+    def test_repeat_same_attack_resets_private_ledger(self):
+        first = self.lab.test("verified")
+        second = self.lab.test("verified")
+        self.assertEqual(first["status"], "SECURITY GAP")
+        self.assertEqual(second["status"], "SECURITY GAP")
+        self.assertEqual(len(self.lab.previews), 1)
+        self.assertEqual(len(self.lab.results), 1)
+
+    def test_new_security_cases_cover_identity_color_spam_and_corruption(self):
+        for case in ("verified_revoke", "rename_other",
+                     "reaction_spoof", "reaction_remove"):
+            with self.subTest(case=case):
+                row = self.lab.test(case)
+                self.assertEqual(row["status"], "SECURITY GAP")
+        for case in ("name_zero_width", "name_confusable",
+                     "color_section", "oversize_text", "room_flood",
+                     "clock_orphan", "signed_forge", "signed_role",
+                     "tamper_user", "erase_all", "null_event"):
+            with self.subTest(case=case):
+                row = self.lab.test(case)
+                self.assertEqual(row["status"], "BLOCKED", row)
+                self.assertEqual(row["after_records"],
+                                 row["before_records"])
+        for case in ("html_text", "script_text", "markdown_title"):
+            with self.subTest(case=case):
+                row = self.lab.test(case)
+                self.assertEqual(row["status"], "ALLOWED TEXT", row)
+
+    def test_partial_append_is_detected_and_preview_shows_broken_journal(self):
+        row = self.lab.test("append_partial")
+        self.assertEqual(row["status"], "DETECTED ONLY")
+        self.assertIsNotNone(self.lab.previews["append_partial"]["attack"]["error"])
+        self.assertFalse(row["restored"])
+
+    def test_rollback_also_clears_chat_preview_state(self):
+        self.lab.test("rename_other")
+        self.assertTrue(self.lab.previews)
+        self.lab.revert_all()
+        self.assertFalse(self.lab.previews)
+
     def test_no_live_write_path_exists_in_modified_client(self):
         import inspect
         text = (ROOT / "tools" / "guardian_stress_lab.py").read_text()
