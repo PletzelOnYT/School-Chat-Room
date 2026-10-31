@@ -154,7 +154,6 @@ class GuardianStressLabTests(unittest.TestCase):
                          str(ROOT / "guardian_stress_lab.py")),
             patch.dict(os.environ, {"COLAB_RELEASE_TAG": "",
                                     "COLAB_GPU": ""}),
-            patch.dict(sys.modules, {"google.colab": None}),
             patch("urllib.request.urlopen",
                   side_effect=AssertionError("should not fetch online")),
         ):
