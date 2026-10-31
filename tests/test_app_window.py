@@ -123,8 +123,8 @@ async function run(){
   assert(app.win.document.html.includes('id="app-input"'));
   assert(app.win.document.html.includes('font-family:monospace;font-size:13px'));
   assert(app.win.document.html.includes('height:19px'));
-  assert(app.win.document.html.includes('width:min(540px,100%)'));
-  assert(app.win.document.html.includes('max-width:80ch'));
+  assert(app.win.document.html.includes('width:min(INPUTPXpx,100%)'));
+  assert(app.win.document.html.includes('max-width:WRAPCHch'));
   assert(app.win.document.html.includes('white-space:pre-wrap;overflow-wrap:anywhere'));
   assert(!app.win.document.html.includes('class="message"'),
     'no redesigned chat cards');
