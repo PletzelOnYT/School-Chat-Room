@@ -184,7 +184,7 @@ class DesktopNotificationTests(unittest.TestCase):
         self.assertIn("desktopAlertsEnabled",source)
         self.assertIn("new API('Pletzel Chat'",source)
         self.assertIn("msg.private",source)
-        self.assertIn("CLIENT_VERSION = '5.40'",source)
+        self.assertIn("CLIENT_VERSION = '5.41'",source)
 
 
 if __name__=="__main__":
