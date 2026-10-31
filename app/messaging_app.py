@@ -2191,6 +2191,16 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
   let appPickerMessageId = null;
   let appSearchTerm = '';
   let appRenderedSignature = null;
+  let appThreadRootId = null;
+  let appThreadTarget = null;
+  let appPingOnly = false;
+  let appUnreadPings = 0;
+  let appKnownIds = new Set();
+  let appBootstrapped = false;
+  let appKnownNames = [];
+  let appMentionChoices = [];
+  let appMentionIndex = -1;
+  let appMentionStart = -1;
   const appAvatarPalette = ['#5865f2','#3ba55c','#eb459e','#d68b46','#1abc9c','#7988d8','#aa72cb'];
 
   function appAvatarColor(name) {
@@ -2224,6 +2234,165 @@ CHAT_HTML = r'''<div id="messaging-app-SESSION_ID" style="font-family:monospace;
       '↳ Replying to ' + appReplyTarget.user : '';
     appElements.input.placeholder=appReplyTarget ?
       'Reply to ' + appReplyTarget.user : 'Message #general';
+  }
+
+
+  function appHasMention(text,username) {
+    if(!username)return false;
+    const escaped=String(username).replace(/[^A-Za-z0-9]/g,'\\  function renderApp(state,force=false) {');
+    return new RegExp('(^|[^\\w@])@'+escaped+'(?!\\w)','i').test(String(text||''));
+  }
+
+  function appTextWithPings(doc,text,self,names,target) {
+    const value=String(text||'');
+    const unique=Array.from(new Set([...names,self].filter(Boolean)));
+    if(!unique.length){target.appendChild(doc.createTextNode(value));return;}
+    const escaped=unique.sort((a,b)=>b.length-a.length)
+      .map(name=>name.replace(/[^A-Za-z0-9]/g,'\\  function renderApp(state,force=false) {'));
+    const pattern=new RegExp('(^|[^\\w@])(@(?:'+escaped.join('|')+'))(?!\\w)','gi');
+    let offset=0,hit;
+    while((hit=pattern.exec(value))!==null) {
+      target.appendChild(doc.createTextNode(value.slice(offset,hit.index)+hit[1]));
+      const mention=doc.createElement('span');
+      mention.className='ping-mention'+
+        (hit[2].slice(1).toLocaleLowerCase()===String(self).toLocaleLowerCase()?' mine':'');
+      mention.textContent=hit[2];
+      target.appendChild(mention);
+      offset=hit.index+hit[0].length;
+    }
+    target.appendChild(doc.createTextNode(value.slice(offset)));
+  }
+
+  function appThreadGroup(messageId,state=latestState) {
+    return (state?.threads||[]).find(group =>
+      group.root?.id===messageId ||
+      (group.replies||[]).some(item=>item.id===messageId))||null;
+  }
+
+  function appOpenThread(messageId) {
+    if(!appElements)return;
+    const group=appThreadGroup(messageId);
+    if(!group)return;
+    appThreadRootId=group.root.id;
+    appThreadTarget=group.root;
+    appElements.layout.className='app thread-open';
+    appRenderThread(latestState);
+    try{appElements.threadInput.focus();}catch(error){/* optional */}
+  }
+
+  function appCloseThread() {
+    appThreadRootId=null;
+    appThreadTarget=null;
+    if(!appElements)return;
+    appElements.layout.className='app';
+    appElements.threadBody.replaceChildren();
+    try{appElements.input.focus();}catch(error){/* optional */}
+  }
+
+  function appRenderThread(state) {
+    if(!appElements || !appThreadRootId)return;
+    const group=appThreadGroup(appThreadRootId,state);
+    if(!group){appCloseThread();return;}
+    const el=appElements,doc=appWindow.document,body=el.threadBody,scroll=el.threadScroll;
+    const bottom=scroll.scrollHeight-scroll.scrollTop-scroll.clientHeight<80;
+    const top=scroll.scrollTop;
+    const previousValue=el.threadInput.value;
+    const replies=group.replies||[];
+    el.threadMeta.textContent=replies.length+' '+(replies.length===1?'reply':'replies');
+    body.replaceChildren();
+
+    function card(message,root=false) {
+      const item=doc.createElement('div');
+      item.className='thread-card '+(root?'root':'reply')+
+        (!root && message.reply_to!==group.root.id?' nested':'');
+      const author=doc.createElement('span');
+      author.className='thread-author';
+      author.textContent=String(message.user||'Unknown');
+      item.appendChild(author);
+      const time=doc.createElement('span');
+      time.className='thread-time';
+      time.textContent=displayedTime(message);
+      item.appendChild(time);
+      const content=doc.createElement('div');
+      content.className='thread-body';
+      appTextWithPings(doc,message.text,state.username,appKnownNames,content);
+      item.appendChild(content);
+      if(Number.isSafeInteger(message.number)){
+        item.appendChild(appButton(doc,'↳ Reply',()=>{
+          appThreadTarget=message;
+          appRenderThread(latestState);
+          el.threadInput.focus();
+        },'thread-link'));
+      }
+      body.appendChild(item);
+    }
+    card(group.root,true);
+    const divider=doc.createElement('div');
+    divider.className='thread-divider';
+    divider.textContent=replies.length+' '+(replies.length===1?'REPLY':'REPLIES');
+    body.appendChild(divider);
+    for(const reply of replies) card(reply);
+    el.threadTarget.textContent='Replying to '+String((appThreadTarget||group.root).user||'Unknown');
+    el.threadInput.value=previousValue;
+    scroll.scrollTop=bottom?scroll.scrollHeight:top;
+  }
+
+  function appDismissMentions() {
+    appMentionChoices=[];
+    appMentionIndex=-1;
+    appMentionStart=-1;
+    if(appElements){
+      appElements.mentionList.style.display='none';
+      appElements.mentionList.replaceChildren();
+    }
+  }
+
+  function appChooseMention(index=appMentionIndex) {
+    if(!appElements || index<0 || index>=appMentionChoices.length)return false;
+    const input=appElements.input;
+    const cursor=Number.isInteger(input.selectionStart)?input.selectionStart:input.value.length;
+    const start=appMentionStart;
+    if(start<0 || start>cursor)return false;
+    const replacement='@'+appMentionChoices[index]+' ';
+    input.value=input.value.slice(0,start)+replacement+input.value.slice(cursor);
+    const next=start+replacement.length;
+    if(typeof input.setSelectionRange==='function')input.setSelectionRange(next,next);
+    appDismissMentions();
+    input.focus();
+    return true;
+  }
+
+  function appUpdateMentions() {
+    if(!appElements)return;
+    const el=appElements,input=el.input,doc=appWindow.document;
+    const cursor=Number.isInteger(input.selectionStart)?input.selectionStart:input.value.length;
+    const match=/(^|[\s(])@([A-Za-z0-9._-]{0,32})$/.exec(input.value.slice(0,cursor));
+    if(!match){appDismissMentions();return;}
+    const choices=appKnownNames.filter(name=>
+      name.toLocaleLowerCase().startsWith(match[2].toLocaleLowerCase())).slice(0,7);
+    if(!choices.length){appDismissMentions();return;}
+    appMentionStart=cursor-match[2].length-1;
+    appMentionChoices=choices;
+    appMentionIndex=0;
+    el.mentionList.replaceChildren();
+    const caption=doc.createElement('div');
+    caption.className='mention-caption';
+    caption.textContent='MENTION A PERSON';
+    el.mentionList.appendChild(caption);
+    for(let i=0;i<choices.length;i++){
+      const button=appButton(doc,'@'+choices[i],()=>appChooseMention(i),
+        'mention-option'+(i===appMentionIndex?' active':''));
+      el.mentionList.appendChild(button);
+    }
+    el.mentionList.style.display='block';
+  }
+
+  function appUpdatePingBadge() {
+    if(!appElements)return;
+    const el=appElements;
+    el.pings.className='ping-filter'+(appPingOnly?' active':'');
+    el.pingCount.textContent=String(appUnreadPings);
+    el.pingCount.style.display=appUnreadPings?'inline-block':'none';
   }
 
   function renderApp(state,force=false) {
