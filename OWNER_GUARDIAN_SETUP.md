@@ -1,4 +1,4 @@
-# Messaging App — Owner Guardian
+# Messaging App — Owner Guardian v2.2
 
 The owner runs a **separate Python program** (`owner_guardian.py`) in their own Google Colab notebook. The chat itself, including the original terminal UI and `chat.json`, remains unchanged. No Vercel, Redis, or additional shared folder is required.
 
@@ -28,46 +28,67 @@ because the app switched to append-only writes.
 - If the file is empty, corrupted, or truncated, attempts to restore the approved history **in place**.
 - If the original Drive object is in Trash, it optionally attempts to **untrash the original file ID** using a Google token already available in the session.
 
-## Setup in the owner's Colab notebook
+## Automatic setup in the owner's Google Colab
 
-**Before first run**, make a backup and confirm that the current shared `chat.json` is the correct history. On its first run, the guardian treats that history as the trusted baseline; it cannot establish whether older events were already modified.
+**Only the owner should run Guardian.** All participants run `school_chat.py` /
+`messaging_app.py`, but running multiple Guardians against a single shared file
+can result in competing recovery writes. Do not add the Guardian launcher to
+every student's chat notebook.
 
-Run the following in a separate Colab notebook:
+Guardian v2.2 now automatically:
+1. Mounts the owner's Google Drive when a Colab mount is not already present (Google may ask for permission).
+2. Checks `My Drive/chat.json` and reuses it when already available.
+3. If missing, attempts to create a **shortcut** (not a new chat copy) that points
+   to the exact original Drive file ID
+   `1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd`, using previously authorized Drive API credentials.
+4. Keeps its SQLite database, incident logs, and clock audit private in
+   `My Drive/.messaging_guardian/` — **never** in the shared chat file/folder.
+5. Resumes using the previously approved backup when it exists and monitors
+   every five seconds while the owner's Colab session remains active.
+
+You can launch the latest Guardian automatically from **one cell in the
+owner's own Colab notebook**:
 
 ```python
-from google.colab import drive
-drive.mount('/content/drive')
-
-import importlib.util
 import urllib.request
-
-url = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/owner_guardian.py"
-path = "/content/owner_guardian.py"
-urllib.request.urlretrieve(url, path)
-
-spec = importlib.util.spec_from_file_location("owner_guardian", path)
-guardian = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(guardian)
-
-guardian.main([
-    "--interval", "5",
-    "--file-id", "PASTE_ORIGINAL_DRIVE_FILE_ID_HERE"
-])
+url = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/guardian_launcher.py"
+exec(compile(urllib.request.urlopen(url).read().decode("utf-8"), url, "exec"))
 ```
 
-To find the **original file ID**, open the shared file in Google Drive and copy the ID between `/d/` and `/view` in its URL. Use the ID of the real original file, **not** a shortcut or copy. Replace the placeholder; if unavailable, remove both `"--file-id"` and its placeholder. The guardian remembers an entered ID in your private Drive folder.
+This downloads the latest launcher and starts the current Guardian program.
+No manually entered file ID, manual Drive mount, copy of `chat.json`, or manual
+`--file` argument is needed.
 
-**Migration requirement:** The live `chat.json` was converted to 196 four-field messages. Stop any guardian process from before v5.25, then on your first start with the updated guardian add `"--reset-baseline"` to the argument list, e.g.:
+**Before the Guardian's first-ever run**, inspect and save a copy of the original
+chat history privately; enrollment treats the existing history as the trusted
+baseline, even if the content had already been modified. Existing Guardian owners
+should keep their healthy `.messaging_guardian/guardian.sqlite3` database.
+**Do not reset the baseline merely because you upgraded**; that discards the
+approved recovery history. Use `--reset-baseline` only to deliberately migrate
+an incompatible older checkpoint after verifying and backing up the current chat.
+
+If the school's Google account restricts Drive API authorization, the Guardian
+will display an actionable error instead of trying to bypass restrictions.
+In that situation, open the original shared file with the same Google account,
+choose *Organize → Add shortcut*, put the shortcut at the root of *My Drive*,
+and restart the Guardian. If the mount does not immediately show the shortcut,
+remount Google Drive and retry. The Guardian **never changes sharing permissions**
+or creates another `chat.json` copy.
+
+For a non-destructive, one-pass safety inspection using the original script:
 
 ```python
-guardian.main(["--interval", "5", "--reset-baseline"])
+# Once owner_guardian.py is imported as the module "guardian":
+guardian.main(["--audit-only", "--once"])
 ```
 
-This archives the previous private SQLite checkpoint before enrolling the new simplified history. Run this option only once, and only after confirming the correct migrated shared file. Running an older guardian without the new migration handling could restore the deleted old metadata records.
+For advanced use, explicit `--file` and `--private` paths are still supported
+and skip automatic shortcut enrollment. The existing `--interval`, `--once`,
+`--audit-only`, and optional original-file recovery ID flags are preserved.
 
-Keep this cell running. It will print alerts and actions. Later launches reload the private SQLite backup rather than blindly trusting the shared file again.
-
-To make a one-time check without writing repairs, use `guardian.main(["--audit-only", "--once"])` after downloading/importing the script.
+**This is not an always-on service.** The program monitors and repairs only
+while the owner's Colab runtime remains connected and the Guardian cell is
+running. It does not start in the background on every student's behalf.
 
 ## Important limits
 
