@@ -1,4 +1,4 @@
-# @title Messaging App — Owner Guardian v3.1
+# @title Messaging App — Owner Guardian v3.2
 """Owner-side Google Drive watchdog. Does not run inside messaging_app.py.
 
 - Approves only allowlisted, signed NEW events and stores a durable event ledger.
@@ -33,7 +33,7 @@ import uuid
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-GUARDIAN_VERSION = "3.1"
+GUARDIAN_VERSION = "3.2"
 # Exact existing shared file; Guardian never copies the message archive.
 SHARED_CHAT_FILE_ID = '1CysiJWMvyW6AOYXtkAnf99JSIhAQHrMd'
 SHARED_CHAT_FILE_LINK = (
@@ -92,6 +92,21 @@ def simple_message(event):
             0<len(event["user"])<=128 and
             isinstance(event.get("text"),str) and
             len(event["text"])<=5000)
+
+
+WHISPER_FIELDS = frozenset(("kind", "time", "user", "to", "text"))
+
+
+def simple_whisper(event):
+    """Updated clients display this record only to its named participants."""
+    return (isinstance(event, dict) and set(event) == WHISPER_FIELDS
+            and event.get("kind") == "whisper"
+            and isinstance(event.get("time"), str)
+            and VALID_CLOCK.fullmatch(event["time"]) is not None
+            and valid_name(event.get("user"))
+            and valid_name(event.get("to"))
+            and isinstance(event.get("text"), str)
+            and 0 < len(event["text"]) <= MAX_TEXT)
 
 
 def simple_title(event):
@@ -158,9 +173,9 @@ def plain_message_hash(event):
 
 def event_id(event, position=None):
     """Storage index for private ledger, not written to public chat.json."""
-    if (simple_message(event) or simple_title(event) or
-            simple_rename(event) or simple_reaction(event) or
-            simple_clock(event)) and position is not None:
+    if (simple_message(event) or simple_whisper(event) or
+            simple_title(event) or simple_rename(event) or
+            simple_reaction(event) or simple_clock(event)) and position is not None:
         raw=canonical_event(event).encode("utf-8")
         return "plain-%d-%s" % (position,hashlib.sha256(raw).hexdigest()[:16])
     return event.get("id") if isinstance(event,dict) else None
@@ -278,7 +293,7 @@ def check_new_event(event, accepted, rate_log, now=None):
         return "event is not an object"
     # Four-field chat messages deliberately have no signature or sender ID.
     # They can be checked for format and spam, NOT identity/authenticity.
-    if simple_message(event):
+    if simple_message(event) or simple_whisper(event):
         if not valid_name(event["user"]):
             return "invalid new display name"
         reason=invalid_text(event["text"])
@@ -289,6 +304,8 @@ def check_new_event(event, accepted, rate_log, now=None):
         stamp=now
         history[:]=[(ts,body) for ts,body in history if stamp-ts<=60]
         normalized=" ".join(event["text"].casefold().split())
+        if simple_whisper(event):
+            normalized="to:"+event["to"].casefold()+" "+normalized
         if sum(0<=stamp-ts<=10 for ts,_ in history)>=RATE_10_SECONDS:
             return "message burst from same nickname"
         if len(history)>=RATE_60_SECONDS:
@@ -495,9 +512,9 @@ def read_shared(path):
         raise ValueError("shared file exceeded safety size")
     entries=decode_shared_stream(raw)
     legacy_anchor=any(isinstance(x,dict) and x.get("id")==ANCHOR for x in entries)
-    simplified=all(simple_message(x) or simple_title(x) or
-                   simple_rename(x) or simple_reaction(x) or
-                    simple_clock(x) for x in entries)
+    simplified=all(simple_message(x) or simple_whisper(x) or
+                   simple_title(x) or simple_rename(x) or
+                   simple_reaction(x) or simple_clock(x) for x in entries)
     if not legacy_anchor and not simplified:
         raise ValueError("file is neither legacy history nor simplified chat")
     return raw,entries
@@ -961,9 +978,9 @@ class Guardian:
         # A deliberate four-field migration invalidates old ID-based
         # checkpoints. Never undo it automatically and restore old metadata.
         migrated=(bool(live) and all(
-                    simple_message(e) or simple_title(e) or
-                    simple_rename(e) or simple_reaction(e) or
-                     simple_clock(e) for e in live))
+                    simple_message(e) or simple_whisper(e) or
+                    simple_title(e) or simple_rename(e) or
+                    simple_reaction(e) or simple_clock(e) for e in live))
         old_baseline=any(e.get("id")==ANCHOR for e in known)
         if migrated and old_baseline:
             self.log("FORMAT MIGRATION detected. Old guardian checkpoint "
@@ -989,10 +1006,12 @@ class Guardian:
             except (ValueError,TypeError):
                 continue
             kind=stored.get("kind")
-            if kind=="message" and isinstance(stored.get("text"),str):
+            if kind in ("message","whisper") and isinstance(stored.get("text"),str):
                 body=" ".join(stored["text"].casefold().split())
-                if simple_message(stored):
+                if simple_message(stored) or simple_whisper(stored):
                     key="display-name:"+stored["user"].casefold()
+                    if simple_whisper(stored):
+                        body="to:"+stored["to"].casefold()+" "+body
                     rate.setdefault("__room_messages__",[]).append(
                         (observed_at,body))
                 else:
