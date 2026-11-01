@@ -268,6 +268,21 @@ class GuardianTests(unittest.TestCase):
         self.assertEqual([e["id"] for e in self.current()],
                          [self.legacy["id"],first["id"],second["id"]])
 
+    def test_whisper_is_approved_but_not_a_public_chat_message(self):
+        self.assertEqual(self.mon.process(),"enrolled")
+        whisper={"kind":"whisper","time":"12:00:00","user":"Alice",
+                 "to":"Emma","text":"hello privately in client UI"}
+        self.assertTrue(guardian.simple_whisper(whisper))
+        self.assertIsNone(guardian.check_new_event(whisper,{},{}))
+        self.shared.write_text(json.dumps([self.legacy,whisper]))
+        self.assertEqual(self.mon.process(),"healthy")
+        self.assertEqual(guardian.count_events(self.mon.db),2)
+        self.shared.write_text(json.dumps([self.legacy]))
+        self.assertEqual(self.mon.process(),"restored")
+        self.assertEqual(self.current()[-1],whisper)
+        self.assertFalse(guardian.simple_whisper(dict(whisper,to="Owner")))
+        self.assertFalse(guardian.simple_whisper(dict(whisper,extra="no")))
+
     def test_accept_and_restore_four_field_messages_without_ids(self):
         self.mon.process()
         simple={"kind":"message","time":"04:15:50",
