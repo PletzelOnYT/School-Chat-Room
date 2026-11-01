@@ -121,7 +121,7 @@ class GuardianTests(unittest.TestCase):
             approved=3,bytes_on_disk=1234,running=True)
         self.assertEqual(report,self.private/"guardian_health.json")
         data=json.loads(report.read_text())
-        self.assertEqual(data["guardian_version"],"3.1")
+        self.assertEqual(data["guardian_version"],"3.2")
         self.assertEqual(data["scans"],42)
         self.assertEqual(data["approved_records"],3)
         self.assertTrue(data["running"])
