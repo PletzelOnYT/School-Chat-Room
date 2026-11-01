@@ -1,4 +1,4 @@
-# Messaging App — Owner Guardian v3.1
+# Messaging App — Owner Guardian v3.2
 
 The owner runs a **separate Python program** (`guardian/owner_guardian.py`) in their own Google Colab notebook. The chat itself, including the original terminal UI and `chat.json`, remains unchanged. No Vercel, Redis, or additional shared folder is required.
 
@@ -27,6 +27,27 @@ because the app switched to append-only writes.
 - If messages disappear, are modified, or are reordered, repairs the existing shared file using the approved history.
 - If the file is empty, corrupted, or truncated, attempts to restore the approved history **in place**.
 - If the original Drive object is in Trash, it optionally attempts to **untrash the original file ID** using a Google token already available in the session.
+
+## Guardian v3.2: Named whispers (/w and /msg)
+
+Chat Room v5.58 introduces a separate five-field `whisper` record:
+`kind`, `time`, `user`, `to`, and `text`. Existing ordinary
+messages remain unchanged. The Guardian v3.2 recognizes whispers and
+applies the same content, name and flood checks as public messages.
+
+**Update every chat client to v5.58 and restart Owner Guardian v3.2
+before using whispers.** Older clients can reject these unfamiliar
+records, and an older running Guardian can mistake whispers for
+unauthorized events and attempt to remove them. Stop the old Guardian,
+then relaunch its normal notebook code.
+
+A whisper is *only hidden in updated chat interfaces* for participants
+other than the named sender/recipient. The shared Drive record is still
+plaintext; anyone with raw file access or a modified client can read it.
+Sender names are not cryptographically authenticated by this feature.
+Do not use whispers for passwords, confidential personal data, or
+anything requiring real privacy. End-to-end encryption would require
+a separate key exchange and verification design.
 
 ## Guardian v3.1: Advanced anti-tamper and flood detection
 
