@@ -1,4 +1,4 @@
-# @title Messaging App v5.57 — Google Drive Messenger
+# @title Messaging App v5.58 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.57'
+CLIENT_VERSION = '5.58'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -509,10 +509,33 @@ def clock_event(message, epoch):
     return {'kind': 'clock', 'time': message['time'], 'user': message['user'],
             'epoch': epoch, 'message_hash': message_hash(message)}
 
+WHISPER_FIELDS = frozenset(('kind', 'time', 'user', 'to', 'text'))
+
+
+def is_whisper_event(event):
+    """Dedicated whisper record; older clients won't mistake it for #general."""
+    return (isinstance(event, dict) and set(event) == WHISPER_FIELDS
+            and event.get('kind') == 'whisper'
+            and isinstance(event.get('time'), str)
+            and re.fullmatch(r'(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d',
+                             event['time']) is not None
+            and valid_username(event.get('user')) is not None
+            and valid_username(event.get('to')) is not None
+            and isinstance(event.get('text'), str)
+            and 0 < len(event['text']) <= MESSAGE_LIMIT
+            and valid_incoming_message(event['text']))
+
+
+def whisper_event(recipient, text):
+    return {'kind': 'whisper',
+            'time': time.strftime('%H:%M:%S', time.gmtime()),
+            'user': username, 'to': recipient, 'text': text}
+
+
 def is_simple_record(event):
     return (is_plain_message(event) or is_title_event(event) or
             is_rename_event(event) or is_simple_reaction(event) or
-            is_clock_event(event))
+            is_clock_event(event) or is_whisper_event(event))
 
 
 def plain_message(text, timestamp=None):
@@ -851,6 +874,7 @@ def analyze(events):
     legacy_claimed = set()
     identities = {}
     messages = []
+    whispers = []  # Private-view rows, never public message numbers or threads.
     by_number = {}
     seen_ids = set()
     post_number = 0
@@ -869,12 +893,23 @@ def analyze(events):
         if not isinstance(e, dict):
             continue
         plain = is_plain_message(e)
-        event_id = (display_only_message_id(e,index) if plain else
+        whisper = is_whisper_event(e)
+        event_id = (display_only_message_id(e,index) if plain or whisper else
                     str(e.get('id','legacy-index-'+str(index))))
         if event_id in seen_ids:
             continue
         seen_ids.add(event_id)
         kind = str(e.get('kind','message'))
+        if kind == 'whisper':
+            if whisper:
+                whispers.append({
+                    'id': event_id, 'number': None,
+                    'anchor': post_number, 'user': e['user'],
+                    'to': e['to'], 'text': e['text'],
+                    'time': e['time'], 'private': True, 'whisper': True,
+                    'reactions': {}, 'verified': False,
+                })
+            continue
         if kind == 'title' and is_title_event(e):
             name_key = e['user'].casefold()
             if e['title'] == TITLE_VERIFIED:
@@ -1190,7 +1225,27 @@ def analyze(events):
             old['time_estimated'] = True
             anchor_epoch = min(anchor_epoch, candidate)
 
+    # Receiver-side filtering happens before sending state to browser UI.
+    # This is presentation filtering, NOT encryption or sender authentication.
+    own_base = GOOGLE_ACCOUNT_USERNAME.casefold()
+    own_names = {own_base, renamed_users.get(own_base, own_base).casefold()}
+    visible_whispers = []
+    for whisper in whispers:
+        recipient_key = whisper['to'].casefold()
+        sender_key = whisper['user'].casefold()
+        recipient_base = aliases_to_base.get(recipient_key, recipient_key)
+        sender_base = aliases_to_base.get(sender_key, sender_key)
+        if (recipient_base not in own_names and recipient_key not in own_names
+                and sender_base not in own_names and sender_key not in own_names):
+            continue
+        item = dict(whisper)
+        item['user'] = renamed_users.get(sender_base, whisper['user'])
+        item['to'] = renamed_users.get(recipient_base, whisper['to'])
+        item['outgoing'] = sender_base in own_names or sender_key in own_names
+        visible_whispers.append(item)
+
     return dict(verified_names=verified_names, renamed_users=renamed_users,
+                whispers=visible_whispers,
                 messages=messages, by_number=by_number,
                 identities=identities, seen_aliases=seen_aliases, display_names=display_names,
                 name_owners=name_owners, verified=verified)
@@ -1234,6 +1289,8 @@ HELP_TEXT = '''CHAT COMMANDS (only shown to you)
 /mentions                  Show recent @mentions in a separate window
 /search <filters>          Search messages in a separate window
 /reply <#> <message>        Reply to a numbered post
+/w <name> <message>        Whisper to a named user (client-filtered)
+/msg <name> <message>      Same as /w; quote names with spaces
 /react <#> <emoji>          React to a message (/reacte also works)
 /unreact <#> <emoji>        Remove your reaction
 /mute <name> /unmute <name> Hide/show someone's posts locally
@@ -1528,9 +1585,12 @@ def snapshot():
         for m in a['messages']:
             if m['number'] > clear_through and m['user'].casefold() not in muted_names:
                 mixed.append((m['number'], 0, dict(m, mentioned=is_mentioned(m['text'], username))))
+        for i, m in enumerate(a.get('whispers', [])):
+            if m['anchor'] >= clear_through and m['user'].casefold() not in muted_names:
+                mixed.append((m['anchor'], i + 1, dict(m)))
         for i, m in enumerate(local_messages):
             if m['anchor'] >= clear_through:
-                mixed.append((m['anchor'], i + 1, dict(m)))
+                mixed.append((m['anchor'], len(a.get('whispers', [])) + i + 1, dict(m)))
         if error:
             # Read failures are also local System messages: they take one
             # visible slot rather than living forever outside /last.
@@ -1641,6 +1701,37 @@ def submit_message(raw):
         command, arg = command.casefold(), arg.strip()
 
         try:
+            if command in ('/w', '/msg'):
+                target_match = re.fullmatch(
+                    r'(?:"([^"]{1,32})"|(\\S+))\\s+([\\s\\S]+)', arg)
+                if not target_match or not target_match.group(3).strip():
+                    note('Usage: /w <name> <message>  or  /msg <name> <message>')
+                    return snapshot()
+                target_input = (target_match.group(1) or target_match.group(2)).lstrip('@')
+                body = target_match.group(3).strip()
+                if len(body) > MESSAGE_LIMIT or not valid_incoming_message(body):
+                    note('Whisper blocked: invalid, oversized, or spam-like message.')
+                    return snapshot()
+                current = latest_analysis()
+                names = {m['user'].casefold(): m['user'] for m in current['messages']}
+                names.update({v.casefold(): v for v in current['renamed_users'].values()})
+                recipient = names.get(target_input.casefold())
+                if not recipient:
+                    note('Whisper recipient not found. Use an exact chat username.')
+                    return snapshot()
+                if recipient.casefold() == username.casefold():
+                    note('You cannot whisper to yourself.')
+                    return snapshot()
+                now = time.time()
+                if now - last_message_time < COOLDOWN_SECONDS:
+                    note('Slow down! Wait before sending another message.')
+                    return snapshot()
+                evt = whisper_event(recipient, body)
+                if write_event(evt):
+                    last_message_time = now
+                else:
+                    note('Whisper delivery could not be confirmed. Check before retrying.')
+                return snapshot()
             if command == '/vf':
                 # Unlisted. No argument claims the current displayed name;
                 # an explicit name grants that user's blue checkmark.
