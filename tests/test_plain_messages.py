@@ -15,7 +15,8 @@ from test_security import env as legacy_env
 
 SOURCE = Path(__file__).resolve().parents[1].joinpath("app", "messaging_app.py").read_text()
 TREE = ast.parse(SOURCE)
-NAMES = {"is_plain_message","plain_message","display_only_message_id",
+NAMES = {"is_plain_message","is_whisper_event","whisper_event",
+         "plain_message","display_only_message_id",
          "message_hash","is_clock_event","clock_event",
          "read_messages","append_event_in_place","write_plain_message",
          "is_title_event","is_simple_record","title_event",
@@ -40,6 +41,8 @@ def setup(extra=None):
         "GOOGLE_ACCOUNT_USERNAME": "Pletzel",
         "TITLE_VERIFIED": "Verified", "TITLE_NONE": "None",
         "username": "Pletzel",
+        "WHISPER_FIELDS": frozenset(("kind","time","user","to","text")),
+        "valid_incoming_message": lambda text: isinstance(text,str) and 0<len(text)<=1000,
         "file_lock": threading.RLock(),
         "ChatFileError": type("ChatFileError",(Exception,),{}),
     })
@@ -179,6 +182,43 @@ class PlainMessagesTests(unittest.TestCase):
         self.assertFalse(state["messages"][-1]["verified"])
         self.assertTrue(state["messages"][-1]["id"].startswith("plain-1-"))
         self.assertNotIn("id",simple)
+
+    def test_whisper_visibility_for_sender_recipient_and_bystanders(self):
+        records=[
+            {"kind":"message","time":"04:12:00","user":"Alex","text":"public hi"},
+            {"kind":"whisper","time":"04:12:01","user":"Alex","to":"Emma",
+             "text":"for Emma"},
+            {"kind":"message","time":"04:12:02","user":"Emma","text":"public hey"},
+            {"kind":"whisper","time":"04:12:03","user":"Emma","to":"Alex",
+             "text":"for Alex"},
+            {"kind":"whisper","time":"04:12:04","user":"Alex","to":"Sasha",
+             "text":"for Sasha"},
+        ]
+        for viewer,visible in [
+                ("Emma",["for Emma","for Alex"]),
+                ("Alex",["for Emma","for Alex","for Sasha"]),
+                ("Sasha",["for Sasha"]),
+                ("Taylor",[])]:
+            with self.subTest(viewer=viewer):
+                env=setup({"GOOGLE_ACCOUNT_USERNAME":viewer,"username":viewer})
+                analysis=env["analyze"](records)
+                self.assertEqual([m["text"] for m in analysis["messages"]],
+                                 ["public hi","public hey"])
+                self.assertEqual([w["text"] for w in analysis["whispers"]],visible)
+                self.assertEqual([w["number"] for w in analysis["whispers"]],
+                                 [None]*len(visible))
+                self.assertTrue(all(w["private"] for w in analysis["whispers"]))
+                self.assertEqual(sorted(analysis["by_number"]),[1,2])
+
+    def test_whispers_are_a_distinct_valid_append_only_record(self):
+        env=setup({"username":"Alex"})
+        row=env["whisper_event"]("Emma","hello quietly")
+        self.assertEqual(set(row),{"kind","time","user","to","text"})
+        self.assertTrue(env["is_whisper_event"](row))
+        self.assertTrue(env["is_simple_record"](row))
+        self.assertFalse(env["is_plain_message"](row))
+        self.assertFalse(env["is_whisper_event"](dict(row,to="Owner")))
+        self.assertFalse(env["is_whisper_event"](dict(row,extra=True)))
 
     def test_reply_nesting_from_four_field_text(self):
         env=setup()
