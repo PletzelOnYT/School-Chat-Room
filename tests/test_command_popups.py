@@ -105,6 +105,37 @@ class PopupCommandTests(unittest.TestCase):
         self.env["submit_message"]("/rules")
         self.assertEqual(self.notices, [])
 
+    def test_minecraft_whispers_write_only_addressed_records(self):
+        outgoing=[]
+        self.env.update({
+            "COOLDOWN_SECONDS":0.65,
+            "last_message_time":0,
+            "MESSAGE_LIMIT":1000,
+            "valid_incoming_message":lambda text:bool(text.strip()),
+            "whisper_event":lambda to,text:{
+                "kind":"whisper","time":"12:00:00",
+                "user":"Pletzel","to":to,"text":text},
+            "write_event":lambda record:outgoing.append(record) or True,
+        })
+        self.env["submit_message"]("/w Emma hello there")
+        self.assertEqual([(m["to"],m["text"]) for m in outgoing],
+                         [("Emma","hello there")])
+        self.assertEqual(outgoing[0]["kind"],"whisper")
+        self.env["last_message_time"]=0
+        self.env["submit_message"]("/msg Emma second whisper")
+        self.assertEqual(outgoing[-1]["text"],"second whisper")
+        for invalid in ("/msg Unknown nope","/w Pletzel hello",
+                        "/w Emma","/msg", "/w Emma  "):
+            with self.subTest(invalid=invalid):
+                count=len(outgoing)
+                self.env["last_message_time"]=0
+                self.env["submit_message"](invalid)
+                self.assertEqual(len(outgoing),count)
+        self.assertEqual(len(outgoing),2)
+        self.assertTrue(any("recipient not found" in text
+                            for text in self.notices))
+        self.assertTrue(any("Usage: /w" in text for text in self.notices))
+
     def test_server_help_text_mentions_popup_commands(self):
         self.assertIn("/users", self.env["HELP_TEXT"])
         self.assertIn("separate window", self.env["HELP_TEXT"])
