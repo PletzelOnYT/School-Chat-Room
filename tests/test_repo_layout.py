@@ -16,17 +16,21 @@ class RepositoryLayoutTests(unittest.TestCase):
             with self.subTest(path=filename):
                 self.assertTrue((ROOT / filename).is_file())
 
-    def test_current_compatibility_entry_points_work(self):
-        for old, new in (
-            ("messaging_app.py", "app/messaging_app.py"),
-            ("owner_guardian.py", "guardian/owner_guardian.py"),
-            ("guardian_launcher.py", "guardian/guardian_launcher.py"),
+    def test_launcher_is_the_only_root_python_file(self):
+        self.assertEqual(
+            {p.name for p in ROOT.glob("*.py")},
+            {"launcher.py"},
+        )
+        source = (ROOT / "launcher.py").read_text(encoding="utf-8")
+        self.assertIn("app/messaging_app.py", source)
+        self.assertIn("PINNED_COMMIT", source)
+        self.assertIn("EXPECTED_VERSION", source)
+        for redirect in (
+            "messaging_app.py", "owner_guardian.py",
+            "guardian_launcher.py", "OWNER_GUARDIAN_SETUP.md",
         ):
-            with self.subTest(old=old):
-                content = (ROOT / old).read_text(encoding="utf-8")
-                self.assertIn(new, content)
-                self.assertIn("compat_refresh", content)
-        self.assertTrue((ROOT / "OWNER_GUARDIAN_SETUP.md").is_file())
+            with self.subTest(redirect=redirect):
+                self.assertFalse((ROOT / redirect).exists())
 
     def test_removed_legacy_and_stress_files_are_absent(self):
         for deleted in (
@@ -46,13 +50,14 @@ class RepositoryLayoutTests(unittest.TestCase):
 
     def test_continuous_integration_targets_production_paths(self):
         workflow = (ROOT / ".github/workflows/check-python.yml").read_text()
-        for folder in ("app/**", "guardian/**", "docs/**"):
-            self.assertEqual(workflow.count(folder), 2)
+        for folder in ("app/**", "guardian/**", "docs/**", "launcher.py"):
+            self.assertEqual(workflow.count(folder), 2 if folder.endswith("/**") else 3)
         for name in ("app/messaging_app.py", "guardian/owner_guardian.py",
-                     "guardian/guardian_launcher.py"):
+                     "guardian/guardian_launcher.py", "launcher.py"):
             self.assertIn(name, workflow)
         for removed in ("school_chat.py", "guardian_stress_lab.py",
-                        "tools/**"):
+                        "tools/**", "'messaging_app.py'", "'owner_guardian.py'",
+                        "'guardian_launcher.py'"):
             self.assertNotIn(removed, workflow)
 
 
