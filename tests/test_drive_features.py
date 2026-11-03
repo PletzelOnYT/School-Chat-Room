@@ -71,6 +71,33 @@ class FourFieldDriveTests(unittest.TestCase):
         self.path.write_text(json.dumps(self.initial,indent=2,ensure_ascii=False)+"\n")
         self.env=storage_env(self.path)
 
+    def test_whisper_history_is_read_at_startup(self):
+        """A saved whisper must not crash the shared-history reader."""
+        whisper={"kind":"whisper","time":"04:16:00","user":"Emma",
+                 "to":"Pletzel","text":"This message is only shown to you"}
+        self.assertTrue(self.env["is_whisper_event"](whisper))
+        with self.path.open("ab") as output:
+            output.write(b"\\n\\x1e"+json.dumps(whisper).encode("utf-8")+b"\\n")
+        self.assertEqual(self.env["read_messages"]()[-1],whisper)
+
+    def test_bootstrap_scan_runs_after_all_whisper_validators_exist(self):
+        """Guard against the exact NameError reported during startup."""
+        nodes=list(TREE.body)
+        startup=[node for node in nodes
+                 if isinstance(node,ast.Expr) and
+                 isinstance(node.value,ast.Call) and
+                 isinstance(node.value.func,ast.Name) and
+                 node.value.func.id=="read_messages"]
+        self.assertEqual(len(startup),1)
+        startup_line=startup[0].lineno
+        for name in ("valid_username","is_whisper_event",
+                     "valid_incoming_message","gibberish_reason",
+                     "is_gibberish"):
+            definitions=[node for node in nodes
+                         if isinstance(node,ast.FunctionDef) and node.name==name]
+            self.assertEqual(len(definitions),1,name)
+            self.assertLess(definitions[0].lineno,startup_line,name)
+
     def test_reads_pretty_history_without_anchor_or_ids(self):
         self.assertEqual(self.env["read_messages"](),self.initial)
         self.assertTrue(all(len(x)==4 and "id" not in x
