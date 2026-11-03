@@ -1,3 +1,34 @@
+# Chat Room — Colab quick start (tested v5.60)
+
+**Launch Chat Room:** The only Python file at the repository root is
+[launcher.py](launcher.py). Open a **Google Colab** cell and run:
+
+```python
+import time
+import urllib.request
+
+url = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/launcher.py"
+request = urllib.request.Request(
+    url + "?fresh=" + str(time.time_ns()),
+    headers={"Cache-Control": "no-cache"},
+)
+with urllib.request.urlopen(request, timeout=30) as response:
+    launcher = response.read().decode("utf-8")
+exec(compile(launcher, url, "exec"), globals())
+```
+
+Then authorize Drive if prompted and click **Open in App**. The root launcher
+downloads the pinned, tested **v5.60** Chat Room application from
+`app/messaging_app.py` without creating a new room or replacing existing chat
+history. Later app updates do **not** automatically change this pinned launcher;
+upgrade its `PINNED_COMMIT` and `EXPECTED_VERSION` together after testing.
+
+**Owner Guardian:** Run [guardian/guardian_launcher.py](guardian/guardian_launcher.py)
+separately, **only in the owner's Colab notebook**. See
+[Guardian setup](docs/OWNER_GUARDIAN_SETUP.md).
+
+---
+
 # Messaging App v5.47
 
 ## Messaging App v5.47 — Fix bottom gap below countdown bar
@@ -246,32 +277,35 @@ v5.37. The Owner Guardian does not need to be restarted.
 
 ## Repository structure
 
-The main implementations are grouped by purpose. The old root-level
-`*.py` URLs are lightweight **compatibility entry points**, so existing
-Google Colab notebooks and shared links still work without updating them.
+The repository now has **one root-level Python entry point**:
+`launcher.py`. Production source files live in their respective folders;
+the old root-level redirect/compatibility files have been removed.
 
 ```text
 School-Chat-Room/
+├── launcher.py                     Single Chat Room Colab entry point
 ├── README.md                       Main guide and quick start
 ├── app/
 │   └── messaging_app.py            Complete chat application
 ├── guardian/
 │   ├── owner_guardian.py           Owner-only monitor and recovery engine
-│   └── guardian_launcher.py        Current Guardian Colab launcher
+│   └── guardian_launcher.py        Owner-only Guardian Colab launcher
 ├── docs/
 │   └── OWNER_GUARDIAN_SETUP.md     Owner Guardian setup instructions
 ├── tests/                          Automated Python/browser regression tests
-├── .github/workflows/             Continuous integration
-├── messaging_app.py                Compatibility loader for app/
-├── guardian_launcher.py           Compatibility loader for guardian/
-├── owner_guardian.py              Compatibility loader for guardian/
-└── OWNER_GUARDIAN_SETUP.md         Documentation redirect for old links
+└── .github/workflows/             Continuous integration
 ```
+
+**Old links warning:** If your notebook fetches root
+`messaging_app.py`, `owner_guardian.py`, or `guardian_launcher.py`,
+change it to `launcher.py` for chat or
+`guardian/guardian_launcher.py` for the owner monitor. There are no
+root redirects now.
 
 **Important:** Run one owner Guardian in its separate Colab notebook. Do not
 run the Guardian in every participant's chat session.
-Neither reorganization nor compatibility loading changes the original
-shared Drive file, the private Guardian database, or any account permissions.
+The file cleanup does not change the original shared Drive file, the
+private Guardian database, or any account permissions.
 
 
 A Google Colab messaging app using **one shared Google Drive `chat.json`** file. The original terminal UI is preserved. No extra shared folder, Vercel, Redis, or external database is required.
@@ -367,7 +401,7 @@ fresh too, use this owner-only Colab cell:
 
 ```python
 import time, urllib.request
-source = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/guardian_launcher.py"
+source = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/guardian/guardian_launcher.py"
 url = source + "?cache_bust=" + str(time.time_ns())
 exec(compile(urllib.request.urlopen(url).read().decode("utf-8"), source, "exec"))
 ```
@@ -444,7 +478,7 @@ To launch from one Colab cell **in the owner's account only**:
 
 ```python
 import urllib.request
-url = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/guardian_launcher.py"
+url = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/guardian/guardian_launcher.py"
 exec(compile(urllib.request.urlopen(url).read().decode("utf-8"), url, "exec"))
 ```
 
@@ -568,7 +602,7 @@ Emoji reactions also work with small metadata records:
 
 1. Stop all older Colab chat cells; older versions can write incompatible records.
 2. The launcher automatically attempts to add a shortcut to the original shared `chat.json` in each participant's My Drive root. Existing correct shortcuts continue working; if the school account restricts the Drive API, use the link and add the original shortcut manually.
-3. Rerun the current `messaging_app.py` launcher from GitHub.
+3. Run the root [`launcher.py`](launcher.py) from GitHub in each participant's Google Colab notebook.
 4. **Stop any older Owner Guardian before anyone starts v5.32.** An older Guardian will treat the appended records as broken JSON and could overwrite them. Download the latest `owner_guardian.py` and restart it. **Do not reset an existing healthy Guardian database** solely for this upgrade; a reset would discard the prior verified backup history. Run a temporary `--audit-only` check first.
 
 ## Supported features and trade-offs
