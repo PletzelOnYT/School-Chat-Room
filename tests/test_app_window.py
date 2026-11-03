@@ -299,7 +299,7 @@ run().catch(e=>{console.error(e);process.exitCode=1});
 class AppWindowTests(unittest.TestCase):
     def test_discord_style_only_affects_popup(self):
         source=SOURCE.read_text(encoding="utf-8")
-        self.assertIn("CLIENT_VERSION = '5.59'",source)
+        self.assertIn("CLIENT_VERSION = '5.60'",source)
         self.assertIn('font-family:monospace;font-size:13px',HTML)
         self.assertIn('height:19px',HTML)
         self.assertIn("textControl('[Open in App]',openAppWindow",SCRIPT)
