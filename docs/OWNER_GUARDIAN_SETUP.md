@@ -165,7 +165,7 @@ Existing private backups and `chat.json` are preserved.
 
 ## Automatic setup in the owner's Google Colab
 
-**Only the owner should run Guardian.** All participants run the updated `messaging_app.py` launcher or `app/messaging_app.py`, but running multiple Guardians against a single shared file
+**Only the owner should run Guardian.** Chat participants run root-level `launcher.py` (which loads `app/messaging_app.py`), but running multiple Guardians against a single shared file
 can result in competing recovery writes. Do not add the Guardian launcher to
 every student's chat notebook.
 
@@ -185,7 +185,7 @@ owner's own Colab notebook**:
 
 ```python
 import urllib.request
-url = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/guardian_launcher.py"
+url = "https://raw.githubusercontent.com/PletzelOnYT/School-Chat-Room/main/guardian/guardian_launcher.py"
 exec(compile(urllib.request.urlopen(url).read().decode("utf-8"), url, "exec"))
 ```
 
