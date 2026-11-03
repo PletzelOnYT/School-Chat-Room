@@ -220,6 +220,17 @@ class PlainMessagesTests(unittest.TestCase):
         self.assertFalse(env["is_whisper_event"](dict(row,to="Owner")))
         self.assertFalse(env["is_whisper_event"](dict(row,extra=True)))
 
+    def test_whisper_spam_checked_on_receive_not_during_bootstrap(self):
+        env=setup({"GOOGLE_ACCOUNT_USERNAME":"Emma","username":"Emma",
+                   "valid_incoming_message":lambda text:text!="spam content"})
+        spam={"kind":"whisper","time":"12:30:00","user":"Alex","to":"Emma",
+              "text":"spam content"}
+        legitimate=dict(spam,text="hello Emma")
+        self.assertTrue(env["is_whisper_event"](spam),
+                        "Record schema alone must be bootstrap-safe")
+        state=env["analyze"]([spam,legitimate])
+        self.assertEqual([w["text"] for w in state["whispers"]],["hello Emma"])
+
     def test_reply_nesting_from_four_field_text(self):
         env=setup()
         root={"kind":"message","time":"04:00:00","user":"Pletzel","text":"hello"}
