@@ -1,4 +1,4 @@
-# @title Messaging App v5.59 — Google Drive Messenger
+# @title Messaging App v5.60 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.59'
+CLIENT_VERSION = '5.60'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -513,7 +513,11 @@ WHISPER_FIELDS = frozenset(('kind', 'time', 'user', 'to', 'text'))
 
 
 def is_whisper_event(event):
-    """Dedicated whisper record; older clients won't mistake it for #general."""
+    """Validate whisper storage format without depending on later definitions.
+
+    This is deliberately safe during the early read_messages() bootstrap scan.
+    Spam/content checks run separately when preparing a recipient's view.
+    """
     return (isinstance(event, dict) and set(event) == WHISPER_FIELDS
             and event.get('kind') == 'whisper'
             and isinstance(event.get('time'), str)
@@ -522,8 +526,7 @@ def is_whisper_event(event):
             and valid_username(event.get('user')) is not None
             and valid_username(event.get('to')) is not None
             and isinstance(event.get('text'), str)
-            and 0 < len(event['text']) <= MESSAGE_LIMIT
-            and valid_incoming_message(event['text']))
+            and 0 < len(event['text']) <= MESSAGE_LIMIT)
 
 
 def whisper_event(recipient, text):
@@ -903,7 +906,9 @@ def analyze(events):
         seen_ids.add(event_id)
         kind = str(e.get('kind','message'))
         if kind == 'whisper':
-            if whisper:
+            # Content protections execute after all helpers are initialized.
+            # A malformed or spam-like whisper never reaches any chat view.
+            if whisper and valid_incoming_message(e['text']):
                 whispers.append({
                     'id': event_id, 'number': None,
                     'anchor': post_number, 'user': e['user'],
