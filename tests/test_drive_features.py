@@ -77,7 +77,7 @@ class FourFieldDriveTests(unittest.TestCase):
                  "to":"Pletzel","text":"This message is only shown to you"}
         self.assertTrue(self.env["is_whisper_event"](whisper))
         with self.path.open("ab") as output:
-            output.write(b"\\n\\x1e"+json.dumps(whisper).encode("utf-8")+b"\\n")
+            output.write(b"\n\x1e"+json.dumps(whisper).encode("utf-8")+b"\n")
         self.assertEqual(self.env["read_messages"]()[-1],whisper)
 
     def test_bootstrap_scan_runs_after_all_whisper_validators_exist(self):
