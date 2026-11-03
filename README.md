@@ -248,7 +248,7 @@ client-side only, never written to the shared `chat.json` or seen by
 other participants. The chat input, fullscreen behavior, and existing
 popup-command behavior are unchanged.
 
-**To activate:** Restart each participant's current `messaging_app.py`
+**To activate:** Restart each participant's `launcher.py`
 Colab cell and check `/version` for v5.38 (version opens a separate
 window). The Guardian and its private ledger do not need a restart.
 
@@ -272,7 +272,7 @@ Command results are local to the requesting browser and never written
 to shared `chat.json`.
 
 To activate, **restart each chat Colab cell** using the existing
-`messaging_app.py` GitHub launcher and confirm `/version` displays
+`launcher.py` GitHub entry point and confirm `/version` displays
 v5.37. The Owner Guardian does not need to be restarted.
 
 ## Repository structure
@@ -342,7 +342,7 @@ approved-history database schema:
   in the owner's private `.messaging_guardian/incidents/` folder.
 
 **Activation:** Stop the **old Guardian Colab cell** and rerun your existing
-`guardian_launcher.py` launcher. It loads v3.0 from the `main` branch.
+`guardian/guardian_launcher.py` launcher. It loads the Guardian from the `main` branch.
 Do not reset the baseline, delete `chat.json`, or start multiple competing
 Guardians. Your existing chat launcher requires no update for this change.
 To check health, open the private `guardian_health.json` and verify the
@@ -517,11 +517,11 @@ Owner Guardian v2.1 adds a persistent rolling spam-rate window (including across
 
 These controls are **best-effort, not identity verification or DDoS protection**. Shared `chat.json` remains unsigned for plain messages. People with write access can spoof display names or deliberately send new records; rate limits can also affect legitimate bursts. For stronger security, a single authenticated server and atomic per-message storage are needed.
 
-To activate: stop the prior Owner Guardian and Colab chat cells, restart the **current** `owner_guardian.py` first, then rerun your existing GitHub chat launcher. No `chat.json` deletion or baseline reset is required. Type `/version` in chat to verify **v5.34**. The Guardian prints **v2.1** on startup.
+To activate: stop the prior Owner Guardian and Colab chat cells, restart the **current** `guardian/owner_guardian.py` first, then rerun your existing GitHub chat launcher. No `chat.json` deletion or baseline reset is required. Type `/version` in chat to verify **v5.34**. The Guardian prints **v2.1** on startup.
 
 ## v5.32: Clock validation, browser-local time, and /version
 
-Run `/version` in the Colab chat to see the current script version. The launcher still fetches `messaging_app.py` from the GitHub `main` branch on restart.
+Run `/version` in the Colab chat to see the current script version. The root `launcher.py` is pinned to a tested commit of `app/messaging_app.py` rather than fetching whatever happens to be on `main`.
 
 New messages keep **exactly** the four message fields `kind`, `time`, `user`, `text`. The client writes each message time in UTC and appends a separate `kind: "clock"` metadata record with an absolute Unix timestamp and SHA-256 digest of the message. This lets viewers display the correct local time, even across dates and daylight-saving transitions, without breaking the original message schema or rewriting the shared history.
 
@@ -603,7 +603,7 @@ Emoji reactions also work with small metadata records:
 1. Stop all older Colab chat cells; older versions can write incompatible records.
 2. The launcher automatically attempts to add a shortcut to the original shared `chat.json` in each participant's My Drive root. Existing correct shortcuts continue working; if the school account restricts the Drive API, use the link and add the original shortcut manually.
 3. Run the root [`launcher.py`](launcher.py) from GitHub in each participant's Google Colab notebook.
-4. **Stop any older Owner Guardian before anyone starts v5.32.** An older Guardian will treat the appended records as broken JSON and could overwrite them. Download the latest `owner_guardian.py` and restart it. **Do not reset an existing healthy Guardian database** solely for this upgrade; a reset would discard the prior verified backup history. Run a temporary `--audit-only` check first.
+4. **Stop any older Owner Guardian before anyone starts v5.32.** An older Guardian will treat the appended records as broken JSON and could overwrite them. Download the latest `guardian/owner_guardian.py` and restart it. **Do not reset an existing healthy Guardian database** solely for this upgrade; a reset would discard the prior verified backup history. Run a temporary `--audit-only` check first.
 
 ## Supported features and trade-offs
 
