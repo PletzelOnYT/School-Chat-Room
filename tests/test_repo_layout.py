@@ -50,8 +50,11 @@ class RepositoryLayoutTests(unittest.TestCase):
 
     def test_continuous_integration_targets_production_paths(self):
         workflow = (ROOT / ".github/workflows/check-python.yml").read_text()
-        for folder in ("app/**", "guardian/**", "docs/**", "launcher.py"):
-            self.assertEqual(workflow.count(folder), 2 if folder.endswith("/**") else 3)
+        for folder in ("app/**", "guardian/**", "docs/**"):
+            self.assertEqual(workflow.count(folder), 2)
+        # The quoted root path appears once in each trigger block.
+        # An unqualified substring also matches guardian_launcher.py.
+        self.assertEqual(workflow.count("'launcher.py'"), 2)
         for name in ("app/messaging_app.py", "guardian/owner_guardian.py",
                      "guardian/guardian_launcher.py", "launcher.py"):
             self.assertIn(name, workflow)
