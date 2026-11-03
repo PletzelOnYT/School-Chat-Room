@@ -75,6 +75,9 @@ class FourFieldDriveTests(unittest.TestCase):
         """A saved whisper must not crash the shared-history reader."""
         whisper={"kind":"whisper","time":"04:16:00","user":"Emma",
                  "to":"Pletzel","text":"This message is only shown to you"}
+        # Simulate the exact failure: validator runs before the late
+        # content-filter function has been defined in a Colab kernel.
+        self.env.pop("valid_incoming_message",None)
         self.assertTrue(self.env["is_whisper_event"](whisper))
         with self.path.open("ab") as output:
             output.write(b"\n\x1e"+json.dumps(whisper).encode("utf-8")+b"\n")
