@@ -1,4 +1,4 @@
-# @title Messaging App v5.58 — Google Drive Messenger
+# @title Messaging App v5.59 — Google Drive Messenger
 """Messaging App — Google Colab chat using a shared Google Drive chat.json.
 
 Messages, threads, emoji reactions, search and responsive layout all use the
@@ -40,7 +40,7 @@ WRAP_WIDTH_CH = 80
 REFRESH_INTERVAL_MS = 1000
 COOLDOWN_SECONDS = 0.65
 MESSAGE_LIMIT = 1000
-CLIENT_VERSION = '5.58'
+CLIENT_VERSION = '5.59'
 UPSTREAM_VERSION_CHECK_SECONDS = 25.0
 GITHUB_CHAT_SOURCE_URL = (
     'https://raw.githubusercontent.com/PletzelOnYT/'
@@ -605,9 +605,6 @@ def read_messages():
                 time.sleep(0.12 * (attempt + 1))
 
 
-read_messages()  # Verify the correct shared history before showing the chat.
-
-
 def append_event_in_place(event):
     """Append a complete framed record at EOF, without editing existing bytes.
 
@@ -858,6 +855,11 @@ def gibberish_reason(text):
 def is_gibberish(text):
     """Compatibility predicate for all send-side and read-side filters."""
     return gibberish_reason(text) is not None
+
+
+# All record validators (including whisper anti-spam) must be initialized
+# before the first scan of shared history; whispers may already exist on Drive.
+read_messages()  # Validate the shared history before showing the chat.
 
 
 def analyze(events):
